@@ -44,6 +44,39 @@ function findOverload(klass: Il2Cpp.Class, name: string, paramType: string): Il2
   return null;
 }
 
+// Cheap prefilter: every Google.Protobuf message implements IMessage. Reading
+// the interface list costs far less than invoking get_Descriptor on all ~50k
+// classes, which is what made a full scan take longer than anyone would wait.
+// If the bridge doesn't expose `interfaces`, fall through and test everything.
+let prefilterWorks = true;
+function mightBeMessage(klass: Il2Cpp.Class): boolean {
+  if (!prefilterWorks) return true;
+  try {
+    // generated classes declare IMessage`1 / IBufferMessage as well as IMessage
+    for (const i of klass.interfaces) {
+      if (i.name.indexOf("IMessage") >= 0 || i.name === "IBufferMessage") return true;
+    }
+    return false;
+  } catch (_) {
+    prefilterWorks = false;
+    return true;
+  }
+}
+
+// The generated accessors are obfuscated in the game protocol assembly
+// (get_Descriptor -> `coma`, get_Parser -> `colz`), so they can't be found by
+// name. Their signatures are untouched: a static, zero-arg method returning a
+// MessageDescriptor is the descriptor getter whatever it's called.
+function descriptorGetter(klass: Il2Cpp.Class): Il2Cpp.Method | null {
+  let byName = klass.tryMethod("get_Descriptor");
+  if (byName && byName.isStatic) return byName;
+  for (const m of klass.methods) {
+    if (!m.isStatic || m.parameterCount !== 0) continue;
+    if (m.returnType.name.indexOf("MessageDescriptor") >= 0) return m;
+  }
+  return null;
+}
+
 function readFields(descriptor: Il2Cpp.Object): any[] {
   const out: any[] = [];
   const coll = descriptor.method("get_Fields").invoke() as Il2Cpp.Object;              // FieldCollection
@@ -80,29 +113,52 @@ Il2Cpp.perform(() => {
   // ---- pass 1: every protobuf message descriptor (names + fields) ----
   let scanned = 0, found = 0;
   for (const asm of Il2Cpp.domain.assemblies) {
+    const t0 = Date.now();
+    let here = 0, seen = 0;
     for (const klass of asm.image.classes) {
       scanned++;
-      const gd = klass.tryMethod("get_Descriptor");
-      const gp = klass.tryMethod("get_Parser");
-      if (!gd || !gp || !gd.isStatic) continue;
-      // a real message has both a static Descriptor and a static Parser
-      if (gp.returnType.name.indexOf("MessageParser") < 0) continue;
+      seen++;
+      if (!mightBeMessage(klass)) continue;
+      const gd = descriptorGetter(klass);
+      if (!gd) continue;
       try {
         const desc = gd.invoke() as Il2Cpp.Object;
         const full = (desc.method("get_FullName").invoke() as Il2Cpp.String).content;
         if (!full) continue;
         messages[full] = { obf: klass.type.name, fields: readFields(desc) };
         found++;
+        here++;
       } catch (e) { /* not a descriptor-bearing message */ }
     }
+    // per-assembly so a long scan shows progress instead of dead air
+    if (here > 0 || seen > 500) {
+      console.log(`[pass1] ${asm.name}: classes=${seen} messages=${here} (${Date.now() - t0}ms)`);
+    }
   }
-  console.log(`[pass1] classes scanned=${scanned} messages=${found}`);
+  console.log(`[pass1] done: classes scanned=${scanned} messages=${found} prefilter=${prefilterWorks}`);
 
   // ---- pass 2: wire id map from esg.dqft (Dictionary<int, MessageParser>) ----
   const esg = findClass("esg");
   const byteString = findClass("Google.Protobuf.ByteString");
   if (esg && byteString) {
-    const dqft = esg.field("dqft").value as Il2Cpp.Object;                 // (VERIFY) field name
+    // the field name is obfuscated and drifts per build; fall back to whatever
+    // static Dictionary<int,...> the class holds
+    let dict = esg.tryField("dqft");
+    if (!dict) {
+      for (const f of esg.fields) {
+        if (f.isStatic && f.type.name.indexOf("Dictionary") >= 0 && f.type.name.indexOf("Int32") >= 0) {
+          dict = f;
+          console.log(`[pass2] dqft not found; using static field ${f.name}: ${f.type.name}`);
+          break;
+        }
+      }
+    }
+    if (!dict) {
+      console.log(`[pass2] no id dictionary on esg; fields: ${esg.fields.map((f) => f.name).join(",")}`);
+      send({ event: "done", messages, idMap });
+      return;
+    }
+    const dqft = dict.value as Il2Cpp.Object;
     const empty = byteString.method("get_Empty").invoke() as Il2Cpp.Object;
     const en = dqft.method("GetEnumerator").invoke() as Il2Cpp.Object;
     let n = 0;

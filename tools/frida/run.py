@@ -27,9 +27,10 @@ def main():
     g.add_argument("-n", "--name", default="Dofus", help='process name (default "Dofus")')
     g.add_argument("-p", "--pid", type=int, help="attach by pid")
     g.add_argument("-f", "--spawn", help="spawn this target (bundle id / path)")
+    ap.add_argument("-a", "--agent", default=AGENT, help="agent .js to load (default agent.js)")
     args = ap.parse_args()
 
-    with open(AGENT, encoding="utf-8") as fh:
+    with open(args.agent, encoding="utf-8") as fh:
         source = fh.read()
 
     device = frida.get_local_device()
@@ -56,11 +57,18 @@ def main():
                 done["ok"] = True
             else:
                 print("[send]", payload)
+        elif message["type"] == "log":
+            # the agent's console.log — its only progress signal during the
+            # class scan, which runs inside script.load() and can take minutes
+            print("[log]", message.get("payload"), flush=True)
         elif message["type"] == "error":
             print("[error]", message.get("stack") or message.get("description"), file=sys.stderr)
 
     script = session.create_script(source)
     script.on("message", on_message)
+    # the agent body runs synchronously inside load(): the scan finishes (and
+    # `done` usually arrives) before this returns
+    print(">> loading agent — scanning classes, this takes minutes", flush=True)
     script.load()
     if spawned_pid is not None:
         device.resume(spawned_pid)
