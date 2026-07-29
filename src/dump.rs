@@ -5,9 +5,16 @@
 //! - When a schema is known, decodes fields by their declared type (packed
 //!   repeateds, nested messages, strings) instead of guessing.
 //! - Falls back to schema-less heuristics for unknown fields/messages.
+//! - A schema resolved from the `Any` key is only a guess: when a declared type
+//!   contradicts the wire type actually present, the declaration is dropped for
+//!   that field and the mismatch is flagged.
 
-use crate::pb::{looks_like_message, Reader, WireType};
+use crate::pb::{looks_like_message, looks_like_text, Reader, WireType};
 use crate::registry::{leaf, Msg, Registry};
+
+/// Tag appended to a field whose declared type contradicted the wire. Also
+/// counted per-`Any` to surface a mis-joined schema.
+const MISMATCH: &str = "  <!schema";
 
 pub fn dump(buf: &[u8], reg: Option<&Registry>, schema: Option<&Msg>, indent: usize) -> String {
     let pad = "  ".repeat(indent);
@@ -19,13 +26,20 @@ pub fn dump(buf: &[u8], reg: Option<&Registry>, schema: Option<&Msg>, indent: us
         let named = inner_schema
             .map(|m| format!(" [{}]", m.real.clone().unwrap_or_else(|| m.obf.clone())))
             .unwrap_or_default();
-        let mut out = format!("{pad}Any <{url}>{named}\n");
+        let body = dump(value, reg, inner_schema, indent + 1);
+        let bad = body.matches(MISMATCH).count();
+        let flag = match bad {
+            0 => String::new(),
+            1 => " <!! schema mismatch on 1 field>".to_string(),
+            n => format!(" <!! schema mismatch on {n} fields>"),
+        };
+        let mut out = format!("{pad}Any <{url}>{named}{flag}\n");
         if let Some(r) = reg {
             if let Some(understood) = crate::interpret::interpret(key, value, r) {
                 out.push_str(&format!("{pad}  => {understood}\n"));
             }
         }
-        out.push_str(&dump(value, reg, inner_schema, indent + 1));
+        out.push_str(&body);
         return out;
     }
 
@@ -54,41 +68,81 @@ fn render_field(
     indent: usize,
 ) -> String {
     let pad = "  ".repeat(indent);
-    let ty = csharp.map(parse_type);
+    let declared = csharp.map(parse_type);
+    // A schema that disagrees with the wire is worse than none: it pushes
+    // strings through the packed-varint path and prints digit soup. Drop it for
+    // this field and fall back to the heuristics, but say so.
+    let bad = declared.as_ref().map(|t| !wire_matches(t, wt)).unwrap_or(false);
+    let note = if bad {
+        format!("{MISMATCH}: declared {}>", csharp.unwrap_or_default())
+    } else {
+        String::new()
+    };
+    let ty = if bad { None } else { declared };
     match wt {
         WireType::Varint => {
             let v = r.varint().unwrap_or(0);
-            let label = match ty.as_ref().map(|t| &t.base) {
-                Some(Base::Msg(_)) => "enum", // varint-wire on a named type = enum
-                _ => "varint",
-            };
-            format!("{pad}{field}: {label} {v}\n")
+            format!("{pad}{field}: {}{note}\n", render_varint(v, ty.as_ref()))
         }
         WireType::I64 => {
             let b = r.read_bytes(8).unwrap_or(&[]);
-            format!("{pad}{field}: i64 0x{}\n", hex(b))
+            format!("{pad}{field}: i64 0x{}{note}\n", hex(b))
         }
         WireType::I32 => {
             let b = r.read_bytes(4).unwrap_or(&[]);
-            format!("{pad}{field}: i32 0x{}\n", hex(b))
+            format!("{pad}{field}: i32 0x{}{note}\n", hex(b))
         }
         WireType::Len => {
             let b = r.len_field().unwrap_or(&[]);
-            render_len(field, b, ty.as_ref(), reg, indent)
+            render_len(field, b, ty.as_ref(), reg, indent, &note)
         }
-        WireType::Unknown(o) => format!("{pad}{field}: <unknown wire {o}>\n"),
+        WireType::Unknown(o) => format!("{pad}{field}: <unknown wire {o}>{note}\n"),
     }
 }
 
-fn render_len(field: u32, b: &[u8], ty: Option<&TypeInfo>, reg: Option<&Registry>, indent: usize) -> String {
+/// Render a varint under the declared signedness. Protobuf sign-extends a
+/// negative int32/int64 to 64 bits, so the raw u64 reads as ~1.8e19 unless it
+/// is reinterpreted.
+fn render_varint(v: u64, ty: Option<&TypeInfo>) -> String {
+    match ty.map(|t| &t.base) {
+        Some(Base::Scalar(Scalar::Bool)) => format!("bool {}", v != 0),
+        Some(Base::Scalar(Scalar::Signed)) => format!("varint {}", v as i64),
+        Some(Base::Scalar(Scalar::Unsigned)) => format!("varint {v}"),
+        // varint-wire on a named type = enum, which is a sign-extended int32
+        Some(Base::Msg(_)) => format!("enum {}", v as i64),
+        // no usable declaration: show the signed reading when one is plausible
+        _ if v >= 1 << 63 => format!("varint {v} ({})", v as i64),
+        _ => format!("varint {v}"),
+    }
+}
+
+fn render_len(
+    field: u32,
+    b: &[u8],
+    ty: Option<&TypeInfo>,
+    reg: Option<&Registry>,
+    indent: usize,
+    note: &str,
+) -> String {
     let pad = "  ".repeat(indent);
     if let Some(t) = ty {
         match &t.base {
-            Base::Bytes => return format!("{pad}{field}: bytes({}) {}\n", b.len(), hex_trunc(b, 32)),
-            Base::Str => return format!("{pad}{field}: string {:?}\n", String::from_utf8_lossy(b)),
-            Base::Scalar(_) if t.repeated => {
-                let vals = packed_varints(b);
-                return format!("{pad}{field}: packed {vals:?}\n");
+            Base::Bytes => {
+                return format!("{pad}{field}: bytes({}) {}{note}\n", b.len(), hex_trunc(b, 32))
+            }
+            Base::Str => {
+                return format!("{pad}{field}: string {:?}{note}\n", String::from_utf8_lossy(b))
+            }
+            Base::Scalar(s) if t.repeated => {
+                // Packed ints and a string are both length-delimited, so the
+                // wire type can't separate them. Printable bytes here mean the
+                // schema is mis-joined and this is really text.
+                if let Some(text) = as_utf8(b).filter(|_| looks_like_text(b)) {
+                    return format!(
+                        "{pad}{field}: string {text:?}{MISMATCH}: declared packed, reads as text>\n"
+                    );
+                }
+                return format!("{pad}{field}: packed {}{note}\n", packed_scalars(b, s));
             }
             Base::Msg(token) => {
                 let inner = reg.and_then(|r| r.resolve(token));
@@ -96,7 +150,7 @@ fn render_len(field: u32, b: &[u8], ty: Option<&TypeInfo>, reg: Option<&Registry
                     .and_then(|m| m.real.clone())
                     .unwrap_or_else(|| leaf(token).to_string());
                 let body = dump(b, reg, inner, indent + 1);
-                return format!("{pad}{field}: {name} ({} bytes)\n{body}", b.len());
+                return format!("{pad}{field}: {name} ({} bytes){note}\n{body}", b.len());
             }
             _ => {}
         }
@@ -105,13 +159,33 @@ fn render_len(field: u32, b: &[u8], ty: Option<&TypeInfo>, reg: Option<&Registry
     if !b.is_empty() && looks_like_message(b) {
         let inner = dump(b, reg, None, indent + 1);
         if !inner.contains("<malformed") {
-            return format!("{pad}{field}: message ({} bytes)\n{inner}", b.len());
+            return format!("{pad}{field}: message ({} bytes){note}\n{inner}", b.len());
         }
     }
     if let Some(s) = as_utf8(b) {
-        return format!("{pad}{field}: string {s:?}\n");
+        return format!("{pad}{field}: string {s:?}{note}\n");
     }
-    format!("{pad}{field}: bytes({}) {}\n", b.len(), hex_trunc(b, 32))
+    format!("{pad}{field}: bytes({}) {}{note}\n", b.len(), hex_trunc(b, 32))
+}
+
+/// Does the wire type actually present agree with the declared C# type?
+fn wire_matches(ty: &TypeInfo, wt: WireType) -> bool {
+    match &ty.base {
+        // repeated scalars are packed, but an old encoder may write one per tag
+        Base::Scalar(s) if ty.repeated => wt == WireType::Len || wt == scalar_wire(s),
+        Base::Scalar(s) => wt == scalar_wire(s),
+        Base::Str | Base::Bytes | Base::Map => wt == WireType::Len,
+        // a named type is a message (Len) or an enum (Varint)
+        Base::Msg(_) => wt == WireType::Len || wt == WireType::Varint,
+    }
+}
+
+fn scalar_wire(s: &Scalar) -> WireType {
+    match s {
+        Scalar::Signed | Scalar::Unsigned | Scalar::Bool => WireType::Varint,
+        Scalar::Fixed32 => WireType::I32,
+        Scalar::Fixed64 => WireType::I64,
+    }
 }
 
 /// Does this body (at any nesting depth) contain an `Any` whose type key has
@@ -205,7 +279,9 @@ enum Base {
 }
 
 enum Scalar {
-    Varint,
+    Signed,   // int32/int64 on the wire: sign-extended, read back as i64
+    Unsigned, // uint32/uint64
+    Bool,
     Fixed32,
     Fixed64,
 }
@@ -231,9 +307,9 @@ fn parse_type(csharp: &str) -> TypeInfo {
 
 fn parse_base(t: &str) -> Base {
     match t {
-        "int" | "uint" | "long" | "ulong" | "bool" | "sbyte" | "byte" | "short" | "ushort" | "char" => {
-            Base::Scalar(Scalar::Varint)
-        }
+        "int" | "long" | "sbyte" | "short" => Base::Scalar(Scalar::Signed),
+        "uint" | "ulong" | "byte" | "ushort" | "char" => Base::Scalar(Scalar::Unsigned),
+        "bool" => Base::Scalar(Scalar::Bool),
         "float" => Base::Scalar(Scalar::Fixed32),
         "double" => Base::Scalar(Scalar::Fixed64),
         "string" => Base::Str,
@@ -244,16 +320,28 @@ fn parse_base(t: &str) -> Base {
 
 // ---- helpers --------------------------------------------------------------
 
-fn packed_varints(b: &[u8]) -> Vec<u64> {
+/// Decode a packed repeated field, honouring the element's width and sign.
+fn packed_scalars(b: &[u8], s: &Scalar) -> String {
     let mut r = Reader::new(b);
-    let mut out = Vec::new();
+    let mut out: Vec<String> = Vec::new();
     while !r.eof() {
-        match r.varint() {
+        let item = match s {
+            Scalar::Signed => r.varint().map(|v| (v as i64).to_string()),
+            Scalar::Unsigned => r.varint().map(|v| v.to_string()),
+            Scalar::Bool => r.varint().map(|v| (v != 0).to_string()),
+            Scalar::Fixed32 => r
+                .read_bytes(4)
+                .map(|x| f32::from_le_bytes([x[0], x[1], x[2], x[3]]).to_string()),
+            Scalar::Fixed64 => r.read_bytes(8).map(|x| {
+                f64::from_le_bytes([x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7]]).to_string()
+            }),
+        };
+        match item {
             Some(v) => out.push(v),
             None => break,
         }
     }
-    out
+    format!("[{}]", out.join(", "))
 }
 
 fn as_utf8(b: &[u8]) -> Option<&str> {
@@ -301,6 +389,72 @@ mod tests {
         assert!(out.contains("type.ankama.com/kdh"), "should surface the Any url");
         // 0x61A4 = 24996 (matches the game's "61 A4")
         assert!(out.contains("packed [394, 1989, 24996, 0]"), "should decode packed int64s:\n{out}");
+    }
+
+    use crate::registry::Field;
+
+    fn schema(fields: &[(u32, &str)]) -> Msg {
+        Msg {
+            obf: "test".to_string(),
+            real: None,
+            fields: fields
+                .iter()
+                .map(|(num, csharp)| Field { num: *num, csharp: csharp.to_string() })
+                .collect(),
+        }
+    }
+
+    // field 1 varint, sign-extended -20002 (10 bytes)
+    const NEG: &[u8] = &[0x08, 0xde, 0xe3, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01];
+
+    #[test]
+    fn signed_varint_reads_as_negative() {
+        let s = schema(&[(1, "long")]);
+        let out = dump(NEG, None, Some(&s), 0);
+        assert!(out.contains("1: varint -20002"), "declared long must read signed:\n{out}");
+        // the same bytes under uint64 really are that huge number
+        let u = schema(&[(1, "ulong")]);
+        assert!(dump(NEG, None, Some(&u), 0).contains("varint 18446744073709531614"));
+    }
+
+    #[test]
+    fn schema_less_varint_surfaces_signed_reading() {
+        let out = dump(NEG, None, None, 0);
+        assert!(out.contains("(-20002)"), "unknown field should hint the signed value:\n{out}");
+    }
+
+    #[test]
+    fn wire_contradiction_drops_the_declaration() {
+        // schema says string, wire carries a varint -> ignore the schema, flag it
+        let s = schema(&[(1, "string")]);
+        let out = dump(NEG, None, Some(&s), 0);
+        assert!(out.contains(MISMATCH), "contradiction must be flagged:\n{out}");
+        assert!(out.contains("(-20002)"), "should fall back to the heuristic:\n{out}");
+    }
+
+    #[test]
+    fn packed_declaration_over_text_is_flagged() {
+        // field 1, length-delimited, carrying "chat text here" — the `ksv` case:
+        // both a packed repeated and a string are Len, so only the bytes tell
+        let mut buf = vec![0x0a, 14];
+        buf.extend_from_slice(b"chat text here");
+        let s = schema(&[(1, "RepeatedField<long>")]);
+        let out = dump(&buf, None, Some(&s), 0);
+        assert!(out.contains("\"chat text here\""), "text must survive as text:\n{out}");
+        assert!(out.contains(MISMATCH), "mis-joined packed field must be flagged:\n{out}");
+        // a genuine packed array of small ints must still decode as numbers
+        let real = [0x0a, 0x04, 0x01, 0x02, 0x03, 0x04];
+        let out = dump(&real, None, Some(&s), 0);
+        assert!(out.contains("packed [1, 2, 3, 4]"), "real packed data unaffected:\n{out}");
+        assert!(!out.contains(MISMATCH));
+    }
+
+    #[test]
+    fn mismatches_are_tallied_on_the_any_header() {
+        let reg = Registry::load("proto/messages.json").expect("registry");
+        // a well-joined message reports nothing
+        let out = dump(BODY, Some(&reg), None, 0);
+        assert!(!out.contains("schema mismatch"), "kdh joins cleanly:\n{out}");
     }
 
     #[test]

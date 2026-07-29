@@ -68,6 +68,8 @@ pub struct Collected {
 enum LenKind {
     PackedVarint,
     Message(String),
+    /// Declaration contradicts the wire — decide from the bytes instead.
+    Heuristic,
     Skip,
 }
 
@@ -87,6 +89,11 @@ fn classify_len(csharp: Option<&str>) -> LenKind {
     }
     if t.starts_with("MapField<") || is_len_scalar(t) {
         return LenKind::Skip;
+    }
+    // A bare scalar can't be length-delimited: the schema is mis-joined here,
+    // so ignore it rather than recurse into what is probably a string.
+    if is_scalar(t) {
+        return LenKind::Heuristic;
     }
     LenKind::Message(t.to_string())
 }
@@ -119,9 +126,18 @@ fn collect(buf: &[u8], schema: Option<&crate::registry::Msg>, reg: &Registry, c:
             WireType::Len => {
                 let b = r.len_field().unwrap_or(&[]);
                 match classify_len(csharp) {
+                    // printable bytes under a packed declaration = mis-joined
+                    // string field; feeding it to handlers as numbers is worse
+                    // than dropping it
+                    LenKind::PackedVarint if crate::pb::looks_like_text(b) => {}
                     LenKind::PackedVarint => c.packs.push(packed(b)),
                     LenKind::Message(tok) => {
                         collect(b, reg.resolve(leaf(&tok)), reg, c);
+                    }
+                    LenKind::Heuristic => {
+                        if !b.is_empty() && crate::pb::looks_like_message(b) {
+                            collect(b, None, reg, c);
+                        }
                     }
                     LenKind::Skip => {}
                 }

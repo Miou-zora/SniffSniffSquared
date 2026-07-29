@@ -92,6 +92,19 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// Heuristic: printable text of some length. Used to spot a schema declaring a
+/// packed numeric field where the wire really carries a string — both are
+/// length-delimited, so the wire type alone can't tell them apart.
+pub fn looks_like_text(b: &[u8]) -> bool {
+    if b.len() < 4 {
+        return false;
+    }
+    match std::str::from_utf8(b) {
+        Ok(s) => s.chars().all(|c| !c.is_control() || c == '\n' || c == '\t'),
+        Err(_) => false,
+    }
+}
+
 /// Heuristic: does `buf` look like a valid, fully-consumable protobuf message?
 /// Used by the framer to validate candidate frame boundaries.
 pub fn looks_like_message(buf: &[u8]) -> bool {
