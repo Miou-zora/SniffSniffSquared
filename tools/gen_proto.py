@@ -20,8 +20,13 @@ import json, re, sys, os
 from collections import OrderedDict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DUMP = os.path.join(ROOT, "GameAssembly_il2cppdump_20260710_1218", "dump.cs")
-MAPPINGS = [os.path.join(ROOT, "Mapping.v2.json"), os.path.join(ROOT, "Mapping.v2-2.json")]
+REF = os.path.join(ROOT, "reference")
+# NOTE: dump.cs is NOT committed (70 MB+). Regenerate it with Il2CppDumper
+# against the current GameAssembly.dylib + global-metadata.dat. See RUNBOOK.md
+# part 3 — the committed proto/messages.json came from the 2026-07-10 dump and
+# the client has updated since.
+DUMP = os.path.join(REF, "il2cpp-dump-20260710", "dump.cs")
+MAPPINGS = [os.path.join(REF, "Mapping.v2.json"), os.path.join(REF, "Mapping.v2-2.json")]
 OUTDIR = os.path.join(ROOT, "proto")
 
 SCALAR = {
@@ -82,6 +87,14 @@ def iter_type_blocks(lines):
 
 
 def main():
+    if not os.path.exists(DUMP):
+        sys.exit(
+            "dump.cs not found at %s\n"
+            "It is not committed (too large). Regenerate it with Il2CppDumper against\n"
+            "  /Applications/Ankama/Dofus-dofus3/Dofus.app/Contents/Frameworks/GameAssembly.dylib\n"
+            "  .../Contents/Resources/Data/il2cpp_data/Metadata/global-metadata.dat\n"
+            "then drop dump.cs beside the DummyDll/ folder. See RUNBOOK.md part 3." % DUMP
+        )
     obf2real = load_mappings()
     with open(DUMP, encoding="utf-8", errors="replace") as f:
         lines = f.readlines()
