@@ -1,0 +1,24 @@
+{
+  "name": "sniffsniffsquared",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Miou-zora/SniffSniffSquared.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Miou-zora/SniffSniffSquared/issues"
+  },
+  "homepage": "https://github.com/Miou-zora/SniffSniffSquared#readme",
+  "dependencies": {
+    "frida-il2cpp-bridge": "^0.13.1"
+  }
+}

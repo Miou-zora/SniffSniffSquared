@@ -1,0 +1,21 @@
+{
+  "lee": "Com.Ankama.Dofus.Server.Connection.Protocol.TokenRequest",
+  "leg": "Com.Ankama.Dofus.Server.Connection.Protocol.TokenRequest.Shield",
+  "lei": "Com.Ankama.Dofus.Server.Connection.Protocol.IdentificationResponse",
+  "lek": "Com.Ankama.Dofus.Server.Connection.Protocol.IdentificationResponse.Success",
+  "lem": "Com.Ankama.Dofus.Server.Connection.Protocol.IdentificationResponse.Success.Rights",
+  "len": "Com.Ankama.Dofus.Server.Connection.Protocol.IdentificationResponse.Error",
+  "leo": "Com.Ankama.Dofus.Server.Connection.Protocol.SelectServerResponse",
+  "lep": "Com.Ankama.Dofus.Server.Connection.Protocol.SelectServerResponse.Success",
+  "ler": "Com.Ankama.Dofus.Server.Connection.Protocol.ServerList",
+  "les": "Com.Ankama.Dofus.Server.Connection.Protocol.ServerList.ServerType",
+  "leu": "Com.Ankama.Dofus.Server.Connection.Protocol.ServerInformation",
+  "lev": "Com.Ankama.Dofus.Server.Connection.Protocol.Server",
+  "lex": "Com.Ankama.Dofus.Server.Connection.Protocol.CharacterInformation",
+  "lez": "Com.Ankama.Dofus.Server.Connection.Protocol.FriendListResponse",
+  "lfa": "Com.Ankama.Dofus.Server.Connection.Protocol.FriendListResponse.FriendList",
+  "lfc": "Com.Ankama.Dofus.Server.Connection.Protocol.FriendListResponse.FriendList.Friend",
+  "lfe": "Com.Ankama.Dofus.Server.Connection.Protocol.AcquaintanceServersResponse",
+  "lff": "Com.Ankama.Dofus.Server.Connection.Protocol.AcquaintanceServersResponse.Servers",
+  "lfh": "Com.Ankama.Dofus.Server.Connection.Protocol.AcquaintanceServersResponse.Error"
+}

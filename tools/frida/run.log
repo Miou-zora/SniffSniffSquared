@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "/Users/miouzora/Documents/GitHub/SniffSniffSquared/tools/frida/run.py", line 83, in <module>
+    main()
+    ~~~~^^
+  File "/Users/miouzora/Documents/GitHub/SniffSniffSquared/tools/frida/run.py", line 42, in main
+    session = device.attach(args.pid)
+  File "/Users/miouzora/.local/pipx/venvs/frida-tools/lib/python3.14/site-packages/frida/core.py", line 94, in wrapper
+    return f(*args, **kwargs)
+  File "/Users/miouzora/.local/pipx/venvs/frida-tools/lib/python3.14/site-packages/frida/core.py", line 1088, in attach
+    return Session(self._impl.attach(self._pid_of(target), **kwargs))  # type: ignore
+                   ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+frida.PermissionDeniedError: unable to access process with pid 29621 from the current user account

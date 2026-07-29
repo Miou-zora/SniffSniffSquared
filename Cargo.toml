@@ -1,0 +1,11 @@
+[package]
+name = "SniffSniffSquared"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pcap = "2.4.0"
+pnet = "0.35.0"
+serde_json = "1"
+postgres = "0.19"
+dotenvy = "0.15"

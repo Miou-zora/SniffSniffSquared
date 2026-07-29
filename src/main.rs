@@ -1,0 +1,279 @@
+//! Dofus 3 (Unity / Ankama.SpinConnection) packet sniffer.
+//!
+//! Pipeline: pcap -> TCP reassembly -> adaptive deframing -> `Frame` protobuf
+//! -> `Payload{id,data}` -> schema-less body dump.
+//!
+//! Usage:
+//!   sudo ./SniffSniffSquared                 # default device, filter "tcp"
+//!   sudo ./SniffSniffSquared "tcp port 5555" # custom BPF filter
+//!   DOFUS_DEV=en0 sudo ./SniffSniffSquared
+//!   ./SniffSniffSquared --list               # list devices
+
+mod dispatch;
+mod dump;
+mod flow;
+mod frame;
+mod framer;
+mod interpret;
+mod pb;
+mod registry;
+
+use dispatch::Dispatcher;
+use flow::{FlowKey, Reassembler};
+use registry::Registry;
+use pcap::{Capture, Device, Linktype};
+use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
+use pnet::packet::ip::IpNextHeaderProtocols;
+use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::ipv6::Ipv6Packet;
+use pnet::packet::tcp::TcpPacket;
+use pnet::packet::Packet;
+use std::net::IpAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
+
+static RAW: AtomicBool = AtomicBool::new(false);
+static SHOW_ALL: AtomicBool = AtomicBool::new(false);
+static REG: OnceLock<Option<Registry>> = OnceLock::new();
+
+fn main() {
+    dotenvy::dotenv().ok(); // load .env so DATABASE_URL/DOFUS_DEV work under sudo
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--list") {
+        list_devices();
+        return;
+    }
+    // parse flags; strip them from positional args
+    let mut dev_arg: Option<String> = None;
+    let mut rest: Vec<String> = Vec::new();
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--dev" => dev_arg = it.next(),
+            "--raw" => RAW.store(true, Ordering::Relaxed),
+            "--all" => SHOW_ALL.store(true, Ordering::Relaxed),
+            _ => rest.push(a),
+        }
+    }
+    let bpf = rest.first().cloned().unwrap_or_else(|| "tcp".to_string());
+
+    let _ = REG.set(Registry::load("proto/messages.json"));
+    match REG.get().and_then(|o| o.as_ref()) {
+        Some(r) => println!("[*] schema registry: {} messages", r.len()),
+        None => println!("[*] no proto/messages.json — schema-less decode"),
+    }
+
+    let device = pick_device(dev_arg);
+    let mode = if SHOW_ALL.load(Ordering::Relaxed) { "all frames" } else { "known only (--all for everything)" };
+    println!("[*] capturing on {} (filter: {bpf}) [{mode}]", device.name);
+
+    let mut cap = Capture::from_device(device)
+        .expect("open device")
+        .immediate_mode(true)
+        .snaplen(65535)
+        .open()
+        .expect("start capture");
+    cap.filter(&bpf, true).expect("bad BPF filter");
+
+    let link = cap.get_datalink();
+    let mut re = Reassembler::new();
+    let mut dispatch = build_dispatch();
+
+    while let Ok(packet) = cap.next_packet() {
+        if let Some((ip_bytes, _)) = strip_link(link, packet.data) {
+            handle_ip(&mut re, &mut dispatch, ip_bytes);
+        }
+    }
+}
+
+const KDH_DDL: &str = "CREATE TABLE IF NOT EXISTS kdh (
+    id BIGINT PRIMARY KEY,
+    b1 BIGINT, b10 BIGINT, b100 BIGINT, b1000 BIGINT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)";
+
+const KDH_UPSERT: &str = "INSERT INTO kdh (id, b1, b10, b100, b1000) VALUES ($1,$2,$3,$4,$5)
+    ON CONFLICT (id) DO UPDATE SET b1=$2, b10=$3, b100=$4, b1000=$5, updated_at=now()";
+
+/// Register packet callbacks here. Each `on(key, ..)` fires when that message
+/// arrives, with the decoded values in `e.values` (vars + packed arrays).
+fn build_dispatch() -> Dispatcher {
+    let mut d = Dispatcher::new();
+    match db_client() {
+        Some(mut client) => {
+            println!("[db] connected; kdh -> table kdh");
+            d.on("kdh", move |e| {
+                if let Err(err) = upsert_kdh(&mut client, e) {
+                    eprintln!("[db] kdh upsert failed: {err}");
+                }
+            });
+        }
+        None => {
+            d.on("kdh", |e| {
+                eprintln!("[cb kdh] vars={:?} packs={:?}", e.values.vars, e.values.packs);
+            });
+        }
+    }
+    d
+}
+
+/// Connect to Postgres via DATABASE_URL and ensure the `kdh` table exists.
+fn db_client() -> Option<postgres::Client> {
+    let url = std::env::var("DATABASE_URL").ok()?;
+    match postgres::Client::connect(&url, postgres::NoTls) {
+        Ok(mut c) => match c.batch_execute(KDH_DDL) {
+            Ok(()) => Some(c),
+            Err(e) => {
+                eprintln!("[db] CREATE TABLE failed: {e}");
+                None
+            }
+        },
+        Err(e) => {
+            eprintln!("[db] connect failed ({e}); running without db");
+            None
+        }
+    }
+}
+
+/// id = first varint; b1/b10/b100/b1000 = first packed array's elements.
+fn upsert_kdh(client: &mut postgres::Client, e: &dispatch::Event) -> Result<(), postgres::Error> {
+    let id = *e.values.vars.first().unwrap_or(&0) as i64;
+    let pack = e.values.packs.first().cloned().unwrap_or_default();
+    let at = |i: usize| pack.get(i).copied().unwrap_or(0) as i64;
+    let (b1, b10, b100, b1000) = (at(0), at(1), at(2), at(3));
+    client.execute(KDH_UPSERT, &[&id, &b1, &b10, &b100, &b1000])?;
+    Ok(())
+}
+
+fn pick_device(dev_arg: Option<String>) -> Device {
+    // precedence: --dev flag, then DOFUS_DEV env, then default
+    if let Some(name) = dev_arg.or_else(|| std::env::var("DOFUS_DEV").ok()) {
+        return Device::list()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|d| d.name == name)
+            .unwrap_or_else(|| panic!("device {name} not found (try --list)"));
+    }
+    Device::lookup().expect("device lookup").expect("no default device")
+}
+
+fn list_devices() {
+    for d in Device::list().unwrap_or_default() {
+        println!("{}\t{}", d.name, d.desc.unwrap_or_default());
+    }
+}
+
+/// Strip the link-layer header, returning the inner IP packet bytes.
+fn strip_link(link: Linktype, data: &[u8]) -> Option<(&[u8], ())> {
+    match link {
+        Linktype::ETHERNET => {
+            let eth = EthernetPacket::new(data)?;
+            match eth.get_ethertype() {
+                EtherTypes::Ipv4 | EtherTypes::Ipv6 => {
+                    let off = 14;
+                    Some((&data[off..], ()))
+                }
+                _ => None,
+            }
+        }
+        // BSD loopback (DLT_NULL): 4-byte address-family header
+        Linktype::NULL | Linktype(108) => data.get(4..).map(|b| (b, ())),
+        Linktype::RAW | Linktype(12) | Linktype(14) => Some((data, ())),
+        _ => {
+            // best effort: assume ethernet
+            data.get(14..).map(|b| (b, ()))
+        }
+    }
+}
+
+fn handle_ip(re: &mut Reassembler, dispatch: &mut Dispatcher, ip: &[u8]) {
+    let version = ip.first().map(|b| b >> 4).unwrap_or(0);
+    match version {
+        4 => {
+            if let Some(p) = Ipv4Packet::new(ip) {
+                if p.get_next_level_protocol() == IpNextHeaderProtocols::Tcp {
+                    handle_tcp(re, dispatch, IpAddr::V4(p.get_source()), IpAddr::V4(p.get_destination()), p.payload());
+                }
+            }
+        }
+        6 => {
+            if let Some(p) = Ipv6Packet::new(ip) {
+                if p.get_next_header() == IpNextHeaderProtocols::Tcp {
+                    handle_tcp(re, dispatch, IpAddr::V6(p.get_source()), IpAddr::V6(p.get_destination()), p.payload());
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Classic offset + hex + ASCII dump.
+fn hexdump(b: &[u8]) -> String {
+    let mut out = String::new();
+    for (i, chunk) in b.chunks(16).enumerate() {
+        let hex: String = chunk.iter().map(|x| format!("{x:02x} ")).collect();
+        let ascii: String = chunk
+            .iter()
+            .map(|&x| if (0x20..0x7f).contains(&x) { x as char } else { '.' })
+            .collect();
+        out.push_str(&format!("  {:04x}  {:<48}  {ascii}\n", i * 16, hex));
+    }
+    out
+}
+
+fn handle_tcp(re: &mut Reassembler, dispatch: &mut Dispatcher, src: IpAddr, dst: IpAddr, tcp_bytes: &[u8]) {
+    let tcp = match TcpPacket::new(tcp_bytes) {
+        Some(t) => t,
+        None => return,
+    };
+    let key = FlowKey { src, sport: tcp.get_source(), dst, dport: tcp.get_destination() };
+    let seq = tcp.get_sequence();
+    let payload = tcp.payload();
+    if payload.is_empty() {
+        return;
+    }
+    if RAW.load(Ordering::Relaxed) {
+        println!("\n[{key}] seq={seq} len={}", payload.len());
+        println!("{}", hexdump(payload));
+        return;
+    }
+    let frames = re.push(key, seq, payload);
+    if frames.is_empty() {
+        return;
+    }
+    if let Some(layout) = re.announce(&key) {
+        eprintln!("[{key}] framing locked: {layout}");
+    }
+    let reg = REG.get().and_then(|o| o.as_ref());
+    let show_all = SHOW_ALL.load(Ordering::Relaxed);
+
+    // fire callbacks for every message a frame carries (independent of display)
+    if let Some(r) = reg {
+        if !dispatch.is_empty() {
+            for d in &frames {
+                let mut anys = Vec::new();
+                dump::collect_any(&d.body, &mut anys);
+                for (mkey, mbody) in anys {
+                    dispatch.dispatch(&mkey, &mbody, r);
+                }
+            }
+        }
+    }
+
+    for d in frames {
+        // default: only frames we have an interpreter for; --all shows everything
+        if !show_all && !dump::has_known(&d.body) {
+            continue;
+        }
+        // game-server Frame carries a routing id; note it when present
+        let hdr = match &d.frame {
+            Some(f) if f.payload().id != 0 || !f.payload().data.is_empty() => {
+                let p = f.payload();
+                format!("{} id=0x{:08X} ({})", f.kind(), p.id as u32, p.id)
+            }
+            _ => format!("body {}B", d.body.len()),
+        };
+        println!("\n[{key}] {hdr}");
+        print!("{}", dump::dump(&d.body, reg, None, 1));
+    }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "frida",
+  "version": "1.0.0",
+  "description": "Two routes. Prefer **A (Frida)** — it reads the live client and gets real message names, real field names, field numbers, and the wire id map in one pass. Use **B (Ghidra)** only if you can't run the client.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "frida-il2cpp-bridge": "^0.13.1"
+  }
+}
