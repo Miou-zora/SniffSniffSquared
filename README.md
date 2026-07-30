@@ -19,22 +19,68 @@ TCP :5555
               └─ message body
 ```
 
-## Quick start
+## Running it
+
+### 1. What you need
+
+- **Docker** — for Postgres.
+- **Rust stable** — `rustup default stable`.
+- **Dofus 3 running and logged in.** The sniffer only sees traffic that exists;
+  with the game closed it will sit there capturing nothing.
+- **Permission to capture.** On macOS that means being in `access_bpf`;
+  otherwise prefix the capture command with `sudo`:
+
+  ```sh
+  id -Gn | tr ' ' '\n' | grep access_bpf   # prints access_bpf if you are
+  ```
+
+Optional: `pipx install frida-tools`, only for the runtime schema recovery in
+RUNBOOK part 3.
+
+### 2. Start the database
+
+From the repo root:
 
 ```sh
-cp .env.example .env          # then quote BPF_FILTER — see RUNBOOK.md
-docker compose up -d          # postgres + pgadmin, from the repo root
+cp .env.example .env          # defaults work as-is for local use
+docker compose up -d          # postgres + pgadmin
+```
 
-cd sniffer                    # the Rust app; run it from here
+### 3. Capture
+
+The Rust app lives in `sniffer/` and **must be run from there** — it resolves
+`keymap.json` and `proto/messages.json` relative to the working directory.
+
+```sh
+cd sniffer
 cargo build
-./target/debug/SniffSniffSquared --list                       # find your interface
+./target/debug/SniffSniffSquared --list        # find your interface (usually en0)
+./target/debug/SniffSniffSquared --dev en0 --all "tcp port 5555"
+```
 
-# capture, decode, and write prices + a full message archive to Postgres
+`.env` supplies `DATABASE_URL`, so prices and the message archive are written
+automatically. To be explicit, or if you skipped `.env`:
+
+```sh
 DATABASE_URL='postgres://dofus:change_me@localhost:5432/dofus' \
   ./target/debug/SniffSniffSquared --dev en0 --all "tcp port 5555"
 ```
 
-Marketplace prices land in the `prices` table, one row per observation:
+### 4. Check it is actually working
+
+Within a few seconds you should see all four of these:
+
+```
+[*] message keymap: 2 entries (2 from keymap.json) — chat_message=ksv price_list=kea
+[*] schema registry: 2317 messages
+[db] connected; price_list (kea) -> table prices
+[a.b.c.d:5555 -> w.x.y.z:NNNNN] framing locked: Varint includes_self=false lead_skip=0
+```
+
+The **`framing locked`** line is the one that matters — it means real game
+traffic is being deframed. If it never appears, see troubleshooting below.
+
+Then browse the marketplace in game, and prices accumulate:
 
 ```sh
 docker exec dofus_db psql -U dofus -d dofus -c \
@@ -43,6 +89,23 @@ docker exec dofus_db psql -U dofus -d dofus -c \
 
 Every message is archived to `packets` whether or not it is understood, so a
 message identified later can be decoded from traffic captured today.
+
+### 5. Stop
+
+```sh
+# Ctrl-C the sniffer, then from the repo root:
+docker compose down             # add -v to also delete the captured data
+```
+
+### Troubleshooting
+
+| symptom | cause |
+|---|---|
+| no `framing locked` line | the game is not running, or the wrong `--dev` interface — check `--list` |
+| `Permission denied` opening the device | not in `access_bpf`; use `sudo` |
+| no `[db] connected` line, and no error either | `DATABASE_URL` never reached the process. An `.env` copied before this was fixed may have `BPF_FILTER` unquoted, which makes `dotenvy` silently drop every variable after it |
+| runs, but `prices` stays empty | you have not opened the marketplace, or a game update rotated the key — see [keymap.json](#keymapjson--what-to-edit-when-the-game-updates) |
+| `no proto/messages.json` | you are not running from `sniffer/` |
 
 ### Running the sniffer in Docker — Linux only
 
@@ -186,11 +249,16 @@ against a live client — see RUNBOOK part 3.
 
 See RUNBOOK.md part 3 for the ordered list of what's next.
 
-## Requirements
+## Platform support
 
-macOS (the Frida tooling is macOS-specific; capture is portable). Rust stable,
-Docker, and `pipx install frida-tools` for schema recovery. Capture needs
-membership in `access_bpf`, or `sudo`.
+Capture is portable — it is libpcap, and works anywhere the binary runs
+natively. Developed and verified on macOS (Darwin 25.5, Apple Silicon).
+
+Two things are platform-bound:
+
+- the **Frida tooling** in `sniffer/tools/` is macOS-specific;
+- the **compose `sniffer` service captures on Linux only**, for the Docker VM
+  reason described above.
 
 ## Legal
 
