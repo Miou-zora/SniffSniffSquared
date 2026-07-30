@@ -62,6 +62,11 @@ docker exec dofus_db psql -U dofus -d dofus -c '\dt'
 - **The Frida scan freezes the client** at 100%+ CPU on its own threads for
   the entire run, and it will not quit. Only run it against the re-signed
   copy, never a client being played. Abort = kill `run.py`, then the game pid.
+- **The re-signed copy needs Zaap's launch arguments**, not just the right
+  directory: `--port`, `--hash` (per-launch session uuid), `--instanceId`,
+  `--connectionPort`. Grab them from a live launcher-started client (see
+  RUNBOOK part 3) and use a different `--instanceId`/`--logfile` so it runs
+  alongside the real client. The hash works concurrently.
 - **The re-signed copy MUST be launched from `/Applications/Ankama/Dofus-dofus3`.**
   Addressables catalogs resolve relative to the launch directory; run it from
   anywhere else and it fails at boot (`Unable to find catalog list`) while

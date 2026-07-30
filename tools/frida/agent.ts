@@ -171,7 +171,9 @@ Il2Cpp.perform(() => {
         if (full) { classMap[full] = klass.type.name; messages++; }
         emitFile(desc.method("get_File").invoke() as Il2Cpp.Object);
       } catch (e) {
-        send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " threw" });
+        // surface the actual exception: it names the missing precondition
+        send({ event: "hb", asm: "seed", scanned, messages, files: filesOut,
+               skipped: name + " threw: " + String(e) });
       }
     }
     while (pending.length > 0) emitFile(pending.pop() as Il2Cpp.Object);

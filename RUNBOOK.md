@@ -393,19 +393,57 @@ the class-init lock is already ours — gets past the first seed:
 main thread). So thread context was a real part of the problem but not all of
 it.
 
-Next experiments, in order:
+**The client must be launched the way Zaap launches it.** Beyond the working
+directory, it needs Zaap's arguments — a per-launch session hash and the IPC
+port back to the launcher:
 
-1. Find out *what* `ksv` throws — the handler currently swallows it. That
-   exception probably names the missing precondition.
-2. Do the extraction from a hook on a **background** game thread rather than
-   the main one, so a blocking initialiser cannot freeze the whole process.
-3. Read the descriptor from the static backing field
-   (`<Proto>k__BackingField` exists on `MessageDescriptor`) instead of calling
-   the getter, avoiding the C# static constructor altogether.
-4. Try after logging in. Game-protocol descriptors may simply not be
-   initialisable at the title screen, which would explain why every route
-   fails there. This means running a modified client against a real account —
-   your call, and not required for anything the passive sniffer does.
+```sh
+./Dofus-debug.app/Contents/MacOS/Dofus \
+  --logfile ~/Library/Logs/zaap/dofus-dofus3/dofus-debug.log \
+  --port 26116 --gameName dofus --gameRelease dofus3 --instanceId 2 \
+  --hash <uuid> --canLogin true --langCode fr \
+  --autoConnectType 1 --connectionPort 5555 --hdReady --4kReady --enableRetina
+```
+
+Capture a live `--hash` and `--port` by starting the game from the launcher and
+reading its command line:
+
+```sh
+ps -Ao pid=,comm= | awk '/MacOS\/Dofus$/ {print $1}' | head -1 | xargs -I{} ps -o command= -p {}
+```
+
+Use a different `--instanceId` and `--logfile` so the debug copy runs alongside
+your real client instead of disturbing it. The hash is reusable concurrently —
+verified. With this the copy boots properly (0 catalog errors,
+`EventSystem:Update()` in the log).
+
+**Where it stands: invoking the descriptor getter is unsafe in every context
+tried.**
+
+| context | client state | result |
+|---|---|---|
+| injected thread, sync | broken boot (no catalogs) | probe read `ksv` FullName — the only success |
+| injected thread, sync | properly booted | deadlock, process idle |
+| inside `EventSystem.Update` hook | properly booted, standalone | `ksv` threw, scan continued, `jrj` deadlocked |
+| inside hook | properly booted, Zaap args | **hard process crash** at `ksv` |
+
+The crash is at process level, not a C# exception — which is why the handler
+never reported anything to catch. `libc++abi: terminate_handler unexpectedly
+returned` appears in the player log.
+
+Next, and this is now clearly the right direction: **stop calling the getter
+altogether.** Every failure comes from forcing the static constructor. Read the
+descriptor out of the already-initialised object graph instead —
+`MessageDescriptor` exposes `<Proto>k__BackingField`, `<Fields>k__BackingField`
+and friends as plain fields (confirmed by probe). Reading a field runs no user
+code and cannot deadlock or crash the runtime the way an invoke can. Only
+classes the game has already initialised will have non-null values, which is
+fine: seed from messages seen on the wire during a real session.
+
+Worth checking at the same time: log which method `descriptorGetter` actually
+selects for `ksv`. The class has both `coma` (static) and `comb` (instance)
+returning `MessageDescriptor`; if the selection is wrong, the crash may be an
+ordinary calling-convention mismatch rather than anything about initialisation.
 
 ### 2. Re-join the registry on real names
 

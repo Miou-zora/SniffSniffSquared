@@ -1,5 +1,5 @@
 📦
-143995 /agent.js
+144105 /agent.js
 ✄
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -3464,7 +3464,14 @@ var require_agent = __commonJS({
             }
             emitFile(desc.method("get_File").invoke());
           } catch (e) {
-            send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " threw" });
+            send({
+              event: "hb",
+              asm: "seed",
+              scanned,
+              messages,
+              files: filesOut,
+              skipped: name + " threw: " + String(e)
+            });
           }
         }
         while (pending.length > 0)
