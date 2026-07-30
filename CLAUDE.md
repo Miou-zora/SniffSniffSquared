@@ -37,8 +37,9 @@ explanation, the verified command sequence, and a "dead ends" list.
 ```
 src/            Rust sniffer (see module table in RUNBOOK.md part 1)
 proto/          messages.json (schema registry) + generated dofus3.proto
-tools/          gen_proto.py, identify.py, parse_descriptors.py,
-                replay.py, resign-debug-app.sh
+proto/keymap.json  wire-key overrides — edit when a build rotates keys
+tools/          gen_proto.py, identify.py, findvalue.py,
+                parse_descriptors.py, replay.py, resign-debug-app.sh
 tools/frida/    runtime schema extraction: agent.ts, probe.ts, run.py
 docs/           observations.md — annotated real captures
 reference/      il2cpp-dump-20260710/, Mapping.v2*.json (inputs to gen_proto.py)
@@ -48,7 +49,7 @@ RUNBOOK.md      the guide. Start here for anything protocol-related.
 ## Commands
 
 ```sh
-cargo build && cargo test                 # 13 tests
+cargo build && cargo test                 # 18 tests
 docker compose up -d                      # postgres + pgadmin
 ./target/debug/SniffSniffSquared --dev en0 --all "tcp port 5555"
 ./target/debug/SniffSniffSquared --dev en0 --raw "tcp port 5555"
@@ -117,13 +118,19 @@ Working: capture, reassembly, adaptive deframing, `Any` unwrapping,
 schema-vs-wire mismatch detection, signed-varint decoding, every message
 archived to `packets`. 94 distinct message keys observed in one session.
 
-**`kea` = marketplace price list** on the current build, identified by
-known-plaintext search (`tools/findvalue.py`) against prices read off the
-screen. Decoded structurally in `interpret::kea` — deliberately NOT through the
-registry, which is keyed to an older build. Writes to the `prices` table, one
-row per observation so history survives. The old `kdh` key is gone from the
-wire; its interpreter arm stays only because the decoder tests pin real `kdh`
-bytes.
+**Messages are referred to by semantic name, never by wire key.** `src/messages.rs`
+owns the `name <-> key` mapping and is the only place a rotated key changes;
+`proto/keymap.json` overrides it at runtime with no rebuild. Adding a message:
+name it in `messages::DEFAULTS`, parse it in `interpret.rs` matching on the
+*name*, optionally persist it in `build_dispatch()` via
+`messages::keymap().key("...")`, and pin it with a test over real bytes.
+`price_list` is the worked example.
+
+| semantic name | key (this build) | meaning |
+|---|---|---|
+| `price_list` | `kea` | marketplace ladder x1/x10/x100/x1000 -> `prices` table |
+| `chat_message` | `ksv` | chat/trade channel |
+| `price_list_legacy` | `kdh` | the 2026-07-10 price list; gone from the wire, kept for tests |
 
 Partly done: runtime schema extraction works and is proven end-to-end —
 `agent.ts` pulls each `.proto` file's serialized `FileDescriptorProto`,

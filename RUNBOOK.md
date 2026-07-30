@@ -67,20 +67,27 @@ never uses.
 | `src/pb.rs` | schema-less protobuf wire reader |
 | `src/registry.rs` | loads `proto/messages.json`, resolves a type token to a field list |
 | `src/dump.rs` | pretty-printer, `Any` unwrapping, schema-vs-wire checking |
-| `src/interpret.rs` | per-message meaning. Only `kdh`, whose key is now stale |
+| `src/interpret.rs` | per-message meaning, dispatched on semantic name |
+| `src/messages.rs` | semantic name <-> wire key; the one place a rotated key changes |
 | `src/dispatch.rs` | callbacks per message key |
 
 ### What is actually known
 
-- `ksv` = chat / listing messages (contains free text, author, timestamp).
-- 94 distinct keys observed in one session; `idd` is the most frequent.
+| semantic name | wire key (this build) | meaning |
+|---|---|---|
+| `price_list` | `kea` | marketplace price ladder: x1 / x10 / x100 / x1000 |
+| `chat_message` | `ksv` | chat / trade channel: author, timestamp, free text |
+
+106 distinct keys observed in one session; `idd` is the most frequent and is
+still unidentified. Code refers to messages by the left-hand column only — see
+part 2 step 5 for what to do when the right-hand column changes.
 
 > **The keys rotate between client builds.** `kdh` (documented as the price
 > list), `kag` and `jqj` appear nowhere in an 861-message capture from the
 > current build — only `ksv` carried over. A mapping is only valid for the
 > build it was observed on, so `docs/observations.md` and the `kdh` interpreter
 > describe a client that no longer exists. Re-identify with
-> `tools/identify.py` — see part 2 step 5.
+> `tools/identify.py` — see part 2 step 6.
 
 Field *names* are unknown for the game protocol. `proto/messages.json` gives
 field **numbers** and **types** only, and describes the 2026-07-10 build.
@@ -154,7 +161,7 @@ If absent, prefix the capture commands with `sudo`.
 cp .env.example .env
 $EDITOR .env
 docker compose up -d
-docker exec dofus_db psql -U dofus -d dofus -c '\dt'   # expect: kdh, packets
+docker exec dofus_db psql -U dofus -d dofus -c '\dt'   # expect: packets, prices
 ```
 
 > **Trap — quote `BPF_FILTER`.** `.env.example` ships
@@ -168,7 +175,7 @@ docker exec dofus_db psql -U dofus -d dofus -c '\dt'   # expect: kdh, packets
 
 ```sh
 cargo build
-cargo test          # 10 tests, all should pass
+cargo test          # 18 tests, all should pass
 ```
 
 > **Trap.** `cargo test` does not refresh `target/debug/SniffSniffSquared`.
@@ -232,7 +239,37 @@ Every message that arrives is also archived to the `packets` table, whether or
 not it has an interpreter (`ARCHIVE_PACKETS=0` disables it). That is what lets
 you work on a message type later without being in-game when it appears.
 
-### 5. Identifying a message
+### 5. When a message stops decoding — repointing a rotated key
+
+The obfuscated wire keys change between client builds, so this is routine
+maintenance rather than a failure. Nothing in `src/` refers to a message by its
+wire key: code says `price_list`, and `src/messages.rs` is the only place that
+knows the current key is `kea`.
+
+**To repoint a message, edit `proto/keymap.json`. No rebuild:**
+
+```json
+{
+  "price_list": "kea",
+  "chat_message": "ksv"
+}
+```
+
+Change the value to the new key, restart the sniffer, and confirm the startup
+line:
+
+```
+[*] message keymap: 3 entries (2 from proto/keymap.json) — chat_message=ksv price_list=kea ...
+```
+
+Entries in that file override the built-in `messages::DEFAULTS`; anything
+omitted falls back to them, and `_`-prefixed entries are treated as comments.
+Editing `DEFAULTS` instead is equivalent but needs a rebuild — do that when the
+new key is confirmed and worth committing.
+
+To find the new key, use step 6.
+
+### 6. Identifying a message
 
 Since the keys rotate, identification is empirical: watch the archive while
 doing one specific thing in game, and see what appears that was not there
@@ -259,11 +296,24 @@ docker exec dofus_db psql -U dofus -d dofus -c \
 Direction is a strong hint on its own: client→server messages are your actions,
 server→client are world state.
 
-To wire a confirmed key in: add an arm to `interpret()` in `src/interpret.rs`
-(plus `is_known_key`), and a handler in `build_dispatch()` in `src/main.rs` if
-it should get its own table.
+To wire a confirmed message in, in this order:
 
-### 6. Testing without the game
+1. **Name it** in `src/messages.rs` `DEFAULTS` — a stable semantic name plus
+   the current wire key, e.g. `("guild_info", "abc")`. Everything downstream
+   uses the name, so a future rotation is a one-line change here.
+2. **Parse it** in `src/interpret.rs`: a function returning a typed struct, and
+   an arm in `interpret()` matching on the *semantic name*. Parse the body
+   structurally with `pb::Reader`; do not go through the schema registry, which
+   is keyed to an older build.
+3. **Persist it**, optionally, with a handler in `build_dispatch()`
+   (`src/main.rs`), registered via
+   `messages::keymap().key("guild_info")` rather than a literal key.
+4. **Pin it** with a test over real captured bytes, as
+   `interpret::tests::price_list_decodes_the_ladder` does.
+
+`price_list` is the worked example of all four steps.
+
+### 7. Testing without the game
 
 `tools/replay.py` pushes captured frames over loopback so the whole pipeline —
 deframing, `Any` unwrapping, interpreters, callbacks, database writes — runs

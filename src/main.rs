@@ -15,6 +15,7 @@ mod flow;
 mod frame;
 mod framer;
 mod interpret;
+mod messages;
 mod pb;
 mod registry;
 
@@ -56,6 +57,15 @@ fn main() {
         }
     }
     let bpf = rest.first().cloned().unwrap_or_else(|| "tcp".to_string());
+
+    let km = messages::keymap();
+    println!(
+        "[*] message keymap: {} entries ({} from {}) — {}",
+        km.len(),
+        km.overridden(),
+        messages::OVERRIDE_PATH,
+        km.summary()
+    );
 
     let _ = REG.set(Registry::load("proto/messages.json"));
     match REG.get().and_then(|o| o.as_ref()) {
@@ -126,20 +136,28 @@ const PACKETS_INSERT: &str =
 /// arrives, with the decoded values in `e.values` (vars + packed arrays).
 fn build_dispatch() -> Dispatcher {
     let mut d = Dispatcher::new();
-    // marketplace prices — `kea` on the current build (see interpret::kea)
+    // Registered by semantic name, so a build that rotates the wire key needs
+    // only messages::DEFAULTS or proto/keymap.json updated — not this code.
+    let price_key = match messages::keymap().key("price_list") {
+        Some(k) => k.to_string(),
+        None => {
+            eprintln!("[keymap] no wire key for \"price_list\"; prices not collected");
+            return d;
+        }
+    };
     match db_client_with(PRICES_DDL) {
         Some(mut client) => {
-            println!("[db] connected; kea -> table prices");
-            d.on("kea", move |e| {
+            println!("[db] connected; price_list ({price_key}) -> table prices");
+            d.on(&price_key, move |e| {
                 if let Err(err) = insert_price(&mut client, e) {
                     eprintln!("[db] price insert failed: {err}");
                 }
             });
         }
         None => {
-            d.on("kea", |e| {
-                if let Some(p) = interpret::kea(e.body) {
-                    eprintln!("[cb kea] {p}");
+            d.on(&price_key, |e| {
+                if let Some(p) = interpret::price_list(e.body) {
+                    eprintln!("[cb price_list] {p}");
                 }
             });
         }
@@ -213,7 +231,7 @@ fn insert_price(
     client: &mut postgres::Client,
     e: &dispatch::Event,
 ) -> Result<(), postgres::Error> {
-    let p = match interpret::kea(e.body) {
+    let p = match interpret::price_list(e.body) {
         Some(p) => p,
         None => return Ok(()), // not a price message after all
     };

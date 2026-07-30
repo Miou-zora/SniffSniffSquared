@@ -1,0 +1,6 @@
+{
+  "_comment": "Semantic message name -> obfuscated Any wire key. These keys rotate between client builds; when a message stops decoding, re-identify it with tools/identify.py or tools/findvalue.py and change the key here. No rebuild needed. Entries override src/messages.rs DEFAULTS; anything omitted falls back to them. Keys beginning with _ are ignored.",
+
+  "price_list": "kea",
+  "chat_message": "ksv"
+}

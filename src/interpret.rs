@@ -4,28 +4,34 @@
 //! human-meaningful attributes. Add a new `match` arm as you figure each
 //! message out. Everything is empty for now except `kdh`.
 
+use crate::messages;
 use crate::pb::{Reader, WireType};
 use crate::registry::{leaf, Registry};
 
-/// Return a one-line understandable rendering for a known message key, or None.
+/// Return a one-line understandable rendering for a known message, or None.
+///
+/// Dispatches on the *semantic* name, never the wire key — the keys rotate per
+/// client build, so `crate::messages` owns that translation. To support a new
+/// message: add its key to `messages::DEFAULTS`, then add an arm here.
 pub fn interpret(key: &str, body: &[u8], reg: &Registry) -> Option<String> {
-    match key {
-        "kea" => kea(body).map(|p| p.to_string()),
-        // `kdh` was the price list on the 2026-07-10 build. That key no longer
-        // exists on the wire — the obfuscated keys rotate per build — so this
-        // arm never fires against a current client. Kept because the decoder
-        // tests pin real captured `kdh` bytes.
-        "kdh" => Some(kdh(body, reg)),
+    match messages::keymap().name(key)? {
+        "price_list" => price_list(body).map(|p| p.to_string()),
+        // the 2026-07-10 price list; that key is long gone from the wire, but
+        // the decoder tests pin real captured bytes for it
+        "price_list_legacy" => Some(kdh(body, reg)),
         _ => None,
     }
 }
 
-/// Whether a message key has an interpreter. Keep in sync with `interpret`.
+/// Whether we can interpret this wire key. Keep in sync with `interpret`.
 pub fn is_known_key(key: &str) -> bool {
-    matches!(key, "kea" | "kdh")
+    matches!(
+        messages::keymap().name(key),
+        Some("price_list") | Some("price_list_legacy")
+    )
 }
 
-// ---- kea: marketplace price list ------------------------------------------
+// ---- price_list: marketplace price ladder ---------------------------------
 //
 // Identified by known-plaintext search: the prices shown in the HDV for one
 // item turned up verbatim in this message (tools/findvalue.py). Parsed
@@ -42,14 +48,14 @@ pub fn is_known_key(key: &str) -> bool {
 // A ladder entry of 0 means that batch size is not on sale.
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Kea {
+pub struct PriceList {
     pub category: u64,
     pub item_id: u64,
     pub ladder: Vec<u64>,
     pub listing_id: u64,
 }
 
-impl std::fmt::Display for Kea {
+impl std::fmt::Display for PriceList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let batches: Vec<String> = self
             .ladder
@@ -68,9 +74,9 @@ impl std::fmt::Display for Kea {
     }
 }
 
-/// Parse a `kea` price-list message straight off the wire.
-pub fn kea(body: &[u8]) -> Option<Kea> {
-    let mut out = Kea { category: 0, item_id: 0, ladder: Vec::new(), listing_id: 0 };
+/// Parse a price-list message straight off the wire.
+pub fn price_list(body: &[u8]) -> Option<PriceList> {
+    let mut out = PriceList { category: 0, item_id: 0, ladder: Vec::new(), listing_id: 0 };
     let mut r = Reader::new(body);
     while !r.eof() {
         let (field, wt) = r.tag()?;
@@ -259,36 +265,36 @@ fn packed(b: &[u8]) -> Vec<u64> {
 mod tests {
     use super::*;
 
-    // Real captured `kea`, identified by known-plaintext search: the client
+    // Real captured price-list message, identified by known-plaintext search: the client
     // showed Carapace Verte at 1=75, 10=326, 100=6660, 1000=99999 and those
     // exact values appear here. Keep byte-exact.
-    const KEA: &[u8] = &[
+    const PRICE_LIST: &[u8] = &[
         0x08, 0x6b, 0x12, 0x12, 0x08, 0xb1, 0x14, 0x2a, 0x08, 0x4b, 0xc6, 0x02, 0x84, 0x34,
         0x9f, 0x8d, 0x06, 0x30, 0x6b, 0x38, 0xc2, 0x4e, 0x18, 0xb1, 0x14,
     ];
 
     #[test]
-    fn kea_decodes_the_price_ladder() {
-        let p = kea(KEA).expect("parses");
+    fn price_list_decodes_the_ladder() {
+        let p = price_list(PRICE_LIST).expect("parses");
         assert_eq!(p.ladder, vec![75, 326, 6660, 99999], "prices shown in game");
         assert_eq!(p.item_id, 2609);
         assert_eq!(p.category, 107);
         assert_eq!(p.listing_id, 10050);
-        assert!(is_known_key("kea"));
+        assert!(is_known_key(messages::keymap().key("price_list").unwrap()));
     }
 
     #[test]
-    fn kea_renders_batches() {
-        let s = kea(KEA).unwrap().to_string();
+    fn price_list_renders_batches() {
+        let s = price_list(PRICE_LIST).unwrap().to_string();
         assert!(s.contains("1:75"), "{s}");
         assert!(s.contains("1000:99999"), "{s}");
         assert!(s.contains("item=2609"), "{s}");
     }
 
     #[test]
-    fn kea_rejects_messages_without_a_ladder() {
+    fn price_list_rejects_messages_without_a_ladder() {
         // a short `kea` ack carrying only ids — real capture, no prices in it
-        assert!(kea(&[0x08, 0x77, 0x18, 0x8a, 0x0d]).is_none());
+        assert!(price_list(&[0x08, 0x77, 0x18, 0x8a, 0x0d]).is_none());
     }
 }
 
