@@ -68,8 +68,9 @@ reference/      IL2CPP dump + deobfuscation mappings (gen_proto.py inputs)
 
 **Working:** capture, TCP reassembly, adaptive deframing (seven candidate
 layouts, locks on three consecutive valid parses), `Any` unwrapping,
-signed-varint decoding, schema-vs-wire mismatch detection, `kdh` (price list)
-persisted to Postgres.
+signed-varint decoding, schema-vs-wire mismatch detection, every message
+archived to `packets`, and marketplace prices (`kea`) decoded into a `prices`
+table with history.
 
 **Known limits:** the obfuscated message keys rotate between client builds, so
 the committed schema registry (built from a 2026-07-10 dump) does not describe

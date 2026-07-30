@@ -48,7 +48,7 @@ RUNBOOK.md      the guide. Start here for anything protocol-related.
 ## Commands
 
 ```sh
-cargo build && cargo test                 # 10 tests
+cargo build && cargo test                 # 13 tests
 docker compose up -d                      # postgres + pgadmin
 ./target/debug/SniffSniffSquared --dev en0 --all "tcp port 5555"
 ./target/debug/SniffSniffSquared --dev en0 --raw "tcp port 5555"
@@ -117,9 +117,13 @@ Working: capture, reassembly, adaptive deframing, `Any` unwrapping,
 schema-vs-wire mismatch detection, signed-varint decoding, every message
 archived to `packets`. 94 distinct message keys observed in one session.
 
-**The `kdh` interpreter and `kdh` table are dead code on the current build** —
-that key no longer exists on the wire. Use `tools/identify.py` to find the
-current price-list key, then repoint `interpret.rs` and `build_dispatch()`.
+**`kea` = marketplace price list** on the current build, identified by
+known-plaintext search (`tools/findvalue.py`) against prices read off the
+screen. Decoded structurally in `interpret::kea` — deliberately NOT through the
+registry, which is keyed to an older build. Writes to the `prices` table, one
+row per observation so history survives. The old `kdh` key is gone from the
+wire; its interpreter arm stays only because the decoder tests pin real `kdh`
+bytes.
 
 Partly done: runtime schema extraction works and is proven end-to-end —
 `agent.ts` pulls each `.proto` file's serialized `FileDescriptorProto`,

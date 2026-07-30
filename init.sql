@@ -15,12 +15,18 @@ CREATE TABLE IF NOT EXISTS packets (
 CREATE INDEX IF NOT EXISTS idx_packets_msg_key     ON packets (msg_key);
 CREATE INDEX IF NOT EXISTS idx_packets_captured_at ON packets (captured_at);
 
--- kdh message: id = first varint (unique); b1/b10/b100/b1000 = packed batches.
-CREATE TABLE IF NOT EXISTS kdh (
-    id         BIGINT PRIMARY KEY,   -- first varint
-    b1         BIGINT,               -- packed[0]  (batch 1)
-    b10        BIGINT,               -- packed[1]  (batch 10)
-    b100       BIGINT,               -- packed[2]  (batch 100)
-    b1000      BIGINT,               -- packed[3]  (batch 1000)
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+-- Marketplace prices, decoded from the `kea` message. One row per observation
+-- so price history is preserved; the item is identified by item_id.
+CREATE TABLE IF NOT EXISTS prices (
+    id         BIGSERIAL PRIMARY KEY,
+    seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    item_id    BIGINT NOT NULL,
+    category   BIGINT,
+    listing_id BIGINT,
+    b1         BIGINT,               -- price for x1
+    b10        BIGINT,               -- x10
+    b100       BIGINT,               -- x100
+    b1000      BIGINT                -- x1000  (0 = that batch not on sale)
 );
+
+CREATE INDEX IF NOT EXISTS idx_prices_item ON prices (item_id, seen_at DESC);

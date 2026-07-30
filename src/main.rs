@@ -86,14 +86,24 @@ fn main() {
     }
 }
 
-const KDH_DDL: &str = "CREATE TABLE IF NOT EXISTS kdh (
-    id BIGINT PRIMARY KEY,
-    b1 BIGINT, b10 BIGINT, b100 BIGINT, b1000 BIGINT,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-)";
+/// Marketplace prices from `kea`. Unlike the old `kdh` table this keeps
+/// history — one row per observation — because the point of watching the
+/// marketplace is how prices move, and an upsert throws that away.
+const PRICES_DDL: &str = "CREATE TABLE IF NOT EXISTS prices (
+    id          BIGSERIAL PRIMARY KEY,
+    seen_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    item_id     BIGINT NOT NULL,
+    category    BIGINT,
+    listing_id  BIGINT,
+    b1          BIGINT,
+    b10         BIGINT,
+    b100        BIGINT,
+    b1000       BIGINT
+);
+CREATE INDEX IF NOT EXISTS idx_prices_item ON prices (item_id, seen_at DESC)";
 
-const KDH_UPSERT: &str = "INSERT INTO kdh (id, b1, b10, b100, b1000) VALUES ($1,$2,$3,$4,$5)
-    ON CONFLICT (id) DO UPDATE SET b1=$2, b10=$3, b100=$4, b1000=$5, updated_at=now()";
+const PRICES_INSERT: &str = "INSERT INTO prices
+    (item_id, category, listing_id, b1, b10, b100, b1000) VALUES ($1,$2,$3,$4,$5,$6,$7)";
 
 /// Matches the `packets` table in init.sql. Re-declared here so the sniffer
 /// works against a database that was created before that table existed.
@@ -116,18 +126,21 @@ const PACKETS_INSERT: &str =
 /// arrives, with the decoded values in `e.values` (vars + packed arrays).
 fn build_dispatch() -> Dispatcher {
     let mut d = Dispatcher::new();
-    match db_client() {
+    // marketplace prices — `kea` on the current build (see interpret::kea)
+    match db_client_with(PRICES_DDL) {
         Some(mut client) => {
-            println!("[db] connected; kdh -> table kdh");
-            d.on("kdh", move |e| {
-                if let Err(err) = upsert_kdh(&mut client, e) {
-                    eprintln!("[db] kdh upsert failed: {err}");
+            println!("[db] connected; kea -> table prices");
+            d.on("kea", move |e| {
+                if let Err(err) = insert_price(&mut client, e) {
+                    eprintln!("[db] price insert failed: {err}");
                 }
             });
         }
         None => {
-            d.on("kdh", |e| {
-                eprintln!("[cb kdh] vars={:?} packs={:?}", e.values.vars, e.values.packs);
+            d.on("kea", |e| {
+                if let Some(p) = interpret::kea(e.body) {
+                    eprintln!("[cb kea] {p}");
+                }
             });
         }
     }
@@ -150,11 +163,6 @@ fn build_dispatch() -> Dispatcher {
         }
     }
     d
-}
-
-/// Connect to Postgres via DATABASE_URL and ensure the `kdh` table exists.
-fn db_client() -> Option<postgres::Client> {
-    db_client_with(KDH_DDL)
 }
 
 /// Connect and run `ddl` to guarantee the target table exists.
@@ -200,13 +208,28 @@ fn insert_packet(
     Ok(())
 }
 
-/// id = first varint; b1/b10/b100/b1000 = first packed array's elements.
-fn upsert_kdh(client: &mut postgres::Client, e: &dispatch::Event) -> Result<(), postgres::Error> {
-    let id = *e.values.vars.first().unwrap_or(&0) as i64;
-    let pack = e.values.packs.first().cloned().unwrap_or_default();
-    let at = |i: usize| pack.get(i).copied().unwrap_or(0) as i64;
-    let (b1, b10, b100, b1000) = (at(0), at(1), at(2), at(3));
-    client.execute(KDH_UPSERT, &[&id, &b1, &b10, &b100, &b1000])?;
+/// One row per observed price ladder, so history is preserved.
+fn insert_price(
+    client: &mut postgres::Client,
+    e: &dispatch::Event,
+) -> Result<(), postgres::Error> {
+    let p = match interpret::kea(e.body) {
+        Some(p) => p,
+        None => return Ok(()), // not a price message after all
+    };
+    let at = |i: usize| p.ladder.get(i).map(|&v| v as i64);
+    client.execute(
+        PRICES_INSERT,
+        &[
+            &(p.item_id as i64),
+            &(p.category as i64),
+            &(p.listing_id as i64),
+            &at(0),
+            &at(1),
+            &at(2),
+            &at(3),
+        ],
+    )?;
     Ok(())
 }
 
