@@ -22,7 +22,8 @@ TCP port 5555. A raw hexdump shows readable ASCII:
 ```
 
 Player names, guild names, chat text and ISO timestamps all arrive in the
-clear. What *looks* like encryption is two separate things:
+clear. (Names and addresses throughout this repo's examples are replaced with
+placeholders; the byte sequences are otherwise real and self-consistent.) What *looks* like encryption is two separate things:
 
 1. **Obfuscation.** Message type names are three-letter tokens (`kdh`, `ksv`,
    `jrj`). That is Ankama's build obfuscation, not a cipher.
@@ -99,8 +100,8 @@ this rather than silently printing garbage:
 ```
 Any <type.ankama.com/ksv> [ksx.ksw.ksv] <!! schema mismatch on 3 fields>
   7: string "2026-07-29T16:21:53+02:00"  <!schema: declared long>
-  8: string "Player-Redact02"            <!schema: declared bool>
-  9: string "<chat message text>" <!schema: declared packed, reads as text>
+  8: string "Player-Redacted-02"         <!schema: declared bool>
+  9: string "<chat message text>"        <!schema: declared packed, reads as text>
 ```
 
 Two guards produce that. A **wire-type** check (declared `long`, wire is

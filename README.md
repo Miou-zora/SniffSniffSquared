@@ -36,8 +36,8 @@ Any <type.ankama.com/ksv> [ksx.ksw.ksv] <!! schema mismatch on 3 fields>
   2: varint 53207171425
   3: bool true
   7: string "2026-07-29T16:21:53+02:00"   <!schema: declared long>
-  8: string "Player-Redact02"             <!schema: declared bool>
-  9: string "<chat message text>"  <!schema: declared packed, reads as text>
+  8: string "Player-Redacted-02"          <!schema: declared bool>
+  9: string "<chat message text>"         <!schema: declared packed, reads as text>
 ```
 
 The `<!schema ...>` tags are the decoder telling you the recovered schema

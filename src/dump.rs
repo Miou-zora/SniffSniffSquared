@@ -434,7 +434,7 @@ mod tests {
 
     #[test]
     fn packed_declaration_over_text_is_flagged() {
-        // field 1, length-delimited, carrying "chat text here" — the `ksv` case:
+        // field 1, length-delimited, carrying chat text — the `ksv` case:
         // both a packed repeated and a string are Len, so only the bytes tell
         let mut buf = vec![0x0a, 14];
         buf.extend_from_slice(b"chat text here");
