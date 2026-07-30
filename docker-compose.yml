@@ -54,6 +54,51 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Deliberately NOT watched. This is the production build; auto-rebuilding
+    # it on every keystroke is slow and was firing during development. To
+    # refresh it after changes:  docker compose up -d --build web
+
+  # Hot-reload development container. Not started by default:
+  #     docker compose --profile dev watch
+  #
+  # compose watch syncs changed files straight into the running container, so
+  # Next's HMR picks them up with no rebuild. Runs on 3001 to stay clear of the
+  # production `web` service and a host `pnpm dev`, both of which want 3000.
+  #
+  # Fastest option is still `cd web && pnpm dev` on the host — native HMR, no
+  # file syncing. This exists for parity with how it runs deployed.
+  web-dev:
+    build:
+      context: ./web
+      target: dev
+    container_name: dofus_web_dev
+    profiles: ["dev"]
+    ports:
+      - "${WEB_DEV_PORT:-3001}:3000"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    networks:
+      - db
+    depends_on:
+      db:
+        condition: service_healthy
+    develop:
+      watch:
+        # sync = copy the changed file in; HMR reacts. No rebuild.
+        - action: sync
+          path: ./web/src
+          target: /app/src
+        - action: sync
+          path: ./web/design
+          target: /app/design
+        - action: sync
+          path: ./web/public
+          target: /app/public
+        # dependency changes need the image rebuilt, not just a file copy
+        - action: rebuild
+          path: ./web/package.json
+        - action: rebuild
+          path: ./web/pnpm-lock.yaml
 
   # Packet capture, LINUX ONLY.
   #
@@ -91,6 +136,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    develop:
+      watch:
+        - action: rebuild
+          path: ./sniffer/src
+        - action: rebuild
+          path: ./sniffer/Cargo.toml
+        # keymap.json is bind-mounted, so a rotated key needs only a restart
+        - action: restart
+          path: ./sniffer/keymap.json
 
 volumes:
   db_data:

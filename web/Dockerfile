@@ -16,6 +16,17 @@ FROM base AS deps
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
+# ---- dev --------------------------------------------------------------------
+# `next dev` with hot reload, for `docker compose --profile dev watch`.
+# Source is synced in by compose watch rather than baked, so edits apply
+# without a rebuild.
+FROM base AS dev
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+ENV NEXT_TELEMETRY_DISABLED=1
+EXPOSE 3000
+CMD ["pnpm", "dev", "--hostname", "0.0.0.0"]
+
 # ---- build ------------------------------------------------------------------
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules

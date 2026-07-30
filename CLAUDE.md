@@ -63,8 +63,11 @@ our decoded category), so `https://api.dofusdb.fr/items/<id>` resolves names,
 icons and types with no mapping table. Enrichment happens read-side in `web/`;
 the sniffer stays free of network dependencies.
 
-Compose services: `db`, `pgadmin`, `web` start by default; `sniffer` needs
-`--profile capture` and only captures on Linux. Inside compose the database
+Compose services: `db`, `pgadmin`, `web` start by default; `web-dev` needs
+`--profile dev` (hot reload on 3001, via `docker compose watch`); `sniffer`
+needs `--profile capture` and only captures on Linux. `watch` does not reliably
+start a profile-gated service on its own — `up -d` it first. The production
+`web` service is intentionally not watched. Inside compose the database
 host is `db`, not `localhost`. For web development prefer `cd web && pnpm dev`
 on the host over the container, which serves a production build.
 

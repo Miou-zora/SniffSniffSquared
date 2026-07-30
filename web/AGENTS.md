@@ -145,6 +145,18 @@ pnpm format         # apply formatting
 
 `pnpm check` is what CI would run. If it passes, the tree is clean.
 
+Running in Docker instead (from the repo root):
+
+```sh
+docker compose --profile dev up -d web-dev   # start it first
+docker compose --profile dev watch           # then sync changes on save
+```
+
+Port 3001, so it does not collide with the production `web` service or a host
+`pnpm dev`, both of which want 3000. **If `pnpm dev` cannot bind port 3000,
+something else is already on it** — usually the `web` container; stop it with
+`docker compose stop web`.
+
 ## Decided
 
 - **External data source: DofusDB**, called server-side at read time and

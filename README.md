@@ -244,11 +244,27 @@ pnpm dev                       # http://localhost:3000
 pnpm check                     # typecheck + lint + format — run before committing
 ```
 
-Or as a container, which serves a production build:
+Or as a container. Two modes:
 
 ```sh
-docker compose up -d db web    # http://localhost:3000
+# production build, port 3000. Does NOT pick up source changes:
+docker compose up -d db web
+docker compose up -d --build web        # refresh it after changes
+
+# hot reload, port 3001. Syncs changed files into the running container:
+docker compose --profile dev up -d web-dev
+docker compose --profile dev watch
 ```
+
+`docker compose watch` copies changed files straight in and Next's HMR reacts —
+no rebuild. Start the container first: `watch` on its own does not reliably
+start a profile-gated service. Dependency changes (`package.json`,
+`pnpm-lock.yaml`) trigger a rebuild instead, since a file copy cannot install
+anything.
+
+The production `web` service is deliberately not watched — rebuilding a
+production image on every keystroke is slow, and it fired during development
+before that was removed.
 
 Inside compose it reaches Postgres at `db:5432`, not `localhost` — `localhost`
 in a container is the container. `docker-compose.yml` sets `DATABASE_URL`
