@@ -16,25 +16,33 @@ explanation, the verified command sequence, and a "dead ends" list.
   `jqj` — the keys the older notes are written around — do not exist in the
   current build at all; an 861-message capture contains none of them (`ksv`
   survived). Any "key X means Y" mapping is only valid for the build it was
-  observed on. Re-identify with `tools/identify.py` rather than trusting notes.
+  observed on. Re-identify with `sniffer/tools/identify.py` rather than trusting notes.
 - **Messages are keyed by the `Any` type URL** (`type.ankama.com/ksv`), not by
-  `Frame.Payload.id`. The `id` map is not used anywhere in `src/`. Do not
+  `Frame.Payload.id`. The `id` map is not used anywhere in `sniffer/src/`. Do not
   chase it.
-- **Field names are unknown** for the game protocol. `proto/messages.json`
+- **Field names are unknown** for the game protocol. `sniffer/proto/messages.json`
   carries field numbers and C# types only, and it is keyed by the 2026-07-10
   build's obfuscated names — which the current wire no longer uses. Treat
   `vars`/`packs` in the `packets` table as unreliable for that reason; `body`
   is the ground truth.
-- **`proto/messages.json` is frequently mis-joined to the wire** — measured
+- **`sniffer/proto/messages.json` is frequently mis-joined to the wire** — measured
   wrong for 4 of 6 keys observed at the time. Two causes, and key rotation
   (above) is the bigger one: the registry describes a build whose keys the wire
   no longer uses, so a name that still resolves may now describe a completely
-  different message. `src/dump.rs` detects and flags the disagreement rather
+  different message. `sniffer/src/dump.rs` detects and flags the disagreement rather
   than trusting the schema.
 
 ## Layout
 
+Monorepo. Shared infra at the root, one folder per app. **The Rust app must be
+run from `sniffer/`** (it resolves `keymap.json` and `proto/` relative to cwd).
+
 ```
+docker-compose.yml init.sql  shared postgres + schema, at the repo root
+docs/           observations.md — annotated real captures
+RUNBOOK.md      the guide. Start here for anything protocol-related.
+
+sniffer/        the Rust capture app; everything below is relative to it
 src/            Rust sniffer (see module table in RUNBOOK.md part 1)
 proto/          messages.json (schema registry) + generated dofus3.proto
 keymap.json  wire-key overrides — edit when a build rotates keys
@@ -48,9 +56,13 @@ RUNBOOK.md      the guide. Start here for anything protocol-related.
 
 ## Commands
 
+The Rust app lives in `sniffer/` and MUST be run from there — it resolves
+`keymap.json` and `proto/messages.json` relative to the working directory.
+
 ```sh
-cargo build && cargo test                 # 18 tests
-docker compose up -d                      # postgres + pgadmin
+docker compose up -d                      # postgres + pgadmin, from repo root
+cd sniffer
+cargo build && cargo test                 # 19 tests
 ./target/debug/SniffSniffSquared --dev en0 --all "tcp port 5555"
 ./target/debug/SniffSniffSquared --dev en0 --raw "tcp port 5555"
 ./target/debug/SniffSniffSquared --list
@@ -68,7 +80,7 @@ docker exec dofus_db psql -U dofus -d dofus -c '\dt'
   Symptom: no `[db] connected` line and no failure message either.
 - **No sudo needed for capture** if the user is in `access_bpf` (they are).
 - **Frida cannot attach to the shipped client.** Hardened runtime without
-  `get-task-allow`; SIP blocks root too. Use `tools/resign-debug-app.sh`,
+  `get-task-allow`; SIP blocks root too. Use `sniffer/tools/resign-debug-app.sh`,
   which re-signs a *copy*. Never modify the real install.
 - **Frida attachment eventually CRASHES the client.** Not just freezes it: the
   injected thread breaks C++ exception unwinding, so the next managed exception
@@ -92,7 +104,7 @@ docker exec dofus_db psql -U dofus -d dofus -c '\dt'
   the unobfuscated chat-service assembly still matches. Match on signature:
   static, zero-arg, returns `MessageDescriptor`.
 - **`esg` is no longer the wire-id class** in the current build. The `esg` and
-  RVA `0x1AF2A50` references in `tools/frida/README.md` are stale.
+  RVA `0x1AF2A50` references in `sniffer/tools/frida/README.md` are stale.
 - **Long-running background commands: don't pipe through `grep` without
   `--line-buffered`,** or progress output is invisible until exit. And
   `pgrep -f` matches the shell wrapper, so it reports "running" for a process
@@ -105,11 +117,11 @@ docker exec dofus_db psql -U dofus -d dofus -c '\dt'
   doc-comment style (`//!` module header explaining *why*, not *what*).
 - When schema and wire disagree, **prefer the wire and flag it**. A wrong
   schema is worse than no schema — it forces strings through the packed-int
-  path and prints digit soup. See the `MISMATCH` tag in `src/dump.rs`.
+  path and prints digit soup. See the `MISMATCH` tag in `sniffer/src/dump.rs`.
 - New message support goes in two places: an interpreter arm in
-  `src/interpret.rs` (plus `is_known_key`), and optionally a handler in
-  `build_dispatch()` in `src/main.rs` to persist it.
-- Test fixtures in `src/dump.rs` and `src/dispatch.rs` are **real captured
+  `sniffer/src/interpret.rs` (plus `is_known_key`), and optionally a handler in
+  `build_dispatch()` in `sniffer/src/main.rs` to persist it.
+- Test fixtures in `sniffer/src/dump.rs` and `sniffer/src/dispatch.rs` are **real captured
   bytes**. Keep them byte-exact.
 
 ## State of play
@@ -118,9 +130,9 @@ Working: capture, reassembly, adaptive deframing, `Any` unwrapping,
 schema-vs-wire mismatch detection, signed-varint decoding, every message
 archived to `packets`. 94 distinct message keys observed in one session.
 
-**Messages are referred to by semantic name, never by wire key.** `src/messages.rs`
+**Messages are referred to by semantic name, never by wire key.** `sniffer/src/messages.rs`
 owns the `name <-> key` mapping and is the only place a rotated key changes;
-`keymap.json` overrides it at runtime with no rebuild. Adding a message:
+`sniffer/keymap.json` overrides it at runtime with no rebuild. Adding a message:
 name it in `messages::DEFAULTS`, parse it in `interpret.rs` matching on the
 *name*, optionally persist it in `build_dispatch()` via
 `messages::keymap().key("...")`, and pin it with a test over real bytes.
@@ -141,7 +153,7 @@ unidentified keys over 7057 messages are `iwa` 1586, `jri` 1569, `jrj` 1250,
 
 Partly done: runtime schema extraction works and is proven end-to-end —
 `agent.ts` pulls each `.proto` file's serialized `FileDescriptorProto`,
-`tools/parse_descriptors.py` turns it into `proto/messages.runtime.json` keyed
+`sniffer/tools/parse_descriptors.py` turns it into `sniffer/proto/messages.runtime.json` keyed
 by protobuf `FullName` (the same token the wire uses). 51 chat-service messages
 recovered with real field names. **But the scan stops before reaching
 `Ankama.Dofus.Protocol.Game`**, so the messages that matter are still missing;
@@ -155,7 +167,7 @@ trying anything. **Diagnostics must use `send()`, not `console.log`**: agent
 and a hung one look identical.
 
 Done since: the `packets` table now archives every message via
-`Dispatcher::on_any` (`ARCHIVE_PACKETS=0` disables), and `tools/replay.py`
+`Dispatcher::on_any` (`ARCHIVE_PACKETS=0` disables), and `sniffer/tools/replay.py`
 exercises the whole pipeline over loopback so the client is not needed to test.
 
 Not done: nothing consumes `messages.runtime.json`; the `decoded` column stays

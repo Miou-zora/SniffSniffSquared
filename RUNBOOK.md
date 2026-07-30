@@ -45,7 +45,7 @@ TCP stream
 ```
 
 The framing header width was not recoverable from the static dump, so
-`src/framer.rs` tries seven candidate layouts and locks whichever parses three
+`sniffer/src/framer.rs` tries seven candidate layouts and locks whichever parses three
 consecutive valid messages. On this build it always resolves to:
 
 ```
@@ -60,16 +60,16 @@ never uses.
 
 | file | job |
 |---|---|
-| `src/main.rs` | pcap capture, link-layer strip, IPv4/IPv6, flags, DB wiring |
-| `src/flow.rs` | per-direction TCP reassembly (seq-aware, drops retransmits) |
-| `src/framer.rs` | adaptive deframing — the seven candidate layouts |
-| `src/frame.rs` | the `Frame` envelope |
-| `src/pb.rs` | schema-less protobuf wire reader |
-| `src/registry.rs` | loads `proto/messages.json`, resolves a type token to a field list |
-| `src/dump.rs` | pretty-printer, `Any` unwrapping, schema-vs-wire checking |
-| `src/interpret.rs` | per-message meaning, dispatched on semantic name |
-| `src/messages.rs` | semantic name <-> wire key; the one place a rotated key changes |
-| `src/dispatch.rs` | callbacks per message key |
+| `sniffer/src/main.rs` | pcap capture, link-layer strip, IPv4/IPv6, flags, DB wiring |
+| `sniffer/src/flow.rs` | per-direction TCP reassembly (seq-aware, drops retransmits) |
+| `sniffer/src/framer.rs` | adaptive deframing — the seven candidate layouts |
+| `sniffer/src/frame.rs` | the `Frame` envelope |
+| `sniffer/src/pb.rs` | schema-less protobuf wire reader |
+| `sniffer/src/registry.rs` | loads `sniffer/proto/messages.json`, resolves a type token to a field list |
+| `sniffer/src/dump.rs` | pretty-printer, `Any` unwrapping, schema-vs-wire checking |
+| `sniffer/src/interpret.rs` | per-message meaning, dispatched on semantic name |
+| `sniffer/src/messages.rs` | semantic name <-> wire key; the one place a rotated key changes |
+| `sniffer/src/dispatch.rs` | callbacks per message key |
 
 ### What is actually known
 
@@ -87,9 +87,9 @@ part 2 step 5 for what to do when the right-hand column changes.
 > current build — only `ksv` carried over. A mapping is only valid for the
 > build it was observed on, so `docs/observations.md` and the `kdh` interpreter
 > describe a client that no longer exists. Re-identify with
-> `tools/identify.py` — see part 2 step 6.
+> `sniffer/tools/identify.py` — see part 2 step 6.
 
-Field *names* are unknown for the game protocol. `proto/messages.json` gives
+Field *names* are unknown for the game protocol. `sniffer/proto/messages.json` gives
 field **numbers** and **types** only, and describes the 2026-07-10 build.
 Because of the rotation this is worse than "partly wrong": a key that still
 resolves may now name a different message entirely. The `vars` and `packs`
@@ -98,7 +98,7 @@ columns in `packets` are derived from it and unreliable for the same reason —
 
 ### The central problem: mis-joined schemas
 
-`proto/messages.json` is keyed by obfuscated C# class path (`ksx.ksw.ksv`).
+`sniffer/proto/messages.json` is keyed by obfuscated C# class path (`ksx.ksw.ksv`).
 The wire gives an `Any` key (`ksv`). `registry.rs` joins them by matching the
 last dotted segment. **That join is often wrong.** Measured over one capture:
 
@@ -160,7 +160,7 @@ If absent, prefix the capture commands with `sudo`.
 ```sh
 cp .env.example .env
 $EDITOR .env
-docker compose up -d
+docker compose up -d          # from the repo root
 docker exec dofus_db psql -U dofus -d dofus -c '\dt'   # expect: packets, prices
 ```
 
@@ -173,9 +173,13 @@ docker exec dofus_db psql -U dofus -d dofus -c '\dt'   # expect: packets, prices
 
 ### 2. Build
 
+The Rust app lives in `sniffer/`. **Run it from there** — it resolves
+`keymap.json` and `proto/messages.json` relative to the working directory.
+
 ```sh
+cd sniffer
 cargo build
-cargo test          # 18 tests, all should pass
+cargo test          # 19 tests, all should pass
 ```
 
 > **Trap.** `cargo test` does not refresh `target/debug/SniffSniffSquared`.
@@ -184,7 +188,7 @@ cargo test          # 18 tests, all should pass
 
 ### 3. Capture
 
-Start the game, then:
+Start the game, then, **from `sniffer/`**:
 
 ```sh
 # what the decoder understands (has an interpreter)
@@ -242,11 +246,11 @@ you work on a message type later without being in-game when it appears.
 ### 5. When a message stops decoding — repointing a rotated key
 
 The obfuscated wire keys change between client builds, so this is routine
-maintenance rather than a failure. Nothing in `src/` refers to a message by its
-wire key: code says `price_list`, and `src/messages.rs` is the only place that
+maintenance rather than a failure. Nothing in `sniffer/src/` refers to a message by its
+wire key: code says `price_list`, and `sniffer/src/messages.rs` is the only place that
 knows the current key is `kea`.
 
-**To repoint a message, edit `keymap.json`. No rebuild:**
+**To repoint a message, edit `sniffer/keymap.json`. No rebuild:**
 
 ```json
 {
@@ -273,12 +277,12 @@ To find the new key, use step 6.
 
 Since the keys rotate, identification is empirical: watch the archive while
 doing one specific thing in game, and see what appears that was not there
-before. `tools/identify.py` automates the diff.
+before. `sniffer/tools/identify.py` automates the diff.
 
 ```sh
 # terminal 1 — sniffer running with DATABASE_URL, so `packets` fills
 # terminal 2
-tools/identify.py "open HDV and click several item prices"
+sniffer/tools/identify.py "open HDV and click several item prices"
 ```
 
 It samples a quiet baseline, waits for you to perform the action, then reports
@@ -298,15 +302,15 @@ server→client are world state.
 
 To wire a confirmed message in, in this order:
 
-1. **Name it** in `src/messages.rs` `DEFAULTS` — a stable semantic name plus
+1. **Name it** in `sniffer/src/messages.rs` `DEFAULTS` — a stable semantic name plus
    the current wire key, e.g. `("guild_info", "abc")`. Everything downstream
    uses the name, so a future rotation is a one-line change here.
-2. **Parse it** in `src/interpret.rs`: a function returning a typed struct, and
+2. **Parse it** in `sniffer/src/interpret.rs`: a function returning a typed struct, and
    an arm in `interpret()` matching on the *semantic name*. Parse the body
    structurally with `pb::Reader`; do not go through the schema registry, which
    is keyed to an older build.
 3. **Persist it**, optionally, with a handler in `build_dispatch()`
-   (`src/main.rs`), registered via
+   (`sniffer/src/main.rs`), registered via
    `messages::keymap().key("guild_info")` rather than a literal key.
 4. **Pin it** with a test over real captured bytes, as
    `interpret::tests::price_list_decodes_the_ladder` does.
@@ -315,7 +319,7 @@ To wire a confirmed message in, in this order:
 
 ### 7. Testing without the game
 
-`tools/replay.py` pushes captured frames over loopback so the whole pipeline —
+`sniffer/tools/replay.py` pushes captured frames over loopback so the whole pipeline —
 deframing, `Any` unwrapping, interpreters, callbacks, database writes — runs
 without launching the client:
 
@@ -324,14 +328,14 @@ without launching the client:
 DATABASE_URL='postgres://dofus:change_me@localhost:5432/dofus' \
   ./target/debug/SniffSniffSquared --dev lo0 --all "tcp port 5555"
 # terminal 2
-tools/replay.py --count 5          # or --hex <frame bytes> for another message
+sniffer/tools/replay.py --count 5          # or --hex <frame bytes> for another message
 ```
 
 Note `--dev lo0`, not `en0`. Send at least three frames or the deframer never
 locks a layout.
 
 To add another message: register a handler in `build_dispatch()`
-(`src/main.rs`), keyed by the `Any` type key. `e.values` gives you the varints
+(`sniffer/src/main.rs`), keyed by the `Any` type key. `e.values` gives you the varints
 and packed arrays already decoded.
 
 ### 2.5 Recovering real schemas with Frida — **PARTIALLY VERIFIED**
@@ -367,7 +371,7 @@ Rebuild the agent after editing `agent.ts`:
 cd tools/frida && npx frida-compile agent.ts -o agent.js
 ```
 
-`tools/frida/probe.ts` is a fast diagnostic (seconds, not minutes). Run it with
+`sniffer/tools/frida/probe.ts` is a fast diagnostic (seconds, not minutes). Run it with
 `run.py -p <pid> -a probe.js` when the main agent finds nothing — it prints
 each class's interfaces, its descriptor/parser methods, and candidate id
 dictionaries.
@@ -406,7 +410,7 @@ FieldDescriptors (~8 bridge invokes per field, ~184k total, never finished),
 `agent.ts` now pulls each loaded `.proto` file's serialized
 `FileDescriptorProto` via `FileDescriptor.ToProto()` — one blob per *file*,
 carrying real message names, real field names, numbers, types and nesting.
-`tools/parse_descriptors.py` turns those blobs into a registry.
+`sniffer/tools/parse_descriptors.py` turns those blobs into a registry.
 
 Proven end-to-end on the chat service, 51 messages with real names:
 
@@ -470,7 +474,7 @@ launched outside `/Applications/Ankama/Dofus-dofus3` is unreliable, including
 the "let the client settle" test above and an early hook probe that reported
 zero callbacks.
 
-`tools/resign-debug-app.sh` now installs the copy beside the original and
+`sniffer/tools/resign-debug-app.sh` now installs the copy beside the original and
 prints the required `cd`. Always confirm a boot before trusting a scan:
 
 ```sh
@@ -577,7 +581,7 @@ ordinary calling-convention mismatch rather than anything about initialisation.
 
 ### 2. Re-join the registry on real names
 
-`tools/parse_descriptors.py` already emits `proto/messages.runtime.json` keyed
+`sniffer/tools/parse_descriptors.py` already emits `sniffer/proto/messages.runtime.json` keyed
 by protobuf `FullName` — the same token the wire puts in the `Any` URL — so the
 guesswork join from the obfuscated C# class leaf disappears. What is missing is
 only the game-protocol half of the input (item 1).
@@ -590,8 +594,8 @@ already exists: the `<!! schema mismatch on N fields>` count should go to zero.
 
 `dump.cs` is 64 MB so it is gitignored, not committed. Recover it by extracting
 `dump.cs` from the Il2CppDumper zip into
-`reference/il2cpp-dump-20260710/`, then run `tools/gen_proto.py`. Verified: it
-reproduces the committed `proto/messages.json` byte-for-byte, so the static
+`sniffer/reference/il2cpp-dump-20260710/`, then run `sniffer/tools/gen_proto.py`. Verified: it
+reproduces the committed `sniffer/proto/messages.json` byte-for-byte, so the static
 pipeline is reproducible and the committed artifact is trustworthy.
 
 **A fresh dump would not fix the mismatches.** The theory was that
@@ -638,7 +642,7 @@ Three observed in one session, all server→client, **68–80 KB each** — two 
 three orders of magnitude larger than anything else on the wire.
 
 It matched all four prices of a single item during known-plaintext search
-(`tools/findvalue.py 75 326 6660 99999`), alongside the 25-byte `price_list`.
+(`sniffer/tools/findvalue.py 75 326 6660 99999`), alongside the 25-byte `price_list`.
 So it carries price data too, but in bulk. The obvious reading is a catalogue
 sync: the full marketplace, or a whole category, in one payload.
 
@@ -649,7 +653,7 @@ Approach:
 
 ```sh
 # when does it arrive? entering the HDV, changing category, first login?
-tools/identify.py "enter the HDV and switch category"
+sniffer/tools/identify.py "enter the HDV and switch category"
 
 # pull one and look at the top-level shape
 docker exec dofus_db psql -U dofus -d dofus -t -A -c \
@@ -668,7 +672,7 @@ but small, one-directional and frequent enough to be something structural
 (entity state, a tick, an inventory delta).
 
 Being server-only means it is world state rather than a player action, which
-narrows what to correlate against. Use `tools/identify.py` with a single
+narrows what to correlate against. Use `sniffer/tools/identify.py` with a single
 deliberate action and watch whether it spikes; if it fires constantly
 regardless, it is a heartbeat or entity update and the size distribution
 (15 vs 166 bytes) is the thing to explain.
@@ -680,7 +684,7 @@ the session rather than this particular message.
 
 - **`esg` is not the id-map class in this build.** Its fields are
   `dqti: Dictionary<Int32, esg.ActivityData>` and `dqtj: esg.Data`. The `esg` /
-  RVA `0x1AF2A50` references in `tools/frida/README.md` and `gen_proto.py` are
+  RVA `0x1AF2A50` references in `sniffer/tools/frida/README.md` and `gen_proto.py` are
   stale. Less important than it looks: the wire uses `Any` type URLs, not
   `Payload.id`, so the descriptor `FullName` is the join that matters.
 - **There are no embedded `FileDescriptorProto` blobs to scrape.**

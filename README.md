@@ -23,7 +23,9 @@ TCP :5555
 
 ```sh
 cp .env.example .env          # then quote BPF_FILTER — see RUNBOOK.md
-docker compose up -d          # postgres + pgadmin
+docker compose up -d          # postgres + pgadmin, from the repo root
+
+cd sniffer                    # the Rust app; run it from here
 cargo build
 ./target/debug/SniffSniffSquared --list                       # find your interface
 
@@ -63,7 +65,7 @@ change between client builds.** A message that decoded fine last month can go
 silent after a patch: it is still on the wire, just under a new name.
 
 So the code never refers to a message by its wire token. It says `price_list`,
-and [`keymap.json`](keymap.json) in the repo root says what `price_list` is
+and [`sniffer/keymap.json`](sniffer/keymap.json) says what `price_list` is
 called on your build:
 
 ```json
@@ -81,7 +83,7 @@ line shows what is in effect, so you can see immediately whether it took:
 [*] message keymap: 2 entries (2 from keymap.json) — chat_message=ksv price_list=kea
 ```
 
-Entries here override the built-in defaults in `src/messages.rs`; anything you
+Entries here override the built-in defaults in `sniffer/src/messages.rs`; anything you
 leave out falls back to those. Keys starting with `_` are ignored, so you can
 leave yourself notes. Invalid JSON prints a warning and keeps running on the
 defaults rather than killing your capture.
@@ -93,11 +95,11 @@ Two tools, neither of which needs a schema or touches the game client:
 ```sh
 # You can read exact numbers off the screen (item prices, a quantity, an id).
 # Searches every archived message for those values as protobuf varints.
-tools/findvalue.py 75 326 6660 99999
+sniffer/tools/findvalue.py 75 326 6660 99999
 
 # You cannot read exact values, but you can trigger the message on demand.
 # Samples a quiet baseline, then reports what appears while you act.
-tools/identify.py "open HDV and click several item prices"
+sniffer/tools/identify.py "open HDV and click several item prices"
 ```
 
 `findvalue.py` is the stronger of the two when it applies — pass three or more
@@ -115,22 +117,37 @@ Adding a brand-new message takes four steps, documented in
 | **[RUNBOOK.md](RUNBOOK.md)** | **Start here.** How the protocol works, a copy-pasteable command sequence, every trap, and what remains to be done. |
 | [CLAUDE.md](CLAUDE.md) | Condensed orientation: ground truth, layout, conventions, traps. |
 | [docs/observations.md](docs/observations.md) | Annotated real captures with byte-level analysis. |
-| [tools/frida/README.md](tools/frida/README.md) | Runtime schema extraction routes. Partly stale — RUNBOOK.md supersedes it. |
+| [sniffer/tools/frida/README.md](sniffer/tools/frida/README.md) | Runtime schema extraction routes. Partly stale — RUNBOOK.md supersedes it. |
 
 ## Layout
 
+The repo holds one app today and is laid out for a second (a Next.js front end
+over the same database). Shared infrastructure stays at the root; each app owns
+its own folder.
+
 ```
-keymap.json     message name -> wire token. EDIT THIS after a game update
-src/            the sniffer — capture, reassembly, deframing, decoding
-  messages.rs     name <-> token mapping and its built-in defaults
-  interpret.rs    per-message decoding, keyed on semantic name
-proto/          messages.json (schema registry) + generated dofus3.proto
-tools/          findvalue.py / identify.py (identify a message), gen_proto.py,
-                replay.py, resign-debug-app.sh
-tools/frida/    runtime schema extraction from the live client
-docs/           captured-traffic analysis
-reference/      IL2CPP dump + deobfuscation mappings (gen_proto.py inputs)
+docker-compose.yml   postgres + pgadmin, shared by every app
+init.sql             database schema (packets, prices)
+.env.example         connection settings
+docs/                captured-traffic analysis
+RUNBOOK.md           the protocol guide
+
+sniffer/             the Rust capture app — run it from this directory
+  keymap.json          message name -> wire token. EDIT THIS after a game update
+  src/                 capture, reassembly, deframing, decoding
+    messages.rs          name <-> token mapping and its built-in defaults
+    interpret.rs         per-message decoding, keyed on semantic name
+  proto/               messages.json (schema registry) + generated dofus3.proto
+  tools/               findvalue.py / identify.py (identify a message),
+                       gen_proto.py, replay.py, resign-debug-app.sh
+  tools/frida/         runtime schema extraction from the live client
+  reference/           IL2CPP dump + deobfuscation mappings
+
+web/                 (not yet) Next.js front end over the same Postgres
 ```
+
+`sniffer/` writes to Postgres; anything else reads from it. That is the only
+coupling between apps, which keeps them independently runnable.
 
 ## Status
 
