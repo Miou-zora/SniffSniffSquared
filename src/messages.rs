@@ -7,8 +7,8 @@
 //! place that knows the current key is `kea`.
 //!
 //! **When a build rotates the keys, this is the only thing to change.**
-//! Either edit `DEFAULTS` below, or — without rebuilding — drop a
-//! `proto/keymap.json` next to the binary's working directory:
+//! Either edit `DEFAULTS` below, or — without rebuilding — edit `keymap.json`
+//! in the repository root:
 //!
 //! ```json
 //! { "price_list": "abc", "chat_message": "xyz" }
@@ -34,7 +34,7 @@ pub const DEFAULTS: &[(&str, &str)] = &[
 ];
 
 /// Where an override file is looked for, relative to the working directory.
-pub const OVERRIDE_PATH: &str = "proto/keymap.json";
+pub const OVERRIDE_PATH: &str = "keymap.json";
 
 pub struct KeyMap {
     by_key: HashMap<String, String>,  // wire key  -> semantic name
@@ -53,7 +53,7 @@ impl KeyMap {
         KeyMap { by_key, by_name, overridden }
     }
 
-    /// Built-in defaults, with `proto/keymap.json` applied on top if present.
+    /// Built-in defaults, with `keymap.json` applied on top if present.
     pub fn load(path: &str) -> KeyMap {
         let mut pairs: Vec<(String, String)> = DEFAULTS
             .iter()

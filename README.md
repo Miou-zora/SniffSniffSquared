@@ -26,8 +26,21 @@ cp .env.example .env          # then quote BPF_FILTER — see RUNBOOK.md
 docker compose up -d          # postgres + pgadmin
 cargo build
 ./target/debug/SniffSniffSquared --list                       # find your interface
-./target/debug/SniffSniffSquared --dev en0 --all "tcp port 5555"
+
+# capture, decode, and write prices + a full message archive to Postgres
+DATABASE_URL='postgres://dofus:change_me@localhost:5432/dofus' \
+  ./target/debug/SniffSniffSquared --dev en0 --all "tcp port 5555"
 ```
+
+Marketplace prices land in the `prices` table, one row per observation:
+
+```sh
+docker exec dofus_db psql -U dofus -d dofus -c \
+  'SELECT seen_at, item_id, b1, b10, b100, b1000 FROM prices ORDER BY seen_at DESC LIMIT 10;'
+```
+
+Every message is archived to `packets` whether or not it is understood, so a
+message identified later can be decoded from traffic captured today.
 
 Sample decoded output:
 
@@ -43,6 +56,58 @@ Any <type.ankama.com/ksv> [ksx.ksw.ksv] <!! schema mismatch on 3 fields>
 The `<!schema ...>` tags are the decoder telling you the recovered schema
 disagrees with the bytes — see below.
 
+## keymap.json — what to edit when the game updates
+
+Ankama obfuscates message names to three-letter tokens, and **those tokens
+change between client builds.** A message that decoded fine last month can go
+silent after a patch: it is still on the wire, just under a new name.
+
+So the code never refers to a message by its wire token. It says `price_list`,
+and [`keymap.json`](keymap.json) in the repo root says what `price_list` is
+called on your build:
+
+```json
+{
+  "price_list": "kea",
+  "chat_message": "ksv"
+}
+```
+
+**If a message stops being collected after a game update, this file is what you
+fix.** Change the token, restart the sniffer — no rebuild, no code. The startup
+line shows what is in effect, so you can see immediately whether it took:
+
+```
+[*] message keymap: 2 entries (2 from keymap.json) — chat_message=ksv price_list=kea
+```
+
+Entries here override the built-in defaults in `src/messages.rs`; anything you
+leave out falls back to those. Keys starting with `_` are ignored, so you can
+leave yourself notes. Invalid JSON prints a warning and keeps running on the
+defaults rather than killing your capture.
+
+### Finding the new token
+
+Two tools, neither of which needs a schema or touches the game client:
+
+```sh
+# You can read exact numbers off the screen (item prices, a quantity, an id).
+# Searches every archived message for those values as protobuf varints.
+tools/findvalue.py 75 326 6660 99999
+
+# You cannot read exact values, but you can trigger the message on demand.
+# Samples a quiet baseline, then reports what appears while you act.
+tools/identify.py "open HDV and click several item prices"
+```
+
+`findvalue.py` is the stronger of the two when it applies — pass three or more
+numbers from the same screen and the message carrying all of them is the one
+you want. That is exactly how `price_list` was identified: four prices read off
+an item, all four found together in one 25-byte message.
+
+Adding a brand-new message takes four steps, documented in
+[RUNBOOK.md](RUNBOOK.md) part 2 step 6, with `price_list` as the worked example.
+
 ## Documentation
 
 | file | what it covers |
@@ -55,10 +120,13 @@ disagrees with the bytes — see below.
 ## Layout
 
 ```
+keymap.json     message name -> wire token. EDIT THIS after a game update
 src/            the sniffer — capture, reassembly, deframing, decoding
+  messages.rs     name <-> token mapping and its built-in defaults
+  interpret.rs    per-message decoding, keyed on semantic name
 proto/          messages.json (schema registry) + generated dofus3.proto
-tools/          gen_proto.py, identify.py (correlate a message with an
-                in-game action), replay.py, resign-debug-app.sh
+tools/          findvalue.py / identify.py (identify a message), gen_proto.py,
+                replay.py, resign-debug-app.sh
 tools/frida/    runtime schema extraction from the live client
 docs/           captured-traffic analysis
 reference/      IL2CPP dump + deobfuscation mappings (gen_proto.py inputs)
@@ -69,15 +137,16 @@ reference/      IL2CPP dump + deobfuscation mappings (gen_proto.py inputs)
 **Working:** capture, TCP reassembly, adaptive deframing (seven candidate
 layouts, locks on three consecutive valid parses), `Any` unwrapping,
 signed-varint decoding, schema-vs-wire mismatch detection, every message
-archived to `packets`, and marketplace prices (`kea`) decoded into a `prices`
-table with history.
+archived to `packets`, and marketplace prices (`price_list`) decoded into a
+`prices` table with history.
 
 **Known limits:** the obfuscated message keys rotate between client builds, so
 the committed schema registry (built from a 2026-07-10 dump) does not describe
 the current wire — a key that still resolves may name a different message
 entirely. The decoder detects and flags the disagreement rather than printing
 garbage. Message types are therefore identified empirically, by correlating
-traffic with in-game actions (`tools/identify.py`). Runtime schema recovery via
+traffic with in-game actions or with values read off the screen — see
+[keymap.json](#keymapjson--what-to-edit-when-the-game-updates) above. Runtime schema recovery via
 Frida is implemented and proven on the chat service, but is blocked and unsafe
 against a live client — see RUNBOOK part 3.
 

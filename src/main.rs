@@ -137,7 +137,7 @@ const PACKETS_INSERT: &str =
 fn build_dispatch() -> Dispatcher {
     let mut d = Dispatcher::new();
     // Registered by semantic name, so a build that rotates the wire key needs
-    // only messages::DEFAULTS or proto/keymap.json updated — not this code.
+    // only messages::DEFAULTS or keymap.json updated — not this code.
     let price_key = match messages::keymap().key("price_list") {
         Some(k) => k.to_string(),
         None => {

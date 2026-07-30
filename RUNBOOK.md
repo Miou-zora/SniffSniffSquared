@@ -246,7 +246,7 @@ maintenance rather than a failure. Nothing in `src/` refers to a message by its
 wire key: code says `price_list`, and `src/messages.rs` is the only place that
 knows the current key is `kea`.
 
-**To repoint a message, edit `proto/keymap.json`. No rebuild:**
+**To repoint a message, edit `keymap.json`. No rebuild:**
 
 ```json
 {
@@ -259,7 +259,7 @@ Change the value to the new key, restart the sniffer, and confirm the startup
 line:
 
 ```
-[*] message keymap: 3 entries (2 from proto/keymap.json) — chat_message=ksv price_list=kea ...
+[*] message keymap: 3 entries (2 from keymap.json) — chat_message=ksv price_list=kea ...
 ```
 
 Entries in that file override the built-in `messages::DEFAULTS`; anything

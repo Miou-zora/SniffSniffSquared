@@ -37,7 +37,7 @@ explanation, the verified command sequence, and a "dead ends" list.
 ```
 src/            Rust sniffer (see module table in RUNBOOK.md part 1)
 proto/          messages.json (schema registry) + generated dofus3.proto
-proto/keymap.json  wire-key overrides — edit when a build rotates keys
+keymap.json  wire-key overrides — edit when a build rotates keys
 tools/          gen_proto.py, identify.py, findvalue.py,
                 parse_descriptors.py, replay.py, resign-debug-app.sh
 tools/frida/    runtime schema extraction: agent.ts, probe.ts, run.py
@@ -120,7 +120,7 @@ archived to `packets`. 94 distinct message keys observed in one session.
 
 **Messages are referred to by semantic name, never by wire key.** `src/messages.rs`
 owns the `name <-> key` mapping and is the only place a rotated key changes;
-`proto/keymap.json` overrides it at runtime with no rebuild. Adding a message:
+`keymap.json` overrides it at runtime with no rebuild. Adding a message:
 name it in `messages::DEFAULTS`, parse it in `interpret.rs` matching on the
 *name*, optionally persist it in `build_dispatch()` via
 `messages::keymap().key("...")`, and pin it with a test over real bytes.
