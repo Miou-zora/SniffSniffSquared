@@ -1,0 +1,11 @@
+# build output — rebuilt inside the image
+target/
+
+# 70 MB of IL2CPP dump; only gen_proto.py needs it, and that runs on the host
+reference/
+
+# host-side tooling, not part of the runtime image
+tools/
+
+# already-generated artifacts that would be stale in an image
+build/

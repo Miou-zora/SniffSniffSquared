@@ -79,6 +79,11 @@ docker exec dofus_db psql -U dofus -d dofus -c '\dt'
   later) silently never loads and the sniffer runs with no DB and no error.
   Symptom: no `[db] connected` line and no failure message either.
 - **No sudo needed for capture** if the user is in `access_bpf` (they are).
+- **The compose `sniffer` service cannot capture on macOS.** Docker's "host"
+  network is the Linux VM, not the Mac: the container sees `eth0`/`docker0`,
+  never `en0`, and silently captures nothing. It is behind a `capture` profile
+  so it does not start by default. On macOS run the binary natively. The image
+  itself is fine — it builds, loads keymap + registry, and reaches Postgres.
 - **Frida cannot attach to the shipped client.** Hardened runtime without
   `get-task-allow`; SIP blocks root too. Use `sniffer/tools/resign-debug-app.sh`,
   which re-signs a *copy*. Never modify the real install.

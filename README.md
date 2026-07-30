@@ -44,6 +44,23 @@ docker exec dofus_db psql -U dofus -d dofus -c \
 Every message is archived to `packets` whether or not it is understood, so a
 message identified later can be decoded from traffic captured today.
 
+### Running the sniffer in Docker — Linux only
+
+```sh
+docker compose --profile capture up -d sniffer   # DOFUS_DEV must be eth0, ens18, ...
+docker compose logs -f sniffer
+```
+
+It is behind a `capture` profile so it never starts by accident.
+
+**This cannot work on macOS or Windows.** Docker runs containers inside a Linux
+VM, so `network_mode: host` attaches to the VM's network, not your machine's —
+the container sees `eth0` and `docker0`, never `en0`, and captures nothing while
+looking perfectly healthy. On those platforms run the binary natively, as in the
+quick start above. Everything else about the image is fine there: it builds, the
+schema and keymap load, and it connects to Postgres — only the packets are
+missing.
+
 Sample decoded output:
 
 ```

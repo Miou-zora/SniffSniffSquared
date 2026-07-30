@@ -34,6 +34,43 @@ services:
     depends_on:
       - db
 
+  # Packet capture, LINUX ONLY.
+  #
+  # Not started by default — bring it up with:
+  #     docker compose --profile capture up -d sniffer
+  #
+  # It needs the real network interface, so it runs with network_mode: host and
+  # CAP_NET_RAW. On macOS and Windows that host is Docker's Linux VM, not your
+  # machine: the container sees a virtual network with no game traffic on it and
+  # will sit there capturing nothing. Run the binary natively there instead:
+  #     cd sniffer && cargo build && ./target/debug/SniffSniffSquared --dev en0 ...
+  #
+  # DOFUS_DEV must name an interface that exists inside the container (eth0,
+  # ens18, ...), not one from `ifconfig` on a Mac.
+  sniffer:
+    build: ./sniffer
+    container_name: dofus_sniffer
+    profiles: ["capture"]
+    restart: unless-stopped
+    # host networking so the capture sees real traffic; it also puts postgres
+    # on localhost, which is why this does not join the `db` network
+    network_mode: host
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:${POSTGRES_PORT:-5432}/${POSTGRES_DB}
+      DOFUS_DEV: ${DOFUS_DEV:-eth0}
+      ARCHIVE_PACKETS: ${ARCHIVE_PACKETS:-1}
+    volumes:
+      # editable without a rebuild — this is the file to change when a game
+      # update rotates the message keys (see README)
+      - ./sniffer/keymap.json:/app/keymap.json:ro
+    command: ["--all", "${BPF_FILTER:-tcp port 5555}"]
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   db_data:
 

@@ -164,12 +164,13 @@ docker compose up -d          # from the repo root
 docker exec dofus_db psql -U dofus -d dofus -c '\dt'   # expect: packets, prices
 ```
 
-> **Trap — quote `BPF_FILTER`.** `.env.example` ships
-> `BPF_FILTER=tcp port 5555` unquoted. `dotenvy` stops parsing at the space,
-> so every variable *after* that line — including `DATABASE_URL` — is silently
-> never loaded, and the sniffer runs with no database and no error message.
-> Write `BPF_FILTER="tcp port 5555"`. `BPF_FILTER` is read from argv anyway,
-> never from the environment.
+> **Trap — keep `BPF_FILTER` quoted.** `.env.example` now ships
+> `BPF_FILTER="tcp port 5555"` with quotes, and it must stay that way. Unquoted,
+> `dotenvy` stops parsing at the space, so every variable declared *after* it —
+> including `DATABASE_URL` — is silently never loaded, and the sniffer runs with
+> no database and no error message. Symptom: no `[db] connected` line and no
+> failure either. Compose strips the quotes correctly, so one form works for
+> both. If you copied `.env` before this was fixed, add the quotes.
 
 ### 2. Build
 
@@ -187,6 +188,13 @@ cargo test          # 19 tests, all should pass
 > and drawing conclusions from it.
 
 ### 3. Capture
+
+> **Docker note.** `docker compose --profile capture up -d sniffer` runs the
+> same binary in a container, but **only captures on Linux**. Docker on macOS
+> and Windows runs containers in a Linux VM, so host networking attaches to the
+> VM — the container sees `eth0`/`docker0`, never `en0`, and captures nothing
+> while looking healthy. Verified: `--list` inside the container returns only
+> virtual interfaces. Use the native commands below on those platforms.
 
 Start the game, then, **from `sniffer/`**:
 
