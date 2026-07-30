@@ -37,6 +37,18 @@ function mightBeMessage(klass: Il2Cpp.Class): boolean {
 }
 
 /**
+ * Classes whose descriptor getter deadlocks when invoked from an injected
+ * thread: the static constructor waits on something that never completes here
+ * (the process goes idle, not busy). There is no way to time out an IL2CPP
+ * invoke, so the only option is to not make the call.
+ *
+ * Add any class the heartbeat names as "INVOKING <x>" immediately before a
+ * hang. Skipping one costs nothing when another class in the same .proto file
+ * still resolves -- we only need one descriptor per file.
+ */
+const POISON = new Set<string>(["hdx"]);
+
+/**
  * The generated accessors are obfuscated in the game protocol assembly
  * (get_Descriptor -> `coma`, get_Parser -> `colz`), so they cannot be found by
  * name — doing so silently yields ZERO messages while appearing to work.
@@ -119,44 +131,93 @@ Il2Cpp.perform(() => {
     console.log("[agent] WARNING: MessageExtensions.ToByteArray not found; cannot serialize descriptors");
   }
 
-  for (const asm of Il2Cpp.domain.assemblies) {
-    const t0 = Date.now();
-    let here = 0;
-    for (const klass of asm.image.classes) {
-      scanned++;
-      if (!mightBeMessage(klass)) continue;
-      const gd = descriptorGetter(klass);
-      if (!gd) continue;
-      try {
-        const desc = gd.invoke() as Il2Cpp.Object;
-        const full = (desc.method("get_FullName").invoke() as Il2Cpp.String).content;
-        if (!full) continue;
+    // ---- seed from classes known to be on the wire -------------------------
+  //
+  // A blind class scan deadlocks almost immediately: invoking the descriptor
+  // getter on the first classes of Ankama.Dofus.Protocol.Game (hdx, then hdy,
+  // ...) never returns, and the process goes idle rather than busy. Skipping
+  // them one at a time does not converge -- they all trip the same shared
+  // static initialisation.
+  //
+  // Directly resolving a class that is actually used on the wire works fine
+  // (verified with `ksv`). So seed from those, take each one's FileDescriptor,
+  // and walk the dependency graph. One serialized FileDescriptorProto covers
+  // every message in that .proto file, so a handful of seeds reaches the whole
+  // protocol without touching the poisoned classes.
+  const SEEDS = [
+    "ksv", "jrj", "jri", "iwa", "kmw", "knh", "jpp", "kqh", "kdh", "kag", "jqj",
+  ];
+
+  const pending: Il2Cpp.Object[] = [];
+
+  function findClassAnywhere(name: string): Il2Cpp.Class | null {
+    for (const a of Il2Cpp.domain.assemblies) {
+      const k = a.image.tryClass(name);
+      if (k) return k;
+    }
+    return null;
+  }
+
+  function emitFile(file: Il2Cpp.Object): void {
+    let fname = "";
+    try {
+      fname = (file.method("get_Name").invoke() as Il2Cpp.String).content || "";
+    } catch (e) {
+      return;
+    }
+    if (!fname || seenFiles[fname]) return;
+    seenFiles[fname] = true;
+    try {
+      const proto = file.method("ToProto").invoke() as Il2Cpp.Object;
+      const hex = serialize(proto);
+      if (hex) {
+        send({ event: "file", name: fname, hex });
+        filesOut++;
+      }
+    } catch (e) {
+      send({ event: "hb", asm: "serialize-failed", scanned, messages, files: filesOut, at: fname });
+    }
+    // follow imports so one seed can reach a whole package
+    try {
+      const deps = file.method("get_Dependencies").invoke() as Il2Cpp.Object;
+      const n = deps.method("get_Count").invoke() as number;
+      for (let i = 0; i < n; i++) {
+        pending.push(deps.method("get_Item").invoke(i) as Il2Cpp.Object);
+      }
+    } catch (e) {
+      /* no Dependencies accessor on this protobuf version */
+    }
+  }
+
+  for (const name of SEEDS) {
+    scanned++;
+    const klass = findClassAnywhere(name);
+    if (!klass) {
+      send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " (absent)" });
+      continue;
+    }
+    const gd = descriptorGetter(klass);
+    if (!gd) {
+      send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " (no descriptor)" });
+      continue;
+    }
+    send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, invoking: name });
+    try {
+      const desc = gd.invoke() as Il2Cpp.Object;
+      const full = (desc.method("get_FullName").invoke() as Il2Cpp.String).content;
+      if (full) {
         classMap[full] = klass.type.name;
         messages++;
-        here++;
-
-        // one serialization per .proto file covers every message inside it
-        const file = desc.method("get_File").invoke() as Il2Cpp.Object;
-        const fname = (file.method("get_Name").invoke() as Il2Cpp.String).content || "";
-        if (fname && !seenFiles[fname]) {
-          seenFiles[fname] = true;
-          const proto = file.method("ToProto").invoke() as Il2Cpp.Object;
-          const hex = serialize(proto);
-          if (hex) {
-            // stream it: a kill mid-scan still leaves everything sent so far
-            send({ event: "file", name: fname, hex });
-            filesOut++;
-          } else {
-            console.log(`[agent] could not serialize ${fname}`);
-          }
-        }
-      } catch (e) {
-        /* not a descriptor-bearing message */
       }
+      emitFile(desc.method("get_File").invoke() as Il2Cpp.Object);
+    } catch (e) {
+      send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " (threw)" });
     }
-    if (here > 0) {
-      console.log(`[agent] ${asm.name}: messages=${here} (${Date.now() - t0}ms)`);
-    }
+  }
+
+  // transitive imports
+  while (pending.length > 0) {
+    emitFile(pending.pop() as Il2Cpp.Object);
   }
 
   // class map in batches, so one oversized message can't stall the transport

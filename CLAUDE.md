@@ -99,8 +99,14 @@ Partly done: runtime schema extraction works and is proven end-to-end —
 by protobuf `FullName` (the same token the wire uses). 51 chat-service messages
 recovered with real field names. **But the scan stops before reaching
 `Ankama.Dofus.Protocol.Game`**, so the messages that matter are still missing;
-nothing consumes `messages.runtime.json` yet. Five variables already ruled out
-— see the table in `RUNBOOK.md` part 3 before trying anything.
+nothing consumes `messages.runtime.json` yet.
+
+The blocker is diagnosed: invoking the descriptor getter on any
+`Ankama.Dofus.Protocol.Game` class deadlocks (process goes idle). Nine
+approaches already ruled out — read the table in `RUNBOOK.md` part 3 before
+trying anything. **Diagnostics must use `send()`, not `console.log`**: agent
+`console.log` is queued until the script yields, which makes a working scan
+and a hung one look identical.
 
 Done since: the `packets` table now archives every message via
 `Dispatcher::on_any` (`ARCHIVE_PACKETS=0` disables), and `tools/replay.py`

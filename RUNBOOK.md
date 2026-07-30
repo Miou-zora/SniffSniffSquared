@@ -318,35 +318,58 @@ channel.ChannelMessage
   5  author              user.User
 ```
 
-**The blocker.** The scan reliably emits the four chat-service descriptors
-(`channel`, `friend_invite`, `transport`, `user`), then stops before reaching
-`Ankama.Dofus.Protocol.Game` — the assembly that matters. The process sits at
-idle CPU, so it is blocked, not grinding. Ruled out by testing one variable at
-a time:
+**The blocker, now diagnosed.** Invoking the descriptor getter on *any*
+`Ankama.Dofus.Protocol.Game` class deadlocks. The process drops to idle CPU
+and never returns.
+
+First, a measurement trap that invalidated every earlier reading:
+**`console.log` output is queued during synchronous agent execution and only
+delivered once the script yields; `send()` is delivered live.** A working scan
+and a hung one looked identical because all the progress logging used
+`console.log`. Any diagnostic here must use `send()`.
+
+With `send()` heartbeats the picture is exact:
+
+```
+[hb] start                        scanned=0   msgs=0  files=0
+[hb] Ankama.Dofus.Protocol.Game   scanned=7   msgs=0  files=0  INVOKING hdx
+   <nothing further, CPU idle>
+```
+
+It blocks on class 7 (`hdx`). Adding `hdx` to a skip list moves the block to
+`hdy` — so it is the shared static initialisation behind these classes, not one
+bad class, and skipping will not converge.
+
+Ruled out, each tested on its own:
 
 | tried | result |
 |---|---|
-| deferred via `setTimeout` (free thread) | stalls at the same point |
-| deferred with `Il2Cpp.perform(..., "main")` | stalls at the same point |
-| binary `send(payload, data)` | stalls at the same point |
-| hex payload, O(n) encoder | stalls at the same point |
-| synchronous at top level | stalls at the same point |
+| deferred via `setTimeout` (free thread) | blocks |
+| deferred with `Il2Cpp.perform(..., "main")` | blocks |
+| binary `send(payload, data)` | blocks |
+| hex payload, O(n) encoder | blocks |
+| synchronous at top level | blocks |
+| skip the offending class | blocks on the next one |
+| seed directly from `ksv`, no class scan | blocks |
+| second attach to the same process | blocks |
+| let the client sit idle for minutes first | blocks |
 
-So it is not thread affinity, not payload encoding, and not the `load()`
-transport timeout (that is now tolerated — the agent keeps running and
-`run.py` keeps listening).
+**The one confirmed success, and the lead.** `tools/frida/probe.ts` *did*
+invoke `ksv`'s descriptor getter and read back its `FullName`. That happened on
+a process where the older `readFields`-based agent had already run **to
+completion** over `Core` and `Google.Protobuf` first. No fresh client has
+reproduced it since. Something about that preceding run left the runtime in a
+state where game-protocol static init could complete.
 
-One unexplained observation worth starting from: `[agent] Core: messages=50`
-is only delivered *after* the host interrupts, which means agent messages are
-being queued rather than the agent being entirely wedged. The scan may be
-progressing into the 5644-class game assembly with its output stuck behind a
-full queue. Next step is to test that directly — have the agent emit a
-heartbeat every N classes and see whether those also arrive only on interrupt.
-If so, this is a message-queue backpressure problem, not a hang, and the fix
-is to yield periodically rather than to change threading.
+Next experiment: reproduce those preconditions deliberately — attach, walk
+`Core`/`Google.Protobuf` to completion, and only then touch a game-protocol
+class, in the same session. If that works, the fix is an ordering requirement,
+not a threading one.
 
-Failing that, scope the scan to `Ankama.Dofus.Protocol.Game` alone and skip
-the assemblies already known to be empty.
+Worth trying alongside: force class initialisation through a path that does not
+run the C# static constructor on our thread — e.g. resolve the descriptor from
+the static backing field (`<Proto>k__BackingField` and friends exist on
+`MessageDescriptor`) rather than calling the getter.
 
 ### 2. Re-join the registry on real names
 

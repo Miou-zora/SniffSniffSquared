@@ -1,5 +1,5 @@
 📦
-142643 /agent.js
+143366 /agent.js
 ✄
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -3353,21 +3353,6 @@ var require_agent = __commonJS({
     init_node_globals();
     Object.defineProperty(exports, "__esModule", { value: true });
     init_dist();
-    var prefilterWorks = true;
-    function mightBeMessage(klass) {
-      if (!prefilterWorks)
-        return true;
-      try {
-        for (const i of klass.interfaces) {
-          if (i.name.indexOf("IMessage") >= 0 || i.name === "IBufferMessage")
-            return true;
-        }
-        return false;
-      } catch (_) {
-        prefilterWorks = false;
-        return true;
-      }
-    }
     function descriptorGetter(klass) {
       const byName = klass.tryMethod("get_Descriptor");
       if (byName && byName.isStatic)
@@ -3426,43 +3411,84 @@ var require_agent = __commonJS({
       if (!findToByteArray()) {
         console.log("[agent] WARNING: MessageExtensions.ToByteArray not found; cannot serialize descriptors");
       }
-      for (const asm of Il2Cpp.domain.assemblies) {
-        const t0 = Date.now();
-        let here = 0;
-        for (const klass of asm.image.classes) {
-          scanned++;
-          if (!mightBeMessage(klass))
-            continue;
-          const gd = descriptorGetter(klass);
-          if (!gd)
-            continue;
-          try {
-            const desc = gd.invoke();
-            const full = desc.method("get_FullName").invoke().content;
-            if (!full)
-              continue;
+      const SEEDS = [
+        "ksv",
+        "jrj",
+        "jri",
+        "iwa",
+        "kmw",
+        "knh",
+        "jpp",
+        "kqh",
+        "kdh",
+        "kag",
+        "jqj"
+      ];
+      const pending = [];
+      function findClassAnywhere(name) {
+        for (const a of Il2Cpp.domain.assemblies) {
+          const k = a.image.tryClass(name);
+          if (k)
+            return k;
+        }
+        return null;
+      }
+      function emitFile(file) {
+        let fname = "";
+        try {
+          fname = file.method("get_Name").invoke().content || "";
+        } catch (e) {
+          return;
+        }
+        if (!fname || seenFiles[fname])
+          return;
+        seenFiles[fname] = true;
+        try {
+          const proto = file.method("ToProto").invoke();
+          const hex = serialize(proto);
+          if (hex) {
+            send({ event: "file", name: fname, hex });
+            filesOut++;
+          }
+        } catch (e) {
+          send({ event: "hb", asm: "serialize-failed", scanned, messages, files: filesOut, at: fname });
+        }
+        try {
+          const deps = file.method("get_Dependencies").invoke();
+          const n = deps.method("get_Count").invoke();
+          for (let i = 0; i < n; i++) {
+            pending.push(deps.method("get_Item").invoke(i));
+          }
+        } catch (e) {
+        }
+      }
+      for (const name of SEEDS) {
+        scanned++;
+        const klass = findClassAnywhere(name);
+        if (!klass) {
+          send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " (absent)" });
+          continue;
+        }
+        const gd = descriptorGetter(klass);
+        if (!gd) {
+          send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " (no descriptor)" });
+          continue;
+        }
+        send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, invoking: name });
+        try {
+          const desc = gd.invoke();
+          const full = desc.method("get_FullName").invoke().content;
+          if (full) {
             classMap[full] = klass.type.name;
             messages++;
-            here++;
-            const file = desc.method("get_File").invoke();
-            const fname = file.method("get_Name").invoke().content || "";
-            if (fname && !seenFiles[fname]) {
-              seenFiles[fname] = true;
-              const proto = file.method("ToProto").invoke();
-              const hex = serialize(proto);
-              if (hex) {
-                send({ event: "file", name: fname, hex });
-                filesOut++;
-              } else {
-                console.log(`[agent] could not serialize ${fname}`);
-              }
-            }
-          } catch (e) {
           }
+          emitFile(desc.method("get_File").invoke());
+        } catch (e) {
+          send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " (threw)" });
         }
-        if (here > 0) {
-          console.log(`[agent] ${asm.name}: messages=${here} (${Date.now() - t0}ms)`);
-        }
+      }
+      while (pending.length > 0) {
+        emitFile(pending.pop());
       }
       const entries = Object.keys(classMap);
       for (let i = 0; i < entries.length; i += 250) {

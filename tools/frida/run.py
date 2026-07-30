@@ -65,6 +65,12 @@ def main():
             if ev == "file":
                 acc["files"][payload["name"]] = payload["hex"]
                 print("[file] %s (%d bytes)" % (payload["name"], len(payload["hex"]) // 2), flush=True)
+            elif ev == "hb":
+                where = payload.get("invoking") or payload.get("skipped") or payload.get("at") or ""
+                print("[hb] %-34s scanned=%-6d msgs=%-4d files=%-3d %s%s"
+                      % (payload.get("asm"), payload.get("scanned", 0),
+                         payload.get("messages", 0), payload.get("files", 0),
+                         ("INVOKING " if payload.get("invoking") else "SKIP " if payload.get("skipped") else ""), where), flush=True)
             elif ev == "classmap":
                 acc["classMap"].update(payload["chunk"])
             elif ev == "done":
