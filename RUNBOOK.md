@@ -431,8 +431,37 @@ The crash is at process level, not a C# exception — which is why the handler
 never reported anything to catch. `libc++abi: terminate_handler unexpectedly
 returned` appears in the player log.
 
-Next, and this is now clearly the right direction: **stop calling the getter
-altogether.** Every failure comes from forcing the static constructor. Read the
+**Attaching to a live, logged-in client crashes it. Do not do this.**
+
+Harvesting from a logged-in session worked mechanically — but the client
+segfaulted a few minutes later, mid-play. The crash report names the cause:
+
+```
+External Modification Warnings:  Thread creation by external task.
+  task_for_pid: 4   thread_create: 1
+
+Thread 0 Crashed:: com.apple.main-thread
+0   ???                 0x360b050d4  ???          <- PC not in any mapped region
+1   libunwind.dylib     _Unwind_RaiseException + 408
+2   libc++abi.dylib     __cxa_throw + 84
+3   GameAssembly.dylib  ...
+```
+
+IL2CPP threw a managed exception, the C++ unwinder walked the stack and jumped
+to garbage. Frida's injected thread and patched frames break unwind info, and
+IL2CPP throws routinely during normal play, so this is a matter of when rather
+than if. The instrumentation is not safe to leave attached to a session anyone
+cares about.
+
+Practical consequence: the heap harvest only sees descriptors the client has
+already built, which needs a logged-in session, and instrumenting a logged-in
+session destabilises it. Those two requirements are in direct tension, which is
+what makes this route a poor trade rather than merely difficult.
+
+If it is picked up again, the least-bad shape is: log in, harvest immediately,
+accept that the client will likely die, and treat each session as one shot.
+
+Next, if continuing anyway: **stop calling the getter altogether.** Every failure comes from forcing the static constructor. Read the
 descriptor out of the already-initialised object graph instead —
 `MessageDescriptor` exposes `<Proto>k__BackingField`, `<Fields>k__BackingField`
 and friends as plain fields (confirmed by probe). Reading a field runs no user

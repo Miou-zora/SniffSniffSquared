@@ -59,9 +59,11 @@ docker exec dofus_db psql -U dofus -d dofus -c '\dt'
 - **Frida cannot attach to the shipped client.** Hardened runtime without
   `get-task-allow`; SIP blocks root too. Use `tools/resign-debug-app.sh`,
   which re-signs a *copy*. Never modify the real install.
-- **The Frida scan freezes the client** at 100%+ CPU on its own threads for
-  the entire run, and it will not quit. Only run it against the re-signed
-  copy, never a client being played. Abort = kill `run.py`, then the game pid.
+- **Frida attachment eventually CRASHES the client.** Not just freezes it: the
+  injected thread breaks C++ exception unwinding, so the next managed exception
+  IL2CPP throws segfaults the process (`_Unwind_RaiseException` -> bad PC).
+  Confirmed on a logged-in session that died mid-play. Never attach to a client
+  anyone is using. Abort = kill `run.py`, then the game pid.
 - **The re-signed copy needs Zaap's launch arguments**, not just the right
   directory: `--port`, `--hash` (per-launch session uuid), `--instanceId`,
   `--connectionPort`. Grab them from a live launcher-started client (see

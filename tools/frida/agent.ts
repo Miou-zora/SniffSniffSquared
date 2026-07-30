@@ -122,10 +122,7 @@ function serialize(msg: Il2Cpp.Object): string | null {
 // and goes on pumping messages instead of tearing the session down.
 Il2Cpp.perform(() => {
   const seenFiles: Record<string, boolean> = {};
-  const classMap: Record<string, string> = {};
-  let messages = 0, filesOut = 0, scanned = 0;
-
-  const SEEDS = ["ksv", "jrj", "jri", "iwa", "kmw", "knh", "jpp", "kqh", "kdh", "kag", "jqj"];
+  let filesOut = 0;
 
   function findClassAnywhere(name: string): Il2Cpp.Class | null {
     for (const a of Il2Cpp.domain.assemblies) {
@@ -134,8 +131,6 @@ Il2Cpp.perform(() => {
     }
     return null;
   }
-
-  const pending: Il2Cpp.Object[] = [];
 
   function emitFile(file: Il2Cpp.Object): void {
     let fname = "";
@@ -148,82 +143,62 @@ Il2Cpp.perform(() => {
       const proto = file.method("ToProto").invoke() as Il2Cpp.Object;
       const hex = serialize(proto);
       if (hex) { send({ event: "file", name: fname, hex }); filesOut++; }
-    } catch (e) { /* ignore */ }
-    try {
-      const deps = file.method("get_Dependencies").invoke() as Il2Cpp.Object;
-      const n = deps.method("get_Count").invoke() as number;
-      for (let i = 0; i < n; i++) pending.push(deps.method("get_Item").invoke(i) as Il2Cpp.Object);
-    } catch (e) { /* none */ }
+      else send({ event: "hb", asm: "no-bytes", scanned: 0, messages: 0, files: filesOut, at: fname });
+    } catch (e) {
+      send({ event: "hb", asm: "toproto-threw", scanned: 0, messages: 0, files: filesOut, at: fname + " " + String(e) });
+    }
   }
 
-  /** The extraction itself. Must run on a game thread, not an injected one. */
-  function extract(): void {
-    for (const name of SEEDS) {
-      scanned++;
-      const klass = findClassAnywhere(name);
-      if (!klass) continue;
-      const gd = descriptorGetter(klass);
-      if (!gd) continue;
-      send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, invoking: name });
-      try {
-        const desc = gd.invoke() as Il2Cpp.Object;
-        const full = (desc.method("get_FullName").invoke() as Il2Cpp.String).content;
-        if (full) { classMap[full] = klass.type.name; messages++; }
-        emitFile(desc.method("get_File").invoke() as Il2Cpp.Object);
-      } catch (e) {
-        // surface the actual exception: it names the missing precondition
-        send({ event: "hb", asm: "seed", scanned, messages, files: filesOut,
-               skipped: name + " threw: " + String(e) });
-      }
-    }
-    while (pending.length > 0) emitFile(pending.pop() as Il2Cpp.Object);
-
-    const entries = Object.keys(classMap);
-    for (let i = 0; i < entries.length; i += 250) {
-      const chunk: Record<string, string> = {};
-      for (const k of entries.slice(i, i + 250)) chunk[k] = classMap[k];
-      send({ event: "classmap", chunk });
-    }
-    send({ event: "done", messages, files: filesOut, classes: scanned });
-  }
-
-  // ---- run it on the game's own thread ------------------------------------
+  // ---- harvest descriptors the game has ALREADY built ----------------------
   //
-  // Invoking a game-protocol descriptor getter from the injected thread
-  // deadlocks: the static constructor and the Unity main thread contend for
-  // the IL2CPP class-init lock and neither wins. Il2Cpp.perform(..., "main")
-  // does not help -- it attaches our thread to the main context rather than
-  // running our code on the game's thread.
+  // Every previous approach forced the descriptor into existence by invoking a
+  // static getter, which deadlocks, throws or hard-crashes the process
+  // depending on context (RUNBOOK part 3). Nothing here calls a static getter
+  // or touches a game-protocol class: Il2Cpp.gc.choose walks the heap for
+  // FileDescriptor objects the client constructed on its own, and ToProto() is
+  // an instance call on an already-initialised object.
   //
-  // So piggyback: hook a per-frame method and do the work inside the hook,
-  // where we ARE the game thread and the lock is already ours. The client
-  // freezes for the duration, which is expected.
-  let ran = false;
-  // EventSystem.Update is confirmed running at the title screen (it appears in
-  // Player.log). The game's own classes are not instantiated that early.
-  const HOOKS = ["UnityEngine.EventSystems.EventSystem",
-                 "UnityEngine.InputSystem.UI.InputSystemUIInputModule",
-                 "us", "wq", "wu", "wv", "wy", "xd", "xf",
-                 "Core.Rendering.MapRenderer"];
-  let attached = 0;
-  for (const cname of HOOKS) {
-    const k = findClassAnywhere(cname);
-    if (!k) continue;
-    for (const mname of ["Update", "LateUpdate", "Process", "Tick"]) {
-      const m = k.tryMethod(mname);
-      if (!m || m.parameterCount !== 0 || m.virtualAddress.isNull()) continue;
+  // The trade-off is coverage: only descriptors the client has actually used
+  // so far are present. Log in and exercise the game, then run this.
+  const fdClass = findClassAnywhere("Google.Protobuf.Reflection.FileDescriptor");
+  if (!fdClass) {
+    send({ event: "hb", asm: "FileDescriptor class not found", scanned: 0, messages: 0, files: 0 });
+    send({ event: "done", messages: 0, files: 0, classes: 0 });
+    return;
+  }
+
+  let instances: Il2Cpp.Object[] = [];
+  try {
+    instances = Il2Cpp.gc.choose(fdClass);
+  } catch (e) {
+    send({ event: "hb", asm: "gc.choose failed", scanned: 0, messages: 0, files: 0, at: String(e) });
+  }
+  send({ event: "hb", asm: "live FileDescriptors", scanned: instances.length, messages: 0, files: 0 });
+
+  for (const fd of instances) emitFile(fd);
+
+  // MessageDescriptor instances give the FullName -> obfuscated class map
+  const classMap: Record<string, string> = {};
+  const mdClass = findClassAnywhere("Google.Protobuf.Reflection.MessageDescriptor");
+  if (mdClass) {
+    let mds: Il2Cpp.Object[] = [];
+    try { mds = Il2Cpp.gc.choose(mdClass); } catch (e) { /* ignore */ }
+    send({ event: "hb", asm: "live MessageDescriptors", scanned: mds.length, messages: 0, files: filesOut });
+    for (const md of mds) {
       try {
-        Interceptor.attach(m.virtualAddress, {
-          onEnter() {
-            if (ran) return;
-            ran = true;
-            try { extract(); } catch (e) { send({ event: "hb", asm: "extract-threw", scanned, messages, files: filesOut, at: String(e) }); }
-          },
-        });
-        attached++;
-      } catch (e) { /* not hookable */ }
-      break;
+        const full = (md.method("get_FullName").invoke() as Il2Cpp.String).content;
+        if (full) classMap[full] = "";
+        emitFile(md.method("get_File").invoke() as Il2Cpp.Object);
+      } catch (e) { /* skip */ }
     }
   }
-  send({ event: "hb", asm: "hooks-attached", scanned: attached, messages: 0, files: 0 });
+
+  const entries = Object.keys(classMap);
+  for (let i = 0; i < entries.length; i += 250) {
+    const chunk: Record<string, string> = {};
+    for (const k of entries.slice(i, i + 250)) chunk[k] = classMap[k];
+    send({ event: "classmap", chunk });
+  }
+
+  send({ event: "done", messages: entries.length, files: filesOut, classes: instances.length });
 });
