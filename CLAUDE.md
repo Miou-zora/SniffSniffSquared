@@ -27,7 +27,8 @@ explanation, the verified command sequence, and a "dead ends" list.
 ```
 src/            Rust sniffer (see module table in RUNBOOK.md part 1)
 proto/          messages.json (schema registry) + generated dofus3.proto
-tools/          gen_proto.py, parse_descriptors.py, resign-debug-app.sh
+tools/          gen_proto.py, parse_descriptors.py, replay.py,
+                resign-debug-app.sh
 tools/frida/    runtime schema extraction: agent.ts, probe.ts, run.py
 docs/           observations.md — annotated real captures
 reference/      il2cpp-dump-20260710/, Mapping.v2*.json (inputs to gen_proto.py)
@@ -101,6 +102,10 @@ recovered with real field names. **But the scan stops before reaching
 nothing consumes `messages.runtime.json` yet. Five variables already ruled out
 — see the table in `RUNBOOK.md` part 3 before trying anything.
 
-Not done: `dump.cs` is not committed, so `gen_proto.py` cannot regenerate the
-static registry. The `packets` table exists in `init.sql` but nothing writes to
-it. Details in `RUNBOOK.md` part 3.
+Done since: the `packets` table now archives every message via
+`Dispatcher::on_any` (`ARCHIVE_PACKETS=0` disables), and `tools/replay.py`
+exercises the whole pipeline over loopback so the client is not needed to test.
+
+Not done: nothing consumes `messages.runtime.json`; the `decoded` column stays
+NULL. `dump.cs` is gitignored (64 MB) — extract it from the Il2CppDumper zip to
+use `gen_proto.py`. Details in `RUNBOOK.md` part 3.

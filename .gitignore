@@ -31,3 +31,8 @@ target
 
 # macOS
 .DS_Store
+
+# Il2CppDumper output — 64 MB, regenerate with Il2CppDumper (see RUNBOOK part 3)
+reference/il2cpp-dump-20260710/dump.cs
+reference/il2cpp-dump-20260710/il2cpp.h
+reference/il2cpp-dump-20260710/script.json

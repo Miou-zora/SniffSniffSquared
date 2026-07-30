@@ -7,5 +7,5 @@ edition = "2024"
 pcap = "2.4.0"
 pnet = "0.35.0"
 serde_json = "1"
-postgres = "0.19"
+postgres = { version = "0.19", features = ["with-serde_json-1"] }
 dotenvy = "0.15"

@@ -208,6 +208,27 @@ docker exec dofus_db psql -U dofus -d dofus -c 'SELECT * FROM kdh ORDER BY updat
 
 `kdh` messages only appear when price data flows — open the market/HDV in game.
 
+Every message that arrives is also archived to the `packets` table, whether or
+not it has an interpreter (`ARCHIVE_PACKETS=0` disables it). That is what lets
+you work on a message type later without being in-game when it appears.
+
+### 5. Testing without the game
+
+`tools/replay.py` pushes captured frames over loopback so the whole pipeline —
+deframing, `Any` unwrapping, interpreters, callbacks, database writes — runs
+without launching the client:
+
+```sh
+# terminal 1
+DATABASE_URL='postgres://dofus:change_me@localhost:5432/dofus' \
+  ./target/debug/SniffSniffSquared --dev lo0 --all "tcp port 5555"
+# terminal 2
+tools/replay.py --count 5          # or --hex <frame bytes> for another message
+```
+
+Note `--dev lo0`, not `en0`. Send at least three frames or the deframer never
+locks a layout.
+
 To add another message: register a handler in `build_dispatch()`
 (`src/main.rs`), keyed by the `Any` type key. `e.values` gives you the varints
 and packed arrays already decoded.
@@ -338,22 +359,51 @@ Once that lands, point `Registry::load` at the runtime registry, preferring it
 and falling back to `messages.json` for anything it lacks. Success metric
 already exists: the `<!! schema mismatch on N fields>` count should go to zero.
 
-### 3. Regenerate `dump.cs`
+### 3. Regenerate `dump.cs` — DONE, and it does not help
 
-`tools/gen_proto.py` reads `reference/il2cpp-dump-20260710/dump.cs`, **which is
-not in the repo** — only `DummyDll/` and the Ghidra scripts were committed. So
-`proto/messages.json` is a frozen artifact from a July 10 dump that cannot
-currently be regenerated, while the client has updated since. Running
-`gen_proto.py` now exits with instructions. Re-run Il2CppDumper against the
-current `GameAssembly.dylib` + `global-metadata.dat`, drop `dump.cs` into that
-folder, then re-run `gen_proto.py`.
+`dump.cs` is 64 MB so it is gitignored, not committed. Recover it by extracting
+`dump.cs` from the Il2CppDumper zip into
+`reference/il2cpp-dump-20260710/`, then run `tools/gen_proto.py`. Verified: it
+reproduces the committed `proto/messages.json` byte-for-byte, so the static
+pipeline is reproducible and the committed artifact is trustworthy.
 
-### 4. Wire up the `packets` table
+**A fresh dump would not fix the mismatches.** The theory was that
+`messages.json` had drifted from the updated client. It has not — all 2204
+obfuscated leaf tokens in the registry are still present in the *current*
+`global-metadata.dat`:
 
-`init.sql` defines it with exactly the columns the pipeline already has in hand
-at `handle_tcp` (`src`, `dst`, `msg_key`, `body`, `vars`, `packs`, `decoded`).
-Nothing inserts. This is the raw-capture archive that was designed and never
-connected.
+```
+obfuscated leaf tokens in messages.json: 2204
+still present in CURRENT global-metadata.dat: 2204
+missing (drifted): 0 = 0.0%
+```
+
+So do not spend time running Il2CppDumper against the current binary expecting
+the mismatch count to drop. The mismatch is **semantic**: the `Any` type URL key
+is not the same identifier as the obfuscated C# class leaf, so joining them by
+last dotted segment is wrong regardless of how fresh the dump is. Only the
+runtime descriptor route (item 1) resolves it, because `FullName` and the field
+list come from the same object.
+
+Note `jpp` and `kqh` appear on the wire but have no entry in the registry at
+all, which is the same problem seen from the other side.
+
+### 4. Wire up the `packets` table — DONE
+
+Every message is now archived, interpreted or not, via `Dispatcher::on_any`.
+The raw `body` is the point: a schema recovered later can be applied to
+traffic captured today, so identifying a message no longer requires being
+in-game at the moment it appears.
+
+```sql
+SELECT src, dst, msg_key, length(body), vars, packs FROM packets ORDER BY id;
+```
+
+Set `ARCHIVE_PACKETS=0` to turn it off. It uses its own Postgres connection
+(`postgres::Client` is not shareable), and insert failures are rate-limited to
+one line per 100 so a broken database cannot drown the capture.
+
+Still unused: the `decoded` JSONB column, which is left NULL.
 
 ### Dead ends — do not repeat these
 

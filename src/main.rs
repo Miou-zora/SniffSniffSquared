@@ -95,6 +95,23 @@ const KDH_DDL: &str = "CREATE TABLE IF NOT EXISTS kdh (
 const KDH_UPSERT: &str = "INSERT INTO kdh (id, b1, b10, b100, b1000) VALUES ($1,$2,$3,$4,$5)
     ON CONFLICT (id) DO UPDATE SET b1=$2, b10=$3, b100=$4, b1000=$5, updated_at=now()";
 
+/// Matches the `packets` table in init.sql. Re-declared here so the sniffer
+/// works against a database that was created before that table existed.
+const PACKETS_DDL: &str = "CREATE TABLE IF NOT EXISTS packets (
+    id          BIGSERIAL PRIMARY KEY,
+    captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    src         TEXT NOT NULL,
+    dst         TEXT NOT NULL,
+    msg_key     TEXT,
+    body        BYTEA,
+    vars        BIGINT[],
+    packs       JSONB,
+    decoded     JSONB
+)";
+
+const PACKETS_INSERT: &str =
+    "INSERT INTO packets (src, dst, msg_key, body, vars, packs) VALUES ($1,$2,$3,$4,$5,$6)";
+
 /// Register packet callbacks here. Each `on(key, ..)` fires when that message
 /// arrives, with the decoded values in `e.values` (vars + packed arrays).
 fn build_dispatch() -> Dispatcher {
@@ -114,14 +131,37 @@ fn build_dispatch() -> Dispatcher {
             });
         }
     }
+    // Archive every message, interpreted or not. A second connection because
+    // postgres::Client is not shareable, and this is the write we least want
+    // to lose: it is what makes offline re-analysis possible without the game.
+    if std::env::var("ARCHIVE_PACKETS").map(|v| v != "0").unwrap_or(true) {
+        if let Some(mut client) = db_client_with(PACKETS_DDL) {
+            println!("[db] archiving all messages -> table packets");
+            let mut failed = 0usize;
+            d.on_any(move |e| {
+                if let Err(err) = insert_packet(&mut client, e) {
+                    failed += 1;
+                    // one line per failure would drown the capture
+                    if failed == 1 || failed % 100 == 0 {
+                        eprintln!("[db] packets insert failed ({failed} so far): {err}");
+                    }
+                }
+            });
+        }
+    }
     d
 }
 
 /// Connect to Postgres via DATABASE_URL and ensure the `kdh` table exists.
 fn db_client() -> Option<postgres::Client> {
+    db_client_with(KDH_DDL)
+}
+
+/// Connect and run `ddl` to guarantee the target table exists.
+fn db_client_with(ddl: &str) -> Option<postgres::Client> {
     let url = std::env::var("DATABASE_URL").ok()?;
     match postgres::Client::connect(&url, postgres::NoTls) {
-        Ok(mut c) => match c.batch_execute(KDH_DDL) {
+        Ok(mut c) => match c.batch_execute(ddl) {
             Ok(()) => Some(c),
             Err(e) => {
                 eprintln!("[db] CREATE TABLE failed: {e}");
@@ -133,6 +173,31 @@ fn db_client() -> Option<postgres::Client> {
             None
         }
     }
+}
+
+/// Archive one message verbatim: the raw body plus whatever decoded out of it.
+/// The body is the point — a schema we do not have yet can be applied later.
+fn insert_packet(
+    client: &mut postgres::Client,
+    e: &dispatch::Event,
+) -> Result<(), postgres::Error> {
+    let vars: Vec<i64> = e.values.vars.iter().map(|&v| v as i64).collect();
+    let packs = serde_json::Value::Array(
+        e.values
+            .packs
+            .iter()
+            .map(|p| {
+                serde_json::Value::Array(
+                    p.iter().map(|&v| serde_json::Value::from(v as i64)).collect(),
+                )
+            })
+            .collect(),
+    );
+    client.execute(
+        PACKETS_INSERT,
+        &[&e.src, &e.dst, &e.key, &e.body, &vars, &packs],
+    )?;
+    Ok(())
 }
 
 /// id = first varint; b1/b10/b100/b1000 = first packed array's elements.
@@ -254,7 +319,11 @@ fn handle_tcp(re: &mut Reassembler, dispatch: &mut Dispatcher, src: IpAddr, dst:
                 let mut anys = Vec::new();
                 dump::collect_any(&d.body, &mut anys);
                 for (mkey, mbody) in anys {
-                    dispatch.dispatch(&mkey, &mbody, r);
+                    let (src, dst) = (
+                        format!("{}:{}", key.src, key.sport),
+                        format!("{}:{}", key.dst, key.dport),
+                    );
+                    dispatch.dispatch(&mkey, &mbody, r, &src, &dst);
                 }
             }
         }

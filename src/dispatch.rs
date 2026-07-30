@@ -17,6 +17,8 @@ pub struct Event<'a> {
     pub key: String,
     pub body: &'a [u8],
     pub values: Collected, // schema-guided varints + packed arrays
+    pub src: String,       // "ip:port"
+    pub dst: String,
 }
 
 type Handler = Box<dyn FnMut(&Event)>;
@@ -24,6 +26,7 @@ type Handler = Box<dyn FnMut(&Event)>;
 #[derive(Default)]
 pub struct Dispatcher {
     handlers: HashMap<String, Vec<Handler>>,
+    any: Vec<Handler>, // fire for every message, whatever its key
 }
 
 impl Dispatcher {
@@ -36,18 +39,37 @@ impl Dispatcher {
         self.handlers.entry(key.to_string()).or_default().push(Box::new(handler));
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.handlers.is_empty()
+    /// Register a callback that fires for *every* message. Used to archive raw
+    /// packets, where the point is to keep what we cannot yet interpret.
+    pub fn on_any(&mut self, handler: impl FnMut(&Event) + 'static) {
+        self.any.push(Box::new(handler));
     }
 
-    /// Fire the handlers registered for `key`, if any.
-    pub fn dispatch(&mut self, key: &str, body: &[u8], reg: &Registry) {
-        if let Some(hs) = self.handlers.get_mut(key) {
-            let values = interpret::values(key, body, reg);
-            let ev = Event { key: key.to_string(), body, values };
+    pub fn is_empty(&self) -> bool {
+        self.handlers.is_empty() && self.any.is_empty()
+    }
+
+    /// Fire the handlers registered for `key`, plus any catch-all handlers.
+    pub fn dispatch(&mut self, key: &str, body: &[u8], reg: &Registry, src: &str, dst: &str) {
+        let keyed = self.handlers.get_mut(key);
+        if keyed.is_none() && self.any.is_empty() {
+            return;
+        }
+        let values = interpret::values(key, body, reg);
+        let ev = Event {
+            key: key.to_string(),
+            body,
+            values,
+            src: src.to_string(),
+            dst: dst.to_string(),
+        };
+        if let Some(hs) = keyed {
             for h in hs.iter_mut() {
                 h(&ev);
             }
+        }
+        for h in self.any.iter_mut() {
+            h(&ev);
         }
     }
 }
@@ -72,10 +94,10 @@ mod tests {
         let mut d = Dispatcher::new();
         d.on("kdh", move |e| *sink.borrow_mut() = Some(e.values.clone()));
         // unregistered key must not fire
-        d.dispatch("zzz", KDH, &reg);
+        d.dispatch("zzz", KDH, &reg, "1.2.3.4:1", "5.6.7.8:5555");
         assert!(got.borrow().is_none());
         // registered key fires with decoded values
-        d.dispatch("kdh", KDH, &reg);
+        d.dispatch("kdh", KDH, &reg, "1.2.3.4:1", "5.6.7.8:5555");
         let v = got.borrow().clone().expect("handler fired");
         assert_eq!(v.vars, vec![8161, 104, 20139, 8161, 104]);
         assert_eq!(v.packs, vec![vec![394, 1989, 24996, 0]]);

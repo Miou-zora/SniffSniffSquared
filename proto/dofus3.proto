@@ -139,6 +139,13 @@ message Frame_Types_Response {
   Frame_Types_Payload f_3 = 3;
 }
 
+message Frame {
+  // obf: Frame  (UNMAPPED)
+  Frame_Types_Request f_1 = 1;
+  Frame_Types_Response f_2 = 2;
+  Frame_Types_Payload f_3 = 3;
+}
+
 message UpdateUserStatusCmd {
   // obf: UpdateUserStatusCmd  (UNMAPPED)
   int64 f_1 = 1;
@@ -7815,6 +7822,17 @@ message juf_jue_jrw_jrv_jru {
   int64 f_4 = 4;
   repeated int64 f_5 = 5;
   bool f_6 = 6;
+}
+
+message Com_Ankama_Dofus_Server_Game_Protocol_Ladder_Dream_LadderDreamSearchResponse {
+  // obf: juf.jue.jrw
+  // real: Com.Ankama.Dofus.Server.Game.Protocol.Ladder.Dream.LadderDreamSearchResponse
+  int32 f_1 = 1;
+  juf_jue_jrw_jrv_jru f_2 = 2;
+  bool f_3 = 3;
+  int32 f_4 = 4;
+  int32 f_5 = 5;
+  int32 f_6 = 6;
 }
 
 message juf_jue_jrx {
@@ -15601,6 +15619,7 @@ message FieldDescriptorProto {
   string f_1 = 1;
   int32 f_3 = 3;
   int32 f_4 = 4;
+  FieldDescriptorProto_Types_Type f_5 = 5;
   string f_6 = 6;
   string f_2 = 2;
   string f_7 = 7;
