@@ -98,6 +98,31 @@ consistent with having browsed one HDV resource category.
   UI rather than corrupting collection.
 - Only the ids actually on screen need resolving. Batch them per page.
 
+## Design system
+
+`design/` holds the "Modal" system — dark, phosphor-terminal, one lime accent.
+`design/README.md` is the short version; `design/DESIGN.md` is the full
+reference.
+
+`design/theme.css` is a Tailwind 4 `@theme` block imported by
+`src/app/globals.css`, so tokens are ordinary utilities: `bg-void-black`,
+`text-phosphor-white`, `text-lime-pulse`, `text-heading-lg`, `px-32`.
+
+Worth knowing before moving anything:
+
+- The folder **must stay inside `web/`**. Turbopack refuses CSS imports that
+  leave the project root, which is why it is not at the repo root.
+- `design/` is in `.prettierignore` — it is a tool export, not hand-maintained.
+- Fonts are substitutes: Goga -> Inter Tight, Inter Variable -> Inter, both via
+  `next/font/google` in `layout.tsx`, bound to the `--font-goga` /
+  `--font-inter-variable` token names.
+- **Ration the lime.** It is for primary actions and single emphasis moments.
+  Body copy is `text-sage-60`; `text-phosphor-white` is for headings.
+- Depth comes from hairline borders (`border-circuit-border`), not shadows.
+
+`src/app/page.tsx` is a placeholder proving the tokens resolve. Delete it when
+real pages arrive.
+
 ## Conventions
 
 - **TypeScript strict** is on. Keep it on.

@@ -225,6 +225,7 @@ sniffer/             the Rust capture app — run it from this directory
 
 web/                 Next.js front end (scaffolded, no features yet)
   AGENTS.md            what the app is, the data it reads, open decisions
+  design/              the "Modal" design system — tokens, reference, theme.css
   src/app/             App Router pages
 ```
 
