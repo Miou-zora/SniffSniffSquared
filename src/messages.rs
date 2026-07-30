@@ -31,9 +31,6 @@ pub const DEFAULTS: &[(&str, &str)] = &[
     ("price_list", "kea"),
     // chat / trade-channel messages: author, timestamp, free text
     ("chat_message", "ksv"),
-    // the 2026-07-10 build's price list. Long gone from the wire; kept so the
-    // decoder tests, which pin real captured bytes, still resolve a name.
-    ("price_list_legacy", "kdh"),
 ];
 
 /// Where an override file is looked for, relative to the working directory.

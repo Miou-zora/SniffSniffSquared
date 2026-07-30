@@ -34,10 +34,9 @@ pub fn dump(buf: &[u8], reg: Option<&Registry>, schema: Option<&Msg>, indent: us
             n => format!(" <!! schema mismatch on {n} fields>"),
         };
         let mut out = format!("{pad}Any <{url}>{named}{flag}\n");
-        if let Some(r) = reg {
-            if let Some(understood) = crate::interpret::interpret(key, value, r) {
-                out.push_str(&format!("{pad}  => {understood}\n"));
-            }
+        // interpreters parse structurally and need no registry
+        if let Some(understood) = crate::interpret::interpret(key, value) {
+            out.push_str(&format!("{pad}  => {understood}\n"));
         }
         out.push_str(&body);
         return out;
@@ -373,7 +372,9 @@ fn hex_trunc(b: &[u8], max: usize) -> String {
 mod tests {
     use super::*;
 
-    // real captured frame body (bytes after the 0x35 length prefix)
+    // Real captured frame body from the 2026-07-10 build (bytes after the
+    // 0x35 length prefix). That key is gone from the wire now; kept because it
+    // is genuine data exercising Any unwrap + schema-driven packed decode.
     const BODY: &[u8] = &[
         0x0a, 0x33, 0x0a, 0x31, 0x0a, 0x13, 0x74, 0x79, 0x70, 0x65, 0x2e, 0x61, 0x6e, 0x6b, 0x61,
         0x6d, 0x61, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6b, 0x64, 0x68, 0x12, 0x1a, 0x0a, 0x13, 0x08,
@@ -454,12 +455,28 @@ mod tests {
         let reg = Registry::load("proto/messages.json").expect("registry");
         // a well-joined message reports nothing
         let out = dump(BODY, Some(&reg), None, 0);
-        assert!(!out.contains("schema mismatch"), "kdh joins cleanly:\n{out}");
+        assert!(!out.contains("schema mismatch"), "this capture joins cleanly:\n{out}");
+    }
+
+    // a real captured price_list message wrapped in its Any envelope
+    const PRICE_ANY: &[u8] = &[
+        0x0a, 0x13, 0x74, 0x79, 0x70, 0x65, 0x2e, 0x61, 0x6e, 0x6b, 0x61, 0x6d, 0x61, 0x2e,
+        0x63, 0x6f, 0x6d, 0x2f, 0x6b, 0x65, 0x61, 0x12, 0x19, 0x08, 0x6b, 0x12, 0x12, 0x08,
+        0xb1, 0x14, 0x2a, 0x08, 0x4b, 0xc6, 0x02, 0x84, 0x34, 0x9f, 0x8d, 0x06, 0x30, 0x6b,
+        0x38, 0xc2, 0x4e, 0x18, 0xb1, 0x14,
+    ];
+
+    #[test]
+    fn interpreted_message_is_surfaced() {
+        let out = dump(PRICE_ANY, None, None, 0);
+        assert!(out.contains("type.ankama.com/kea"), "{out}");
+        assert!(out.contains("=> prices {"), "interpreter line missing:\n{out}");
+        assert!(out.contains("1000:99999"), "{out}");
     }
 
     #[test]
     fn known_filter() {
-        assert!(has_known(BODY), "kdh body is known");
+        assert!(has_known(PRICE_ANY), "a price_list body is known");
         // an Any with an unknown key -> not known
         // field1 "type.ankama.com/zzz", field2 empty
         let unknown = &[

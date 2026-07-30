@@ -5,7 +5,8 @@
 //!
 //! ```ignore
 //! let mut d = Dispatcher::new();
-//! d.on("kdh", |e| println!("kdh a={} batches={:?}", e.values.vars[0], e.values.packs));
+//! let key = messages::keymap().key("price_list").unwrap();
+//! d.on(key, |e| println!("{:?}", e.values.packs));
 //! ```
 
 use crate::interpret::{self, Collected};
@@ -34,7 +35,8 @@ impl Dispatcher {
         Dispatcher::default()
     }
 
-    /// Register a callback for a message key (e.g. "kdh").
+    /// Register a callback for a wire message key. Prefer resolving that key
+    /// from a semantic name via `messages::keymap()`, since keys rotate per build.
     pub fn on(&mut self, key: &str, handler: impl FnMut(&Event) + 'static) {
         self.handlers.entry(key.to_string()).or_default().push(Box::new(handler));
     }
@@ -80,7 +82,8 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    // the kdh message (an Any value) from a real capture
+    // a real captured Any value. The key is arbitrary here — this exercises
+    // dispatcher routing, not the meaning of any particular message.
     const KDH: &[u8] = &[
         0x0a, 0x13, 0x08, 0xe1, 0x3f, 0x10, 0x68, 0x22, 0x08, 0x8a, 0x03, 0xc5, 0x0f, 0xa4, 0xc3,
         0x01, 0x00, 0x28, 0xab, 0x9d, 0x01, 0x18, 0xe1, 0x3f, 0x20, 0x68,

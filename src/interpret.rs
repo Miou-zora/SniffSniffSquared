@@ -1,8 +1,12 @@
 //! Message -> understandable data.
 //!
 //! Per-message-type interpreters that turn a decoded protobuf body into named,
-//! human-meaningful attributes. Add a new `match` arm as you figure each
-//! message out. Everything is empty for now except `kdh`.
+//! human-meaningful attributes.
+//!
+//! Interpreters key off the *semantic* message name (see `crate::messages`),
+//! never the obfuscated wire key, and parse the body structurally with
+//! `pb::Reader` rather than through the schema registry — the registry
+//! describes an older build and cannot be trusted for field types.
 
 use crate::messages;
 use crate::pb::{Reader, WireType};
@@ -13,22 +17,16 @@ use crate::registry::{leaf, Registry};
 /// Dispatches on the *semantic* name, never the wire key — the keys rotate per
 /// client build, so `crate::messages` owns that translation. To support a new
 /// message: add its key to `messages::DEFAULTS`, then add an arm here.
-pub fn interpret(key: &str, body: &[u8], reg: &Registry) -> Option<String> {
+pub fn interpret(key: &str, body: &[u8]) -> Option<String> {
     match messages::keymap().name(key)? {
         "price_list" => price_list(body).map(|p| p.to_string()),
-        // the 2026-07-10 price list; that key is long gone from the wire, but
-        // the decoder tests pin real captured bytes for it
-        "price_list_legacy" => Some(kdh(body, reg)),
         _ => None,
     }
 }
 
 /// Whether we can interpret this wire key. Keep in sync with `interpret`.
 pub fn is_known_key(key: &str) -> bool {
-    matches!(
-        messages::keymap().name(key),
-        Some("price_list") | Some("price_list_legacy")
-    )
+    matches!(messages::keymap().name(key), Some("price_list"))
 }
 
 // ---- price_list: marketplace price ladder ---------------------------------
@@ -120,39 +118,12 @@ pub fn price_list(body: &[u8]) -> Option<PriceList> {
     Some(out)
 }
 
-// ---- kdh ------------------------------------------------------------------
-// packed repeated int64 -> batches keyed 1, 10, 100, 1000, ...
-// every other varint    -> attributes a, b, c, ...
-
 /// Schema-guided decoded values for a message key: every varint (in traversal
 /// order) and every packed repeated-scalar array. Handlers receive this.
 pub fn values(key: &str, body: &[u8], reg: &Registry) -> Collected {
     let mut c = Collected::default();
     collect(body, reg.resolve(key), reg, &mut c);
     c
-}
-
-fn kdh(body: &[u8], reg: &Registry) -> String {
-    let c = values("kdh", body, reg);
-
-    let mut parts = Vec::new();
-    for (i, v) in c.vars.iter().enumerate() {
-        parts.push(format!("{}={}", attr_name(i), v));
-    }
-    for (pi, pack) in c.packs.iter().enumerate() {
-        let batches: Vec<String> = pack
-            .iter()
-            .enumerate()
-            .map(|(i, v)| format!("{}:{}", 10u64.pow(i as u32), v))
-            .collect();
-        let label = if c.packs.len() == 1 {
-            "batches".to_string()
-        } else {
-            format!("batches{}", pi + 1)
-        };
-        parts.push(format!("{label}{{{}}}", batches.join(" ")));
-    }
-    format!("kdh {{ {} }}", parts.join(" "))
 }
 
 // ---- generic schema-guided collection -------------------------------------
@@ -298,12 +269,3 @@ mod tests {
     }
 }
 
-/// a, b, ..., z, a1, b1, ...
-fn attr_name(i: usize) -> String {
-    let letter = (b'a' + (i % 26) as u8) as char;
-    if i < 26 {
-        letter.to_string()
-    } else {
-        format!("{letter}{}", i / 26)
-    }
-}
