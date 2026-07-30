@@ -38,7 +38,7 @@ Monorepo. Shared infra at the root, one folder per app. **The Rust app must be
 run from `sniffer/`** (it resolves `keymap.json` and `proto/` relative to cwd).
 
 ```
-docker-compose.yml  shared postgres + pgadmin; `sniffer` service is Linux-only
+docker-compose.yml  postgres + pgadmin + web; `sniffer` service is Linux-only
 init.sql            schema both apps depend on (packets, prices)
 docs/               observations.md — annotated real captures
 RUNBOOK.md          the guide. Start here for anything protocol-related.
@@ -57,6 +57,11 @@ web/                Next.js 16 front end (scaffolded, no features yet)
 ```
 
 `sniffer/` writes to Postgres, `web/` reads from it — the only coupling.
+
+Compose services: `db`, `pgadmin`, `web` start by default; `sniffer` needs
+`--profile capture` and only captures on Linux. Inside compose the database
+host is `db`, not `localhost`. For web development prefer `cd web && pnpm dev`
+on the host over the container, which serves a production build.
 
 **Working in `web/`: Next 16 differs from training data.** Its `AGENTS.md`
 says to read `web/node_modules/next/dist/docs/` before writing code. Do that.

@@ -79,4 +79,7 @@ These are open, and worth asking about rather than assuming:
   is the smallest option; an ORM is a bigger commitment. Nothing is wired yet.
 - **The external API** mentioned in planning — which one, and whether it is
   called at read time or used to enrich the database at write time.
-- **Whether the web app joins docker-compose** or stays a local `pnpm dev`.
+  Resolved since: the app is wired into `docker-compose.yml` as the `web`
+  service, serving a production build on port 3000. Inside compose the database
+  host is `db`, not `localhost`. For development still prefer `pnpm dev` on the
+  host — it starts in under a second, where the container has to build.

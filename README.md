@@ -233,6 +233,8 @@ between the apps, which keeps them independently runnable.
 
 ### Running the web app
 
+For development, on the host — starts in under a second and hot-reloads:
+
 ```sh
 cd web
 cp .env.example .env.local     # DATABASE_URL, points at the same Postgres
@@ -241,8 +243,18 @@ pnpm dev                       # http://localhost:3000
 pnpm check                     # typecheck + lint + format — run before committing
 ```
 
-It reads the database the sniffer fills; it never captures traffic itself, so
-it does not need the game running.
+Or as a container, which serves a production build:
+
+```sh
+docker compose up -d db web    # http://localhost:3000
+```
+
+Inside compose it reaches Postgres at `db:5432`, not `localhost` — `localhost`
+in a container is the container. `docker-compose.yml` sets `DATABASE_URL`
+accordingly, so nothing needs configuring for that path.
+
+Either way it only reads the database the sniffer fills. It never captures
+traffic, so the game does not need to be running.
 
 ## Status
 

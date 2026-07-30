@@ -34,6 +34,27 @@ services:
     depends_on:
       - db
 
+  # Next.js front end. Reads the database the sniffer fills; it never captures
+  # traffic, so it does not need the game running or any special privileges.
+  #
+  # This runs a production build. For day-to-day work use `cd web && pnpm dev`
+  # on the host — it starts in under a second, where this has to build first.
+  web:
+    build: ./web
+    container_name: dofus_web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    environment:
+      # `db` is the compose service name — inside the network that is the host,
+      # NOT localhost, which would be the container itself.
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    networks:
+      - db
+    depends_on:
+      db:
+        condition: service_healthy
+
   # Packet capture, LINUX ONLY.
   #
   # Not started by default — bring it up with:
