@@ -632,6 +632,50 @@ one line per 100 so a broken database cannot drown the capture.
 
 Still unused: the `decoded` JSONB column, which is left NULL.
 
+### 5. Identify `iuz` — probably the whole marketplace in one message
+
+Three observed in one session, all server→client, **68–80 KB each** — two to
+three orders of magnitude larger than anything else on the wire.
+
+It matched all four prices of a single item during known-plaintext search
+(`tools/findvalue.py 75 326 6660 99999`), alongside the 25-byte `price_list`.
+So it carries price data too, but in bulk. The obvious reading is a catalogue
+sync: the full marketplace, or a whole category, in one payload.
+
+If that is what it is, it is worth more than `price_list`: one message would
+populate the entire `prices` table instead of one item per click.
+
+Approach:
+
+```sh
+# when does it arrive? entering the HDV, changing category, first login?
+tools/identify.py "enter the HDV and switch category"
+
+# pull one and look at the top-level shape
+docker exec dofus_db psql -U dofus -d dofus -t -A -c \
+  "SELECT encode(body,'hex') FROM packets WHERE msg_key='iuz' ORDER BY length(body) DESC LIMIT 1;"
+```
+
+Expect a repeated field of per-item submessages. If each element looks like the
+inner part of `price_list` (item id + a 4-element packed ladder), the existing
+`interpret::price_list` parser can likely be reused per element.
+
+### 6. Identify `idd`
+
+88 observed, all server→client, 15–166 bytes. Not the most frequent key — that
+is `iwa` (1586), `jri` (1569), `jrj` (1250), `kmw` (1163) over 7057 messages —
+but small, one-directional and frequent enough to be something structural
+(entity state, a tick, an inventory delta).
+
+Being server-only means it is world state rather than a player action, which
+narrows what to correlate against. Use `tools/identify.py` with a single
+deliberate action and watch whether it spikes; if it fires constantly
+regardless, it is a heartbeat or entity update and the size distribution
+(15 vs 166 bytes) is the thing to explain.
+
+The higher-volume keys above are better targets if the goal is understanding
+the session rather than this particular message.
+
 ### Dead ends — do not repeat these
 
 - **`esg` is not the id-map class in this build.** Its fields are

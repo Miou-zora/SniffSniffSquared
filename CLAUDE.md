@@ -132,6 +132,13 @@ name it in `messages::DEFAULTS`, parse it in `interpret.rs` matching on the
 | `chat_message` | `ksv` | chat/trade channel |
 | `price_list_legacy` | `kdh` | the 2026-07-10 price list; gone from the wire, kept for tests |
 
+Next up (RUNBOOK part 3 items 5-6): identify `iuz` — 3 seen, 68-80 KB each,
+server-only, matched a full price ladder during known-plaintext search, so it
+is probably the whole marketplace in one payload and worth more than
+`price_list`. Then `idd` (88 seen, server-only, 15-166 B). Highest-volume
+unidentified keys over 7057 messages are `iwa` 1586, `jri` 1569, `jrj` 1250,
+`kmw` 1163.
+
 Partly done: runtime schema extraction works and is proven end-to-end —
 `agent.ts` pulls each `.proto` file's serialized `FileDescriptorProto`,
 `tools/parse_descriptors.py` turns it into `proto/messages.runtime.json` keyed
