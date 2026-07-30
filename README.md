@@ -223,11 +223,26 @@ sniffer/             the Rust capture app — run it from this directory
   tools/frida/         runtime schema extraction from the live client
   reference/           IL2CPP dump + deobfuscation mappings
 
-web/                 (not yet) Next.js front end over the same Postgres
+web/                 Next.js front end (scaffolded, no features yet)
+  AGENTS.md            what the app is, the data it reads, open decisions
+  src/app/             App Router pages
 ```
 
-`sniffer/` writes to Postgres; anything else reads from it. That is the only
-coupling between apps, which keeps them independently runnable.
+`sniffer/` writes to Postgres; `web/` reads from it. That is the only coupling
+between the apps, which keeps them independently runnable.
+
+### Running the web app
+
+```sh
+cd web
+cp .env.example .env.local     # DATABASE_URL, points at the same Postgres
+pnpm install
+pnpm dev                       # http://localhost:3000
+pnpm check                     # typecheck + lint + format — run before committing
+```
+
+It reads the database the sniffer fills; it never captures traffic itself, so
+it does not need the game running.
 
 ## Status
 

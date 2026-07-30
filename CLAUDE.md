@@ -38,21 +38,29 @@ Monorepo. Shared infra at the root, one folder per app. **The Rust app must be
 run from `sniffer/`** (it resolves `keymap.json` and `proto/` relative to cwd).
 
 ```
-docker-compose.yml init.sql  shared postgres + schema, at the repo root
-docs/           observations.md — annotated real captures
-RUNBOOK.md      the guide. Start here for anything protocol-related.
+docker-compose.yml  shared postgres + pgadmin; `sniffer` service is Linux-only
+init.sql            schema both apps depend on (packets, prices)
+docs/               observations.md — annotated real captures
+RUNBOOK.md          the guide. Start here for anything protocol-related.
 
-sniffer/        the Rust capture app; everything below is relative to it
-src/            Rust sniffer (see module table in RUNBOOK.md part 1)
-proto/          messages.json (schema registry) + generated dofus3.proto
-keymap.json  wire-key overrides — edit when a build rotates keys
-tools/          gen_proto.py, identify.py, findvalue.py,
-                parse_descriptors.py, replay.py, resign-debug-app.sh
-tools/frida/    runtime schema extraction: agent.ts, probe.ts, run.py
-docs/           observations.md — annotated real captures
-reference/      il2cpp-dump-20260710/, Mapping.v2*.json (inputs to gen_proto.py)
-RUNBOOK.md      the guide. Start here for anything protocol-related.
+sniffer/            the Rust capture app — RUN IT FROM THIS DIRECTORY
+  src/                module table in RUNBOOK.md part 1
+  proto/              messages.json (schema registry) + generated dofus3.proto
+  keymap.json         wire-key overrides — edit when a build rotates keys
+  tools/              gen_proto.py, identify.py, findvalue.py,
+                      parse_descriptors.py, replay.py, resign-debug-app.sh
+  tools/frida/        runtime schema extraction: agent.ts, probe.ts, run.py
+  reference/          il2cpp-dump-20260710/, Mapping.v2*.json (gen_proto inputs)
+
+web/                Next.js 16 front end (scaffolded, no features yet)
+  AGENTS.md           the app's own guide; CLAUDE.md just imports it
 ```
+
+`sniffer/` writes to Postgres, `web/` reads from it — the only coupling.
+
+**Working in `web/`: Next 16 differs from training data.** Its `AGENTS.md`
+says to read `web/node_modules/next/dist/docs/` before writing code. Do that.
+`pnpm check` (typecheck + lint + format) is the gate before committing.
 
 ## Commands
 
