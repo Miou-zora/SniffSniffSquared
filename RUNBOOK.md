@@ -688,6 +688,20 @@ regardless, it is a heartbeat or entity update and the size distribution
 The higher-volume keys above are better targets if the goal is understanding
 the session rather than this particular message.
 
+### Resolved: item ids are DofusDB ids
+
+`prices.item_id` can be looked up directly at `https://api.dofusdb.fr/items/<id>`
+— no mapping table needed. Verified: id `2609` returns "Carapace Verte", the
+item whose prices were read off the screen when `price_list` was identified,
+and its `typeId` `107` matches the `category` the sniffer decodes. All six
+captured ids resolve, all of type "Alliage", consistent with browsing one HDV
+category.
+
+This closes the "item names" question: the sniffer stores ids only, and the web
+app enriches at read time. Keeping the network dependency out of the capture
+path means a DofusDB outage degrades the UI rather than interrupting
+collection.
+
 ### Dead ends — do not repeat these
 
 - **`esg` is not the id-map class in this build.** Its fields are

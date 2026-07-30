@@ -42,12 +42,61 @@ Two tables, both defined in `../init.sql`:
 
 Caveats worth knowing before designing around them:
 
-- `item_id` is a **numeric game id**; there is no name column yet. Resolving
-  names is an open task (see `../RUNBOOK.md`).
+- `item_id` is a **numeric game id** with no name column. Names, icons and
+  everything else come from the DofusDB API — see below.
 - `packets.vars` and `packets.packs` are derived from a schema registry that
   does not match the current game build. **Do not trust them.** `prices` is
   decoded properly and is fine.
 - Prices are integers in kamas. No decimals, no scaling.
+
+## DofusDB — resolving item ids to names and icons
+
+`https://api.dofusdb.fr` — public, no key, `access-control-allow-origin: *`.
+
+**The ids match ours directly.** Verified: `prices.item_id = 2609` is
+`{"fr": "Carapace Verte", "en": "Green Carapace"}`, which is the item whose
+prices were read off the screen during identification. Its `typeId` is `107`,
+which is exactly the `category` the sniffer decodes. Two independent fields
+agree, so **no mapping layer is needed** — pass the id straight through.
+
+Single item:
+
+```
+GET https://api.dofusdb.fr/items/2609
+```
+
+Batch, which is what a price table wants — one request for the whole page:
+
+```
+GET https://api.dofusdb.fr/items?$limit=20&id[$in][]=746&id[$in][]=748
+```
+
+Feathers-style query syntax. Note `$limit` and `$in` contain `$`, and the
+brackets need escaping in some clients (`curl` needs `--globoff`, or they are
+read as glob patterns).
+
+Fields that matter:
+
+| field       | use                                                                                |
+| ----------- | ---------------------------------------------------------------------------------- |
+| `id`        | joins to `prices.item_id`                                                          |
+| `name`      | `{ fr, en }` — localised, pick per locale                                          |
+| `iconId`    | image at `https://api.dofusdb.fr/img/items/{iconId}.png` (verified 200, ~13-20 KB) |
+| `type.name` | `{ fr, en }`, e.g. "Alliage"                                                       |
+| `level`     | item level                                                                         |
+
+Verified against all six captured ids: all resolve, and all are type "Alliage",
+consistent with having browsed one HDV resource category.
+
+**Design notes, not yet implemented:**
+
+- Fetch it **server-side and cache it**. Item metadata is static — names and
+  icons do not change between game patches — so it wants a long revalidate, not
+  a request per page view. Next's `fetch` cache is the obvious fit.
+- The database deliberately stores ids only. Enriching at read time keeps the
+  sniffer free of network dependencies and means a DofusDB outage degrades the
+  UI rather than corrupting collection.
+- Only the ids actually on screen need resolving. Batch them per page.
 
 ## Conventions
 
@@ -71,15 +120,18 @@ pnpm format         # apply formatting
 
 `pnpm check` is what CI would run. If it passes, the tree is clean.
 
+## Decided
+
+- **External data source: DofusDB**, called server-side at read time and
+  cached. The database keeps ids only; nothing is denormalised into it.
+- **Deployment: compose service `web`**, production build on port 3000. Inside
+  compose the database host is `db`. Development stays `pnpm dev` on the host.
+
 ## Not decided yet
 
-These are open, and worth asking about rather than assuming:
+Worth asking about rather than assuming:
 
 - **How to query Postgres.** No client library is installed. `pg` for plain SQL
   is the smallest option; an ORM is a bigger commitment. Nothing is wired yet.
-- **The external API** mentioned in planning — which one, and whether it is
-  called at read time or used to enrich the database at write time.
-  Resolved since: the app is wired into `docker-compose.yml` as the `web`
-  service, serving a production build on port 3000. Inside compose the database
-  host is `db`, not `localhost`. For development still prefer `pnpm dev` on the
-  host — it starts in under a second, where the container has to build.
+- **What the first page actually shows.** Price history per item is the obvious
+  candidate, since `prices` is a time series, but nothing is designed.

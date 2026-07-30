@@ -58,6 +58,11 @@ web/                Next.js 16 front end (scaffolded, no features yet)
 
 `sniffer/` writes to Postgres, `web/` reads from it — the only coupling.
 
+Item ids are **DofusDB ids** (verified: 2609 = Carapace Verte, typeId 107 =
+our decoded category), so `https://api.dofusdb.fr/items/<id>` resolves names,
+icons and types with no mapping table. Enrichment happens read-side in `web/`;
+the sniffer stays free of network dependencies.
+
 Compose services: `db`, `pgadmin`, `web` start by default; `sniffer` needs
 `--profile capture` and only captures on Linux. Inside compose the database
 host is `db`, not `localhost`. For web development prefer `cd web && pnpm dev`
