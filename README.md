@@ -57,7 +57,8 @@ disagrees with the bytes — see below.
 ```
 src/            the sniffer — capture, reassembly, deframing, decoding
 proto/          messages.json (schema registry) + generated dofus3.proto
-tools/          gen_proto.py (schema from IL2CPP dump), resign-debug-app.sh
+tools/          gen_proto.py, identify.py (correlate a message with an
+                in-game action), replay.py, resign-debug-app.sh
 tools/frida/    runtime schema extraction from the live client
 docs/           captured-traffic analysis
 reference/      IL2CPP dump + deobfuscation mappings (gen_proto.py inputs)
@@ -70,11 +71,14 @@ layouts, locks on three consecutive valid parses), `Any` unwrapping,
 signed-varint decoding, schema-vs-wire mismatch detection, `kdh` (price list)
 persisted to Postgres.
 
-**Known limits:** field names are unrecovered for the game protocol — only
-numbers and types. The schema registry is mis-joined for roughly four of six
-observed message keys; the decoder flags these rather than silently printing
-garbage. The Frida-based full schema recovery is implemented but has never
-been run to completion.
+**Known limits:** the obfuscated message keys rotate between client builds, so
+the committed schema registry (built from a 2026-07-10 dump) does not describe
+the current wire — a key that still resolves may name a different message
+entirely. The decoder detects and flags the disagreement rather than printing
+garbage. Message types are therefore identified empirically, by correlating
+traffic with in-game actions (`tools/identify.py`). Runtime schema recovery via
+Frida is implemented and proven on the chat service, but is blocked and unsafe
+against a live client — see RUNBOOK part 3.
 
 See RUNBOOK.md part 3 for the ordered list of what's next.
 

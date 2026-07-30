@@ -12,23 +12,33 @@ explanation, the verified command sequence, and a "dead ends" list.
 - **The traffic is NOT encrypted.** Plaintext protobuf on TCP 5555. If output
   looks like noise it is a decode bug or a mis-joined schema, never a cipher.
   Confirm with `--raw` — you will see `type.ankama.com/...` in ASCII.
+- **The obfuscated `Any` keys ROTATE between client builds.** `kdh`, `kag` and
+  `jqj` — the keys the older notes are written around — do not exist in the
+  current build at all; an 861-message capture contains none of them (`ksv`
+  survived). Any "key X means Y" mapping is only valid for the build it was
+  observed on. Re-identify with `tools/identify.py` rather than trusting notes.
 - **Messages are keyed by the `Any` type URL** (`type.ankama.com/ksv`), not by
   `Frame.Payload.id`. The `id` map is not used anywhere in `src/`. Do not
   chase it.
 - **Field names are unknown** for the game protocol. `proto/messages.json`
-  carries field numbers and C# types only.
-- **`proto/messages.json` is frequently mis-joined to the wire.** It is keyed
-  by obfuscated C# class path; the join to the `Any` key is a guess and is
-  wrong for roughly 4 of 6 observed keys. `src/dump.rs` detects and flags this
-  rather than trusting it.
+  carries field numbers and C# types only, and it is keyed by the 2026-07-10
+  build's obfuscated names — which the current wire no longer uses. Treat
+  `vars`/`packs` in the `packets` table as unreliable for that reason; `body`
+  is the ground truth.
+- **`proto/messages.json` is frequently mis-joined to the wire** — measured
+  wrong for 4 of 6 keys observed at the time. Two causes, and key rotation
+  (above) is the bigger one: the registry describes a build whose keys the wire
+  no longer uses, so a name that still resolves may now describe a completely
+  different message. `src/dump.rs` detects and flags the disagreement rather
+  than trusting the schema.
 
 ## Layout
 
 ```
 src/            Rust sniffer (see module table in RUNBOOK.md part 1)
 proto/          messages.json (schema registry) + generated dofus3.proto
-tools/          gen_proto.py, parse_descriptors.py, replay.py,
-                resign-debug-app.sh
+tools/          gen_proto.py, identify.py, parse_descriptors.py,
+                replay.py, resign-debug-app.sh
 tools/frida/    runtime schema extraction: agent.ts, probe.ts, run.py
 docs/           observations.md — annotated real captures
 reference/      il2cpp-dump-20260710/, Mapping.v2*.json (inputs to gen_proto.py)
@@ -104,7 +114,12 @@ docker exec dofus_db psql -U dofus -d dofus -c '\dt'
 ## State of play
 
 Working: capture, reassembly, adaptive deframing, `Any` unwrapping,
-schema-vs-wire mismatch detection, signed-varint decoding, `kdh` → Postgres.
+schema-vs-wire mismatch detection, signed-varint decoding, every message
+archived to `packets`. 94 distinct message keys observed in one session.
+
+**The `kdh` interpreter and `kdh` table are dead code on the current build** —
+that key no longer exists on the wire. Use `tools/identify.py` to find the
+current price-list key, then repoint `interpret.rs` and `build_dispatch()`.
 
 Partly done: runtime schema extraction works and is proven end-to-end —
 `agent.ts` pulls each `.proto` file's serialized `FileDescriptorProto`,

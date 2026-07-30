@@ -67,17 +67,27 @@ never uses.
 | `src/pb.rs` | schema-less protobuf wire reader |
 | `src/registry.rs` | loads `proto/messages.json`, resolves a type token to a field list |
 | `src/dump.rs` | pretty-printer, `Any` unwrapping, schema-vs-wire checking |
-| `src/interpret.rs` | per-message meaning. Only `kdh` is implemented |
+| `src/interpret.rs` | per-message meaning. Only `kdh`, whose key is now stale |
 | `src/dispatch.rs` | callbacks per message key |
 
 ### What is actually known
 
-- `kdh` = price list. Decodes correctly.
 - `ksv` = chat / listing messages (contains free text, author, timestamp).
-- `iwa`, `jri`, `jrj`, `kmw`, `knh`, `jpp`, `kqh` = seen on the wire, unlabelled.
+- 94 distinct keys observed in one session; `idd` is the most frequent.
+
+> **The keys rotate between client builds.** `kdh` (documented as the price
+> list), `kag` and `jqj` appear nowhere in an 861-message capture from the
+> current build — only `ksv` carried over. A mapping is only valid for the
+> build it was observed on, so `docs/observations.md` and the `kdh` interpreter
+> describe a client that no longer exists. Re-identify with
+> `tools/identify.py` — see part 2 step 5.
 
 Field *names* are unknown for the game protocol. `proto/messages.json` gives
-field **numbers** and **types** only.
+field **numbers** and **types** only, and describes the 2026-07-10 build.
+Because of the rotation this is worse than "partly wrong": a key that still
+resolves may now name a different message entirely. The `vars` and `packs`
+columns in `packets` are derived from it and unreliable for the same reason —
+**`body` is the ground truth.**
 
 ### The central problem: mis-joined schemas
 
@@ -94,8 +104,12 @@ last dotted segment. **That join is often wrong.** Measured over one capture:
 | `iwa` | 0 — clean |
 | `kdh` | 0 — clean |
 
-Four of six observed keys are mis-joined. The decoder now *detects and reports*
-this rather than silently printing garbage:
+Four of six observed keys were mis-joined in that capture. Note this was
+measured *before* the key rotation was understood — since the registry
+describes a build whose keys the wire no longer uses, rotation is likely the
+larger cause, and these numbers are a lower bound rather than a diagnosis.
+Either way the decoder *detects and reports* the disagreement rather than
+silently printing garbage:
 
 ```
 Any <type.ankama.com/ksv> [ksx.ksw.ksv] <!! schema mismatch on 3 fields>
@@ -189,9 +203,15 @@ it is, or the BPF filter caught the wrong flow.
 
 ### 4. Database writes
 
-Only `kdh` is wired to the database, via `build_dispatch()` in `src/main.rs`.
-The `packets` table in `init.sql` is **created but never written to** — nothing
-in `src/` references it.
+**Every** message is archived to `packets`, interpreted or not, via
+`Dispatcher::on_any` (`ARCHIVE_PACKETS=0` disables). That archive is what makes
+message identification possible without being in-game at the moment a message
+appears.
+
+The `kdh` table is separate, written by a keyed handler in `build_dispatch()`.
+**It no longer fires** — `kdh` is a stale key that this build does not use. Its
+schema also keys on the first varint with an upsert, so it holds only the
+latest row per id, not history.
 
 ```sh
 DATABASE_URL='postgres://dofus:change_me@localhost:5432/dofus' \
@@ -212,7 +232,38 @@ Every message that arrives is also archived to the `packets` table, whether or
 not it has an interpreter (`ARCHIVE_PACKETS=0` disables it). That is what lets
 you work on a message type later without being in-game when it appears.
 
-### 5. Testing without the game
+### 5. Identifying a message
+
+Since the keys rotate, identification is empirical: watch the archive while
+doing one specific thing in game, and see what appears that was not there
+before. `tools/identify.py` automates the diff.
+
+```sh
+# terminal 1 — sniffer running with DATABASE_URL, so `packets` fills
+# terminal 2
+tools/identify.py "open HDV and click several item prices"
+```
+
+It samples a quiet baseline, waits for you to perform the action, then reports
+keys that are new or spiked above background. Run it two or three times for the
+same action — keys that appear *every* time are the match; background chatter
+varies between runs.
+
+Then inspect the candidate's payload:
+
+```sh
+docker exec dofus_db psql -U dofus -d dofus -c \
+  "SELECT captured_at, src, encode(body,'hex') FROM packets WHERE msg_key='<key>' ORDER BY id DESC LIMIT 5;"
+```
+
+Direction is a strong hint on its own: client→server messages are your actions,
+server→client are world state.
+
+To wire a confirmed key in: add an arm to `interpret()` in `src/interpret.rs`
+(plus `is_known_key`), and a handler in `build_dispatch()` in `src/main.rs` if
+it should get its own table.
+
+### 6. Testing without the game
 
 `tools/replay.py` pushes captured frames over loopback so the whole pipeline —
 deframing, `Any` unwrapping, interpreters, callbacks, database writes — runs
