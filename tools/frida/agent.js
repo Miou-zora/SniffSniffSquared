@@ -1,5 +1,5 @@
 📦
-143366 /agent.js
+143995 /agent.js
 ✄
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -2940,7 +2940,7 @@ ${this.isEnum ? `enum` : this.isStruct ? `struct` : this.isInterface ? `interfac
       Il2Cpp3.reference = reference;
     })(Il2Cpp2 || (Il2Cpp2 = {}));
     (function(Il2Cpp3) {
-      class String extends NativeStruct {
+      class String2 extends NativeStruct {
         /** Gets the content of this string. */
         get content() {
           return Il2Cpp3.exports.stringGetChars(this).readUtf16String(this.length);
@@ -2969,7 +2969,7 @@ ${this.isEnum ? `enum` : this.isStruct ? `struct` : this.isInterface ? `interfac
           return this.isNull() ? "null" : `"${this.content}"`;
         }
       }
-      Il2Cpp3.String = String;
+      Il2Cpp3.String = String2;
       function string(content) {
         return new Il2Cpp3.String(Il2Cpp3.exports.stringNew(Memory.allocUtf8String(content ?? "")));
       }
@@ -3408,23 +3408,7 @@ var require_agent = __commonJS({
       const seenFiles = {};
       const classMap = {};
       let messages = 0, filesOut = 0, scanned = 0;
-      if (!findToByteArray()) {
-        console.log("[agent] WARNING: MessageExtensions.ToByteArray not found; cannot serialize descriptors");
-      }
-      const SEEDS = [
-        "ksv",
-        "jrj",
-        "jri",
-        "iwa",
-        "kmw",
-        "knh",
-        "jpp",
-        "kqh",
-        "kdh",
-        "kag",
-        "jqj"
-      ];
-      const pending = [];
+      const SEEDS = ["ksv", "jrj", "jri", "iwa", "kmw", "knh", "jpp", "kqh", "kdh", "kag", "jqj"];
       function findClassAnywhere(name) {
         for (const a of Il2Cpp.domain.assemblies) {
           const k = a.image.tryClass(name);
@@ -3433,6 +3417,7 @@ var require_agent = __commonJS({
         }
         return null;
       }
+      const pending = [];
       function emitFile(file) {
         let fname = "";
         try {
@@ -3451,54 +3436,90 @@ var require_agent = __commonJS({
             filesOut++;
           }
         } catch (e) {
-          send({ event: "hb", asm: "serialize-failed", scanned, messages, files: filesOut, at: fname });
         }
         try {
           const deps = file.method("get_Dependencies").invoke();
           const n = deps.method("get_Count").invoke();
-          for (let i = 0; i < n; i++) {
+          for (let i = 0; i < n; i++)
             pending.push(deps.method("get_Item").invoke(i));
-          }
         } catch (e) {
         }
       }
-      for (const name of SEEDS) {
-        scanned++;
-        const klass = findClassAnywhere(name);
-        if (!klass) {
-          send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " (absent)" });
-          continue;
-        }
-        const gd = descriptorGetter(klass);
-        if (!gd) {
-          send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " (no descriptor)" });
-          continue;
-        }
-        send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, invoking: name });
-        try {
-          const desc = gd.invoke();
-          const full = desc.method("get_FullName").invoke().content;
-          if (full) {
-            classMap[full] = klass.type.name;
-            messages++;
+      function extract() {
+        for (const name of SEEDS) {
+          scanned++;
+          const klass = findClassAnywhere(name);
+          if (!klass)
+            continue;
+          const gd = descriptorGetter(klass);
+          if (!gd)
+            continue;
+          send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, invoking: name });
+          try {
+            const desc = gd.invoke();
+            const full = desc.method("get_FullName").invoke().content;
+            if (full) {
+              classMap[full] = klass.type.name;
+              messages++;
+            }
+            emitFile(desc.method("get_File").invoke());
+          } catch (e) {
+            send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " threw" });
           }
-          emitFile(desc.method("get_File").invoke());
-        } catch (e) {
-          send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " (threw)" });
+        }
+        while (pending.length > 0)
+          emitFile(pending.pop());
+        const entries = Object.keys(classMap);
+        for (let i = 0; i < entries.length; i += 250) {
+          const chunk = {};
+          for (const k of entries.slice(i, i + 250))
+            chunk[k] = classMap[k];
+          send({ event: "classmap", chunk });
+        }
+        send({ event: "done", messages, files: filesOut, classes: scanned });
+      }
+      let ran = false;
+      const HOOKS = [
+        "UnityEngine.EventSystems.EventSystem",
+        "UnityEngine.InputSystem.UI.InputSystemUIInputModule",
+        "us",
+        "wq",
+        "wu",
+        "wv",
+        "wy",
+        "xd",
+        "xf",
+        "Core.Rendering.MapRenderer"
+      ];
+      let attached = 0;
+      for (const cname of HOOKS) {
+        const k = findClassAnywhere(cname);
+        if (!k)
+          continue;
+        for (const mname of ["Update", "LateUpdate", "Process", "Tick"]) {
+          const m = k.tryMethod(mname);
+          if (!m || m.parameterCount !== 0 || m.virtualAddress.isNull())
+            continue;
+          try {
+            Interceptor.attach(m.virtualAddress, {
+              onEnter() {
+                if (ran)
+                  return;
+                ran = true;
+                try {
+                  extract();
+                } catch (e) {
+                  send({ event: "hb", asm: "extract-threw", scanned, messages, files: filesOut, at: String(e) });
+                }
+              }
+            });
+            attached++;
+          } catch (e) {
+          }
+          break;
         }
       }
-      while (pending.length > 0) {
-        emitFile(pending.pop());
-      }
-      const entries = Object.keys(classMap);
-      for (let i = 0; i < entries.length; i += 250) {
-        const chunk = {};
-        for (const k of entries.slice(i, i + 250))
-          chunk[k] = classMap[k];
-        send({ event: "classmap", chunk });
-      }
-      console.log(`[agent] done: classes=${scanned} messages=${messages} files=${filesOut}`);
-      send({ event: "done", messages, files: filesOut, classes: scanned });
+      send({ event: "hb", asm: "hooks-attached", scanned: attached, messages: 0, files: 0 });
     });
   }
 });

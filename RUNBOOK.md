@@ -354,22 +354,58 @@ Ruled out, each tested on its own:
 | second attach to the same process | blocks |
 | let the client sit idle for minutes first | blocks |
 
-**The one confirmed success, and the lead.** `tools/frida/probe.ts` *did*
-invoke `ksv`'s descriptor getter and read back its `FullName`. That happened on
-a process where the older `readFields`-based agent had already run **to
-completion** over `Core` and `Google.Protobuf` first. No fresh client has
-reproduced it since. Something about that preceding run left the runtime in a
-state where game-protocol static init could complete.
+**A root cause found late, which invalidates earlier readings.** The re-signed
+copy was being launched from a scratch directory. Dofus resolves its
+Addressables catalogs relative to the launch directory, so it failed at boot:
 
-Next experiment: reproduce those preconditions deliberately — attach, walk
-`Core`/`Google.Protobuf` to completion, and only then touch a game-protocol
-class, in the same session. If that works, the fix is an ordering requirement,
-not a threading one.
+```
+ERROR [Addressables] (AddressableUtility:118) - Unable to find catalog list
+Core.DataCenter.DataCenterModule:LoadData()
+```
 
-Worth trying alongside: force class initialisation through a path that does not
-run the C# static constructor on our thread — e.g. resolve the descriptor from
-the static backing field (`<Proto>k__BackingField` and friends exist on
-`MessageDescriptor`) rather than calling the getter.
+A window opens, so it looks like a working client — but `DataCenter` never
+loads and **no per-frame method ever runs**. Any conclusion drawn from a copy
+launched outside `/Applications/Ankama/Dofus-dofus3` is unreliable, including
+the "let the client settle" test above and an early hook probe that reported
+zero callbacks.
+
+`tools/resign-debug-app.sh` now installs the copy beside the original and
+prints the required `cd`. Always confirm a boot before trusting a scan:
+
+```sh
+grep -c "Unable to find catalog list" ~/Library/Logs/Ankama/Dofus/Player.log  # want 0
+tail ~/Library/Logs/Ankama/Dofus/Player.log                                   # want EventSystem:Update()
+```
+
+**Running on a game thread changes the failure mode.** With a properly booted
+client, hooking `UnityEngine.EventSystems.EventSystem.Update` and doing the
+extraction inside the hook — so the code runs on the game's own thread, where
+the class-init lock is already ours — gets past the first seed:
+
+```
+[hb] seed  INVOKING ksv
+[hb] seed  SKIP ksv threw        <- throws instead of deadlocking
+[hb] seed  INVOKING jrj          <- and the scan CONTINUES
+```
+
+`ksv` now raises an exception rather than hanging, and the loop moves on.
+`jrj` still deadlocks (whole process to 0% CPU, since the hook occupies the
+main thread). So thread context was a real part of the problem but not all of
+it.
+
+Next experiments, in order:
+
+1. Find out *what* `ksv` throws — the handler currently swallows it. That
+   exception probably names the missing precondition.
+2. Do the extraction from a hook on a **background** game thread rather than
+   the main one, so a blocking initialiser cannot freeze the whole process.
+3. Read the descriptor from the static backing field
+   (`<Proto>k__BackingField` exists on `MessageDescriptor`) instead of calling
+   the getter, avoiding the C# static constructor altogether.
+4. Try after logging in. Game-protocol descriptors may simply not be
+   initialisable at the title screen, which would explain why every route
+   fails there. This means running a modified client against a real account —
+   your call, and not required for anything the passive sniffer does.
 
 ### 2. Re-join the registry on real names
 

@@ -19,8 +19,15 @@
 #   tools/frida/run.py -p <pid>             # attach and dump
 set -euo pipefail
 
+# The copy MUST live beside the original. Dofus resolves its Addressables
+# catalogs relative to the launch directory; run it from anywhere else and it
+# dies early with
+#     ERROR [Addressables] (AddressableUtility:118) - Unable to find catalog list
+# The window opens but the game never boots: DataCenter never loads, no
+# per-frame method ever runs, and the protocol descriptors cannot initialise.
+# It looks like a hung client rather than a failed one.
 SRC="${1:-/Applications/Ankama/Dofus-dofus3/Dofus.app}"
-DEST="${2:-$(cd "$(dirname "$0")/.." && pwd)/build/Dofus-debug.app}"
+DEST="${2:-$(dirname "${1:-/Applications/Ankama/Dofus-dofus3/Dofus.app}")/Dofus-debug.app}"
 
 [ -d "$SRC" ] || { echo "source app not found: $SRC" >&2; exit 1; }
 
@@ -74,12 +81,17 @@ codesign -d --entitlements - "$DEST/Contents/MacOS/Dofus" 2>&1 | grep -q "get-ta
 
 cat <<EOF
 
-Next:
-  "$DEST/Contents/MacOS/Dofus" &
-  # wait ~15s for the IL2CPP runtime to come up, note the pid, then:
+Next — note the cd, it is required, see the comment at the top of this script:
+
+  cd "$(dirname "$DEST")"
+  ./$(basename "$DEST")/Contents/MacOS/Dofus --gameName dofus --gameRelease dofus3 --langCode fr &
+  # give it ~30s, confirm it actually booted:
+  grep -c "Unable to find catalog list" ~/Library/Logs/Ankama/Dofus/Player.log   # want 0
+  tail ~/Library/Logs/Ankama/Dofus/Player.log                                    # want EventSystem:Update()
   ~/.local/pipx/venvs/frida-tools/bin/python tools/frida/run.py -p <pid>
 
 The scan makes the client unresponsive for its whole duration. Run it against
-this copy, not a client you are playing on. No login is required — the protobuf
-descriptors are static and readable from the login screen.
+this copy, not a client you are playing on.
+
+To remove: rm -rf "$DEST"
 EOF

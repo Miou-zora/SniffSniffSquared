@@ -1,74 +1,79 @@
 /*
- * Diagnostic probe — what does the protobuf reflection API expose, and is
- * there a bulk path that avoids ~80 IL2CPP invokes per message?
+ * Find a method the game calls regularly on its own thread, to piggyback the
+ * descriptor extraction onto.
  *
- * The per-field walk in agent.ts costs roughly 8 invokes per field across
- * ~2300 messages and has never finished. If FileDescriptor exposes its
- * serialized FileDescriptorProto, one call per .proto file yields every
- * message in it and we parse host-side instead.
+ * Why: invoking a game-protocol descriptor getter from an injected thread
+ * deadlocks (see RUNBOOK part 3). Il2Cpp.perform(..., "main") does not help --
+ * it attaches our thread to the main context rather than running our code on
+ * the game's thread. Hooking a real per-frame method does.
  *
  * Build: npx frida-compile probe.ts -o probe.js
  * Run:   run.py -p <pid> -a probe.js
  */
 import "frida-il2cpp-bridge";
 
-function findClass(name: string): Il2Cpp.Class | null {
-  for (const asm of Il2Cpp.domain.assemblies) {
-    const k = asm.image.tryClass(name);
-    if (k) return k;
-  }
-  return null;
-}
-
-function members(klass: Il2Cpp.Class, label: string) {
-  console.log(`[probe] ${label} methods:`);
-  for (const m of klass.methods) {
-    if (m.parameterCount > 1) continue;
-    console.log(`  ${m.isStatic ? "static " : ""}${m.name} -> ${m.returnType.name} (${m.parameterCount})`);
-  }
-  console.log(`[probe] ${label} fields:`);
-  for (const f of klass.fields) {
-    console.log(`  ${f.isStatic ? "static " : ""}${f.name}: ${f.type.name}`);
-  }
-}
-
 Il2Cpp.perform(() => {
-  const md = findClass("Google.Protobuf.Reflection.MessageDescriptor");
-  const fd = findClass("Google.Protobuf.Reflection.FileDescriptor");
-  if (md) members(md, "MessageDescriptor");
-  if (fd) members(fd, "FileDescriptor");
+  const candidates: { klass: string; method: string; asm: string }[] = [];
 
-  // Can we reach a serialized descriptor from a real message class?
-  const ksv = findClass("ksv");
-  if (ksv) {
-    let getter: Il2Cpp.Method | null = null;
-    for (const m of ksv.methods) {
-      if (m.isStatic && m.parameterCount === 0 && m.returnType.name.indexOf("MessageDescriptor") >= 0) {
-        getter = m;
+  for (const asm of Il2Cpp.domain.assemblies) {
+    // the game's own code, not engine internals
+    if (asm.name.indexOf("Core") < 0 && asm.name.indexOf("Ankama") < 0) continue;
+    for (const klass of asm.image.classes) {
+      let methods;
+      try {
+        methods = klass.methods;
+      } catch (_) {
+        continue;
+      }
+      for (const m of methods) {
+        if (m.isStatic || m.parameterCount !== 0) continue;
+        if (m.name !== "Update" && m.name !== "LateUpdate" && m.name !== "Tick") continue;
+        if (m.virtualAddress.isNull()) continue;
+        candidates.push({ klass: klass.type.name, method: m.name, asm: asm.name });
         break;
       }
+      if (candidates.length >= 40) break;
     }
-    if (getter) {
-      const desc = getter.invoke() as Il2Cpp.Object;
-      console.log(`[probe] ksv descriptor FullName = ${(desc.method("get_FullName").invoke() as Il2Cpp.String).content}`);
-      try {
-        const file = desc.method("get_File").invoke() as Il2Cpp.Object;
-        console.log(`[probe] ksv .File name = ${(file.method("get_Name").invoke() as Il2Cpp.String).content}`);
-        // the prize: serialized FileDescriptorProto for the whole file
-        for (const cand of ["get_SerializedData", "get_SerializedProto", "SerializedData"]) {
-          try {
-            const bs = file.method(cand).invoke() as Il2Cpp.Object;
-            const len = bs.method("get_Length").invoke() as number;
-            console.log(`[probe] *** ${cand} -> ByteString of ${len} bytes ***`);
-          } catch (e) {
-            console.log(`[probe] ${cand}: not available`);
-          }
-        }
-      } catch (e) {
-        console.log(`[probe] .File: ${e}`);
+    if (candidates.length >= 40) break;
+  }
+
+  send({ event: "hb", asm: "candidates", scanned: candidates.length, messages: 0, files: 0 });
+  for (const c of candidates.slice(0, 40)) {
+    console.log(`[cand] ${c.asm} :: ${c.klass}.${c.method}`);
+  }
+
+  // Hook them all and report which ones actually fire, and on which thread.
+  let hits: Record<string, number> = {};
+  for (const c of candidates.slice(0, 40)) {
+    const klass = (() => {
+      for (const a of Il2Cpp.domain.assemblies) {
+        const k = a.image.tryClass(c.klass);
+        if (k) return k;
       }
+      return null;
+    })();
+    if (!klass) continue;
+    const m = klass.tryMethod(c.method);
+    if (!m || m.virtualAddress.isNull()) continue;
+    const label = `${c.klass}.${c.method}`;
+    try {
+      Interceptor.attach(m.virtualAddress, {
+        onEnter() {
+          hits[label] = (hits[label] || 0) + 1;
+        },
+      });
+    } catch (e) {
+      /* not hookable */
     }
   }
 
-  send({ event: "done", messages: {}, idMap: {} });
+  // let the game run, then report which hooks fired
+  setTimeout(() => {
+    const fired = Object.keys(hits)
+      .sort((a, b) => hits[b] - hits[a])
+      .slice(0, 10)
+      .map((k) => `${k}=${hits[k]}`);
+    send({ event: "hb", asm: "fired", scanned: Object.keys(hits).length, messages: 0, files: 0, at: fired.join(" ") });
+    send({ event: "done", messages: 0, files: 0, classes: 0 });
+  }, 5000);
 });

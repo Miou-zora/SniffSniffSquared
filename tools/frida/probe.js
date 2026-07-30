@@ -1,5 +1,5 @@
 📦
-140890 /probe.js
+140892 /probe.js
 ✄
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -3353,63 +3353,68 @@ var require_probe = __commonJS({
     init_node_globals();
     Object.defineProperty(exports, "__esModule", { value: true });
     init_dist();
-    function findClass(name) {
-      for (const asm of Il2Cpp.domain.assemblies) {
-        const k = asm.image.tryClass(name);
-        if (k)
-          return k;
-      }
-      return null;
-    }
-    function members(klass, label) {
-      console.log(`[probe] ${label} methods:`);
-      for (const m of klass.methods) {
-        if (m.parameterCount > 1)
-          continue;
-        console.log(`  ${m.isStatic ? "static " : ""}${m.name} -> ${m.returnType.name} (${m.parameterCount})`);
-      }
-      console.log(`[probe] ${label} fields:`);
-      for (const f of klass.fields) {
-        console.log(`  ${f.isStatic ? "static " : ""}${f.name}: ${f.type.name}`);
-      }
-    }
     Il2Cpp.perform(() => {
-      const md = findClass("Google.Protobuf.Reflection.MessageDescriptor");
-      const fd = findClass("Google.Protobuf.Reflection.FileDescriptor");
-      if (md)
-        members(md, "MessageDescriptor");
-      if (fd)
-        members(fd, "FileDescriptor");
-      const ksv = findClass("ksv");
-      if (ksv) {
-        let getter2 = null;
-        for (const m of ksv.methods) {
-          if (m.isStatic && m.parameterCount === 0 && m.returnType.name.indexOf("MessageDescriptor") >= 0) {
-            getter2 = m;
+      const candidates = [];
+      for (const asm of Il2Cpp.domain.assemblies) {
+        if (asm.name.indexOf("Core") < 0 && asm.name.indexOf("Ankama") < 0)
+          continue;
+        for (const klass of asm.image.classes) {
+          let methods;
+          try {
+            methods = klass.methods;
+          } catch (_) {
+            continue;
+          }
+          for (const m of methods) {
+            if (m.isStatic || m.parameterCount !== 0)
+              continue;
+            if (m.name !== "Update" && m.name !== "LateUpdate" && m.name !== "Tick")
+              continue;
+            if (m.virtualAddress.isNull())
+              continue;
+            candidates.push({ klass: klass.type.name, method: m.name, asm: asm.name });
             break;
           }
+          if (candidates.length >= 40)
+            break;
         }
-        if (getter2) {
-          const desc = getter2.invoke();
-          console.log(`[probe] ksv descriptor FullName = ${desc.method("get_FullName").invoke().content}`);
-          try {
-            const file = desc.method("get_File").invoke();
-            console.log(`[probe] ksv .File name = ${file.method("get_Name").invoke().content}`);
-            for (const cand of ["get_SerializedData", "get_SerializedProto", "SerializedData"]) {
-              try {
-                const bs = file.method(cand).invoke();
-                const len = bs.method("get_Length").invoke();
-                console.log(`[probe] *** ${cand} -> ByteString of ${len} bytes ***`);
-              } catch (e) {
-                console.log(`[probe] ${cand}: not available`);
-              }
-            }
-          } catch (e) {
-            console.log(`[probe] .File: ${e}`);
+        if (candidates.length >= 40)
+          break;
+      }
+      send({ event: "hb", asm: "candidates", scanned: candidates.length, messages: 0, files: 0 });
+      for (const c of candidates.slice(0, 40)) {
+        console.log(`[cand] ${c.asm} :: ${c.klass}.${c.method}`);
+      }
+      let hits = {};
+      for (const c of candidates.slice(0, 40)) {
+        const klass = (() => {
+          for (const a of Il2Cpp.domain.assemblies) {
+            const k = a.image.tryClass(c.klass);
+            if (k)
+              return k;
           }
+          return null;
+        })();
+        if (!klass)
+          continue;
+        const m = klass.tryMethod(c.method);
+        if (!m || m.virtualAddress.isNull())
+          continue;
+        const label = `${c.klass}.${c.method}`;
+        try {
+          Interceptor.attach(m.virtualAddress, {
+            onEnter() {
+              hits[label] = (hits[label] || 0) + 1;
+            }
+          });
+        } catch (e) {
         }
       }
-      send({ event: "done", messages: {}, idMap: {} });
+      setTimeout(() => {
+        const fired = Object.keys(hits).sort((a, b) => hits[b] - hits[a]).slice(0, 10).map((k) => `${k}=${hits[k]}`);
+        send({ event: "hb", asm: "fired", scanned: Object.keys(hits).length, messages: 0, files: 0, at: fired.join(" ") });
+        send({ event: "done", messages: 0, files: 0, classes: 0 });
+      }, 5e3);
     });
   }
 });

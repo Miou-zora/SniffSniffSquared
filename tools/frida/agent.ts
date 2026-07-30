@@ -122,33 +122,10 @@ function serialize(msg: Il2Cpp.Object): string | null {
 // and goes on pumping messages instead of tearing the session down.
 Il2Cpp.perform(() => {
   const seenFiles: Record<string, boolean> = {};
-  const classMap: Record<string, string> = {}; // descriptor FullName -> obfuscated C# type
-  let messages = 0,
-    filesOut = 0,
-    scanned = 0;
+  const classMap: Record<string, string> = {};
+  let messages = 0, filesOut = 0, scanned = 0;
 
-  if (!findToByteArray()) {
-    console.log("[agent] WARNING: MessageExtensions.ToByteArray not found; cannot serialize descriptors");
-  }
-
-    // ---- seed from classes known to be on the wire -------------------------
-  //
-  // A blind class scan deadlocks almost immediately: invoking the descriptor
-  // getter on the first classes of Ankama.Dofus.Protocol.Game (hdx, then hdy,
-  // ...) never returns, and the process goes idle rather than busy. Skipping
-  // them one at a time does not converge -- they all trip the same shared
-  // static initialisation.
-  //
-  // Directly resolving a class that is actually used on the wire works fine
-  // (verified with `ksv`). So seed from those, take each one's FileDescriptor,
-  // and walk the dependency graph. One serialized FileDescriptorProto covers
-  // every message in that .proto file, so a handful of seeds reaches the whole
-  // protocol without touching the poisoned classes.
-  const SEEDS = [
-    "ksv", "jrj", "jri", "iwa", "kmw", "knh", "jpp", "kqh", "kdh", "kag", "jqj",
-  ];
-
-  const pending: Il2Cpp.Object[] = [];
+  const SEEDS = ["ksv", "jrj", "jri", "iwa", "kmw", "knh", "jpp", "kqh", "kdh", "kag", "jqj"];
 
   function findClassAnywhere(name: string): Il2Cpp.Class | null {
     for (const a of Il2Cpp.domain.assemblies) {
@@ -158,76 +135,93 @@ Il2Cpp.perform(() => {
     return null;
   }
 
+  const pending: Il2Cpp.Object[] = [];
+
   function emitFile(file: Il2Cpp.Object): void {
     let fname = "";
     try {
       fname = (file.method("get_Name").invoke() as Il2Cpp.String).content || "";
-    } catch (e) {
-      return;
-    }
+    } catch (e) { return; }
     if (!fname || seenFiles[fname]) return;
     seenFiles[fname] = true;
     try {
       const proto = file.method("ToProto").invoke() as Il2Cpp.Object;
       const hex = serialize(proto);
-      if (hex) {
-        send({ event: "file", name: fname, hex });
-        filesOut++;
-      }
-    } catch (e) {
-      send({ event: "hb", asm: "serialize-failed", scanned, messages, files: filesOut, at: fname });
-    }
-    // follow imports so one seed can reach a whole package
+      if (hex) { send({ event: "file", name: fname, hex }); filesOut++; }
+    } catch (e) { /* ignore */ }
     try {
       const deps = file.method("get_Dependencies").invoke() as Il2Cpp.Object;
       const n = deps.method("get_Count").invoke() as number;
-      for (let i = 0; i < n; i++) {
-        pending.push(deps.method("get_Item").invoke(i) as Il2Cpp.Object);
+      for (let i = 0; i < n; i++) pending.push(deps.method("get_Item").invoke(i) as Il2Cpp.Object);
+    } catch (e) { /* none */ }
+  }
+
+  /** The extraction itself. Must run on a game thread, not an injected one. */
+  function extract(): void {
+    for (const name of SEEDS) {
+      scanned++;
+      const klass = findClassAnywhere(name);
+      if (!klass) continue;
+      const gd = descriptorGetter(klass);
+      if (!gd) continue;
+      send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, invoking: name });
+      try {
+        const desc = gd.invoke() as Il2Cpp.Object;
+        const full = (desc.method("get_FullName").invoke() as Il2Cpp.String).content;
+        if (full) { classMap[full] = klass.type.name; messages++; }
+        emitFile(desc.method("get_File").invoke() as Il2Cpp.Object);
+      } catch (e) {
+        send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " threw" });
       }
-    } catch (e) {
-      /* no Dependencies accessor on this protobuf version */
     }
+    while (pending.length > 0) emitFile(pending.pop() as Il2Cpp.Object);
+
+    const entries = Object.keys(classMap);
+    for (let i = 0; i < entries.length; i += 250) {
+      const chunk: Record<string, string> = {};
+      for (const k of entries.slice(i, i + 250)) chunk[k] = classMap[k];
+      send({ event: "classmap", chunk });
+    }
+    send({ event: "done", messages, files: filesOut, classes: scanned });
   }
 
-  for (const name of SEEDS) {
-    scanned++;
-    const klass = findClassAnywhere(name);
-    if (!klass) {
-      send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " (absent)" });
-      continue;
-    }
-    const gd = descriptorGetter(klass);
-    if (!gd) {
-      send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " (no descriptor)" });
-      continue;
-    }
-    send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, invoking: name });
-    try {
-      const desc = gd.invoke() as Il2Cpp.Object;
-      const full = (desc.method("get_FullName").invoke() as Il2Cpp.String).content;
-      if (full) {
-        classMap[full] = klass.type.name;
-        messages++;
-      }
-      emitFile(desc.method("get_File").invoke() as Il2Cpp.Object);
-    } catch (e) {
-      send({ event: "hb", asm: "seed", scanned, messages, files: filesOut, skipped: name + " (threw)" });
+  // ---- run it on the game's own thread ------------------------------------
+  //
+  // Invoking a game-protocol descriptor getter from the injected thread
+  // deadlocks: the static constructor and the Unity main thread contend for
+  // the IL2CPP class-init lock and neither wins. Il2Cpp.perform(..., "main")
+  // does not help -- it attaches our thread to the main context rather than
+  // running our code on the game's thread.
+  //
+  // So piggyback: hook a per-frame method and do the work inside the hook,
+  // where we ARE the game thread and the lock is already ours. The client
+  // freezes for the duration, which is expected.
+  let ran = false;
+  // EventSystem.Update is confirmed running at the title screen (it appears in
+  // Player.log). The game's own classes are not instantiated that early.
+  const HOOKS = ["UnityEngine.EventSystems.EventSystem",
+                 "UnityEngine.InputSystem.UI.InputSystemUIInputModule",
+                 "us", "wq", "wu", "wv", "wy", "xd", "xf",
+                 "Core.Rendering.MapRenderer"];
+  let attached = 0;
+  for (const cname of HOOKS) {
+    const k = findClassAnywhere(cname);
+    if (!k) continue;
+    for (const mname of ["Update", "LateUpdate", "Process", "Tick"]) {
+      const m = k.tryMethod(mname);
+      if (!m || m.parameterCount !== 0 || m.virtualAddress.isNull()) continue;
+      try {
+        Interceptor.attach(m.virtualAddress, {
+          onEnter() {
+            if (ran) return;
+            ran = true;
+            try { extract(); } catch (e) { send({ event: "hb", asm: "extract-threw", scanned, messages, files: filesOut, at: String(e) }); }
+          },
+        });
+        attached++;
+      } catch (e) { /* not hookable */ }
+      break;
     }
   }
-
-  // transitive imports
-  while (pending.length > 0) {
-    emitFile(pending.pop() as Il2Cpp.Object);
-  }
-
-  // class map in batches, so one oversized message can't stall the transport
-  const entries = Object.keys(classMap);
-  for (let i = 0; i < entries.length; i += 250) {
-    const chunk: Record<string, string> = {};
-    for (const k of entries.slice(i, i + 250)) chunk[k] = classMap[k];
-    send({ event: "classmap", chunk });
-  }
-
-  console.log(`[agent] done: classes=${scanned} messages=${messages} files=${filesOut}`);
-  send({ event: "done", messages, files: filesOut, classes: scanned });
+  send({ event: "hb", asm: "hooks-attached", scanned: attached, messages: 0, files: 0 });
 });
