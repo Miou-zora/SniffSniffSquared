@@ -1,0 +1,767 @@
+{
+ "channel.Channel": {
+  "fields": [
+   {
+    "csharp": "string",
+    "name": "channel_id",
+    "num": 1
+   },
+   {
+    "csharp": "RepeatedField<user.User>",
+    "name": "members",
+    "num": 2
+   },
+   {
+    "csharp": "long",
+    "name": "last_message_created_timestamp",
+    "num": 3
+   }
+  ],
+  "real": "channel.Channel"
+ },
+ "channel.ChannelDeletedEvt": {
+  "fields": [
+   {
+    "csharp": "string",
+    "name": "channel_id",
+    "num": 1
+   },
+   {
+    "csharp": "long",
+    "name": "member_user_id",
+    "num": 2
+   }
+  ],
+  "real": "channel.ChannelDeletedEvt"
+ },
+ "channel.ChannelList": {
+  "fields": [
+   {
+    "csharp": "RepeatedField<channel.Channel>",
+    "name": "values",
+    "num": 1
+   }
+  ],
+  "real": "channel.ChannelList"
+ },
+ "channel.ChannelMessage": {
+  "fields": [
+   {
+    "csharp": "string",
+    "name": "message_id",
+    "num": 1
+   },
+   {
+    "csharp": "string",
+    "name": "channel_id",
+    "num": 2
+   },
+   {
+    "csharp": "long",
+    "name": "created_timestamp",
+    "num": 3
+   },
+   {
+    "csharp": "string",
+    "name": "content",
+    "num": 4
+   },
+   {
+    "csharp": "user.User",
+    "name": "author",
+    "num": 5
+   }
+  ],
+  "real": "channel.ChannelMessage"
+ },
+ "channel.ChannelMessageCreatedEvt": {
+  "fields": [
+   {
+    "csharp": "channel.ChannelMessage",
+    "name": "message",
+    "num": 1
+   }
+  ],
+  "real": "channel.ChannelMessageCreatedEvt"
+ },
+ "channel.ChannelMessageList": {
+  "fields": [
+   {
+    "csharp": "RepeatedField<channel.ChannelMessage>",
+    "name": "values",
+    "num": 1
+   }
+  ],
+  "real": "channel.ChannelMessageList"
+ },
+ "channel.CreateChannelMessageCmd": {
+  "fields": [
+   {
+    "csharp": "string",
+    "name": "channel_id",
+    "num": 1
+   },
+   {
+    "csharp": "long",
+    "name": "author_user_id",
+    "num": 2
+   },
+   {
+    "csharp": "string",
+    "name": "content",
+    "num": 3
+   }
+  ],
+  "real": "channel.CreateChannelMessageCmd"
+ },
+ "channel.DeleteChannelCmd": {
+  "fields": [
+   {
+    "csharp": "string",
+    "name": "channel_id",
+    "num": 1
+   },
+   {
+    "csharp": "long",
+    "name": "member_user_id",
+    "num": 2
+   }
+  ],
+  "real": "channel.DeleteChannelCmd"
+ },
+ "channel.ListChannelMessagesCmd": {
+  "fields": [
+   {
+    "csharp": "string",
+    "name": "channel_id",
+    "num": 1
+   },
+   {
+    "csharp": "int",
+    "name": "limit",
+    "num": 2
+   },
+   {
+    "csharp": "string",
+    "name": "before",
+    "num": 3
+   },
+   {
+    "csharp": "string",
+    "name": "after",
+    "num": 4
+   }
+  ],
+  "real": "channel.ListChannelMessagesCmd"
+ },
+ "channel.ListChannelsCmd": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "member_user_id",
+    "num": 1
+   }
+  ],
+  "real": "channel.ListChannelsCmd"
+ },
+ "friend_invite.CreateFriendInviteCmd": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "inviter_user_id",
+    "num": 1
+   },
+   {
+    "csharp": "long",
+    "name": "recipient_user_id",
+    "num": 2
+   },
+   {
+    "csharp": "friend_invite.CreateFriendInviteCmd.RecipientUserNameAndTag",
+    "name": "recipient_user_name_and_tag",
+    "num": 4
+   }
+  ],
+  "real": "friend_invite.CreateFriendInviteCmd"
+ },
+ "friend_invite.CreateFriendInviteCmd.RecipientUserNameAndTag": {
+  "fields": [
+   {
+    "csharp": "string",
+    "name": "name",
+    "num": 1
+   },
+   {
+    "csharp": "string",
+    "name": "tag",
+    "num": 2
+   }
+  ],
+  "real": "friend_invite.CreateFriendInviteCmd.RecipientUserNameAndTag"
+ },
+ "friend_invite.DeleteFriendInviteCmd": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "inviter_user_id",
+    "num": 1
+   },
+   {
+    "csharp": "long",
+    "name": "recipient_user_id",
+    "num": 2
+   },
+   {
+    "csharp": "friend_invite.DeleteFriendInviteCmd.Reason",
+    "name": "reason",
+    "num": 3
+   }
+  ],
+  "real": "friend_invite.DeleteFriendInviteCmd"
+ },
+ "friend_invite.FriendInvite": {
+  "fields": [
+   {
+    "csharp": "user.User",
+    "name": "inviter",
+    "num": 1
+   },
+   {
+    "csharp": "user.User",
+    "name": "recipient",
+    "num": 2
+   }
+  ],
+  "real": "friend_invite.FriendInvite"
+ },
+ "friend_invite.FriendInviteCreatedEvt": {
+  "fields": [
+   {
+    "csharp": "friend_invite.FriendInvite",
+    "name": "invite",
+    "num": 1
+   }
+  ],
+  "real": "friend_invite.FriendInviteCreatedEvt"
+ },
+ "friend_invite.FriendInviteDeletedEvt": {
+  "fields": [
+   {
+    "csharp": "friend_invite.FriendInvite",
+    "name": "invite",
+    "num": 1
+   },
+   {
+    "csharp": "friend_invite.DeleteFriendInviteCmd.Reason",
+    "name": "reason",
+    "num": 2
+   }
+  ],
+  "real": "friend_invite.FriendInviteDeletedEvt"
+ },
+ "friend_invite.FriendInviteList": {
+  "fields": [
+   {
+    "csharp": "RepeatedField<friend_invite.FriendInvite>",
+    "name": "values",
+    "num": 1
+   }
+  ],
+  "real": "friend_invite.FriendInviteList"
+ },
+ "transport.Frame": {
+  "fields": [
+   {
+    "csharp": "transport.Frame.Request",
+    "name": "request",
+    "num": 1
+   },
+   {
+    "csharp": "transport.Frame.Response",
+    "name": "response",
+    "num": 2
+   },
+   {
+    "csharp": "transport.Frame.Payload",
+    "name": "event",
+    "num": 3
+   }
+  ],
+  "real": "transport.Frame"
+ },
+ "transport.Frame.Payload": {
+  "fields": [
+   {
+    "csharp": "int",
+    "name": "id",
+    "num": 1
+   },
+   {
+    "csharp": "ByteString",
+    "name": "data",
+    "num": 2
+   }
+  ],
+  "real": "transport.Frame.Payload"
+ },
+ "transport.Frame.Request": {
+  "fields": [
+   {
+    "csharp": "int",
+    "name": "correlation_id",
+    "num": 1
+   },
+   {
+    "csharp": "transport.Frame.Payload",
+    "name": "payload",
+    "num": 2
+   }
+  ],
+  "real": "transport.Frame.Request"
+ },
+ "transport.Frame.Response": {
+  "fields": [
+   {
+    "csharp": "int",
+    "name": "correlation_id",
+    "num": 1
+   },
+   {
+    "csharp": "transport.Frame.Response.Status",
+    "name": "status",
+    "num": 2
+   },
+   {
+    "csharp": "transport.Frame.Payload",
+    "name": "payload",
+    "num": 3
+   }
+  ],
+  "real": "transport.Frame.Response"
+ },
+ "user.CreateUserBlockedUserCmd": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "long",
+    "name": "blocked_user_id",
+    "num": 2
+   }
+  ],
+  "real": "user.CreateUserBlockedUserCmd"
+ },
+ "user.CreateUserFriendGroupCmd": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "user.Friend.Group",
+    "name": "group",
+    "num": 2
+   }
+  ],
+  "real": "user.CreateUserFriendGroupCmd"
+ },
+ "user.DeleteUserBlockedUserCmd": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "long",
+    "name": "blocked_user_id",
+    "num": 2
+   }
+  ],
+  "real": "user.DeleteUserBlockedUserCmd"
+ },
+ "user.DeleteUserFriendCmd": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "long",
+    "name": "friend_user_id",
+    "num": 2
+   }
+  ],
+  "real": "user.DeleteUserFriendCmd"
+ },
+ "user.DeleteUserFriendGroupCmd": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "string",
+    "name": "name",
+    "num": 2
+   }
+  ],
+  "real": "user.DeleteUserFriendGroupCmd"
+ },
+ "user.EndpointProperties": {
+  "fields": [
+   {
+    "csharp": "int",
+    "name": "application_id",
+    "num": 1
+   },
+   {
+    "csharp": "RepeatedField<string>",
+    "name": "activities",
+    "num": 2
+   },
+   {
+    "csharp": "RepeatedField<user.EndpointProperties.MetadataEntry>",
+    "name": "metadata",
+    "num": 3
+   }
+  ],
+  "real": "user.EndpointProperties"
+ },
+ "user.EndpointProperties.MetadataEntry": {
+  "fields": [
+   {
+    "csharp": "string",
+    "name": "key",
+    "num": 1
+   },
+   {
+    "csharp": "string",
+    "name": "value",
+    "num": 2
+   }
+  ],
+  "real": "user.EndpointProperties.MetadataEntry"
+ },
+ "user.Friend": {
+  "fields": [
+   {
+    "csharp": "user.User",
+    "name": "user",
+    "num": 1
+   },
+   {
+    "csharp": "user.Friend.Group",
+    "name": "group",
+    "num": 2
+   },
+   {
+    "csharp": "string",
+    "name": "note",
+    "num": 3
+   }
+  ],
+  "real": "user.Friend"
+ },
+ "user.Friend.Group": {
+  "fields": [
+   {
+    "csharp": "string",
+    "name": "name",
+    "num": 1
+   }
+  ],
+  "real": "user.Friend.Group"
+ },
+ "user.FriendGroupList": {
+  "fields": [
+   {
+    "csharp": "RepeatedField<user.Friend.Group>",
+    "name": "values",
+    "num": 1
+   }
+  ],
+  "real": "user.FriendGroupList"
+ },
+ "user.FriendList": {
+  "fields": [
+   {
+    "csharp": "RepeatedField<user.Friend>",
+    "name": "values",
+    "num": 1
+   }
+  ],
+  "real": "user.FriendList"
+ },
+ "user.ListUserBlockedUsersCmd": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   }
+  ],
+  "real": "user.ListUserBlockedUsersCmd"
+ },
+ "user.ListUserFriendGroupsCmd": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   }
+  ],
+  "real": "user.ListUserFriendGroupsCmd"
+ },
+ "user.ListUserFriendInvitesCmd": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   }
+  ],
+  "real": "user.ListUserFriendInvitesCmd"
+ },
+ "user.ListUserFriendsCmd": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   }
+  ],
+  "real": "user.ListUserFriendsCmd"
+ },
+ "user.UpdateUserEndpointPropertiesCmd": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "user.EndpointProperties",
+    "name": "properties",
+    "num": 2
+   }
+  ],
+  "real": "user.UpdateUserEndpointPropertiesCmd"
+ },
+ "user.UpdateUserFriendCmd": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "user.Friend",
+    "name": "friend",
+    "num": 2
+   }
+  ],
+  "real": "user.UpdateUserFriendCmd"
+ },
+ "user.UpdateUserStatusCmd": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "user.UserStatus",
+    "name": "status",
+    "num": 2
+   }
+  ],
+  "real": "user.UpdateUserStatusCmd"
+ },
+ "user.User": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "string",
+    "name": "name",
+    "num": 2
+   },
+   {
+    "csharp": "string",
+    "name": "tag",
+    "num": 3
+   }
+  ],
+  "real": "user.User"
+ },
+ "user.UserBlockedUserCreatedEvt": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "user.User",
+    "name": "blocked_user",
+    "num": 2
+   }
+  ],
+  "real": "user.UserBlockedUserCreatedEvt"
+ },
+ "user.UserBlockedUserDeletedEvt": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "long",
+    "name": "blocked_user_id",
+    "num": 2
+   }
+  ],
+  "real": "user.UserBlockedUserDeletedEvt"
+ },
+ "user.UserEndpointPropertiesUpdatedEvt": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "RepeatedField<user.EndpointProperties>",
+    "name": "properties",
+    "num": 2
+   }
+  ],
+  "real": "user.UserEndpointPropertiesUpdatedEvt"
+ },
+ "user.UserFriendCreatedEvt": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "user.Friend",
+    "name": "friend",
+    "num": 2
+   }
+  ],
+  "real": "user.UserFriendCreatedEvt"
+ },
+ "user.UserFriendDeletedEvt": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "long",
+    "name": "friend_user_id",
+    "num": 2
+   }
+  ],
+  "real": "user.UserFriendDeletedEvt"
+ },
+ "user.UserFriendGroupCreatedEvt": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "user.Friend.Group",
+    "name": "group",
+    "num": 2
+   }
+  ],
+  "real": "user.UserFriendGroupCreatedEvt"
+ },
+ "user.UserFriendGroupDeletedEvt": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "string",
+    "name": "name",
+    "num": 2
+   }
+  ],
+  "real": "user.UserFriendGroupDeletedEvt"
+ },
+ "user.UserFriendUpdatedEvt": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "user.Friend",
+    "name": "friend",
+    "num": 2
+   }
+  ],
+  "real": "user.UserFriendUpdatedEvt"
+ },
+ "user.UserList": {
+  "fields": [
+   {
+    "csharp": "RepeatedField<user.User>",
+    "name": "values",
+    "num": 1
+   }
+  ],
+  "real": "user.UserList"
+ },
+ "user.UserPresenceUpdatedEvt": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "user.UserPresence",
+    "name": "presence",
+    "num": 2
+   }
+  ],
+  "real": "user.UserPresenceUpdatedEvt"
+ },
+ "user.UserStatusUpdatedEvt": {
+  "fields": [
+   {
+    "csharp": "long",
+    "name": "user_id",
+    "num": 1
+   },
+   {
+    "csharp": "user.UserStatus",
+    "name": "status",
+    "num": 2
+   }
+  ],
+  "real": "user.UserStatusUpdatedEvt"
+ }
+}

@@ -27,7 +27,7 @@ explanation, the verified command sequence, and a "dead ends" list.
 ```
 src/            Rust sniffer (see module table in RUNBOOK.md part 1)
 proto/          messages.json (schema registry) + generated dofus3.proto
-tools/          gen_proto.py, resign-debug-app.sh
+tools/          gen_proto.py, parse_descriptors.py, resign-debug-app.sh
 tools/frida/    runtime schema extraction: agent.ts, probe.ts, run.py
 docs/           observations.md — annotated real captures
 reference/      il2cpp-dump-20260710/, Mapping.v2*.json (inputs to gen_proto.py)
@@ -92,7 +92,15 @@ docker exec dofus_db psql -U dofus -d dofus -c '\dt'
 Working: capture, reassembly, adaptive deframing, `Any` unwrapping,
 schema-vs-wire mismatch detection, signed-varint decoding, `kdh` → Postgres.
 
-Not done: the Frida full scan has never completed (killed at ~25 min; needs
-scoping and fewer per-field invokes). `dump.cs` is not committed, so
-`gen_proto.py` cannot currently regenerate the registry. The `packets` table
-exists in `init.sql` but nothing writes to it. Details in `RUNBOOK.md` part 3.
+Partly done: runtime schema extraction works and is proven end-to-end —
+`agent.ts` pulls each `.proto` file's serialized `FileDescriptorProto`,
+`tools/parse_descriptors.py` turns it into `proto/messages.runtime.json` keyed
+by protobuf `FullName` (the same token the wire uses). 51 chat-service messages
+recovered with real field names. **But the scan stops before reaching
+`Ankama.Dofus.Protocol.Game`**, so the messages that matter are still missing;
+nothing consumes `messages.runtime.json` yet. Five variables already ruled out
+— see the table in `RUNBOOK.md` part 3 before trying anything.
+
+Not done: `dump.cs` is not committed, so `gen_proto.py` cannot regenerate the
+static registry. The `packets` table exists in `init.sql` but nothing writes to
+it. Details in `RUNBOOK.md` part 3.

@@ -1,5 +1,5 @@
 📦
-144531 /agent.js
+142643 /agent.js
 ✄
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -2940,7 +2940,7 @@ ${this.isEnum ? `enum` : this.isStruct ? `struct` : this.isInterface ? `interfac
       Il2Cpp3.reference = reference;
     })(Il2Cpp2 || (Il2Cpp2 = {}));
     (function(Il2Cpp3) {
-      class String2 extends NativeStruct {
+      class String extends NativeStruct {
         /** Gets the content of this string. */
         get content() {
           return Il2Cpp3.exports.stringGetChars(this).readUtf16String(this.length);
@@ -2969,7 +2969,7 @@ ${this.isEnum ? `enum` : this.isStruct ? `struct` : this.isInterface ? `interfac
           return this.isNull() ? "null" : `"${this.content}"`;
         }
       }
-      Il2Cpp3.String = String2;
+      Il2Cpp3.String = String;
       function string(content) {
         return new Il2Cpp3.String(Il2Cpp3.exports.stringNew(Memory.allocUtf8String(content ?? "")));
       }
@@ -3353,42 +3353,6 @@ var require_agent = __commonJS({
     init_node_globals();
     Object.defineProperty(exports, "__esModule", { value: true });
     init_dist();
-    var FIELD_TYPE = {
-      0: "double",
-      1: "float",
-      2: "int64",
-      3: "uint64",
-      4: "int32",
-      5: "fixed64",
-      6: "fixed32",
-      7: "bool",
-      8: "string",
-      9: "group",
-      10: "message",
-      11: "bytes",
-      12: "uint32",
-      13: "enum",
-      14: "sfixed32",
-      15: "sfixed64",
-      16: "sint32",
-      17: "sint64"
-    };
-    function findClass(fullName) {
-      for (const asm of Il2Cpp.domain.assemblies) {
-        const k = asm.image.tryClass(fullName);
-        if (k)
-          return k;
-      }
-      return null;
-    }
-    function findOverload(klass, name, paramType) {
-      for (const m of klass.methods) {
-        if (m.name === name && m.parameterCount === 1 && m.parameters[0].type.name.indexOf(paramType) >= 0) {
-          return m;
-        }
-      }
-      return null;
-    }
     var prefilterWorks = true;
     function mightBeMessage(klass) {
       if (!prefilterWorks)
@@ -3405,7 +3369,7 @@ var require_agent = __commonJS({
       }
     }
     function descriptorGetter(klass) {
-      let byName = klass.tryMethod("get_Descriptor");
+      const byName = klass.tryMethod("get_Descriptor");
       if (byName && byName.isStatic)
         return byName;
       for (const m of klass.methods) {
@@ -3416,45 +3380,57 @@ var require_agent = __commonJS({
       }
       return null;
     }
-    function readFields(descriptor) {
-      const out = [];
-      const coll = descriptor.method("get_Fields").invoke();
-      const list = coll.method("InDeclarationOrder").invoke();
-      const count = list.method("get_Count").invoke();
-      for (let i = 0; i < count; i++) {
-        const f = list.method("get_Item").invoke(i);
-        const ftype = f.method("get_FieldType").invoke();
-        const rec = {
-          name: f.method("get_Name").invoke().content,
-          number: f.method("get_FieldNumber").invoke(),
-          type: FIELD_TYPE[ftype] ?? String(ftype),
-          repeated: f.method("get_IsRepeated").invoke(),
-          map: f.method("get_IsMap").invoke()
-        };
-        try {
-          if (rec.type === "message" || rec.type === "group") {
-            const mt = f.method("get_MessageType").invoke();
-            rec.ref = mt.method("get_FullName").invoke().content;
-          } else if (rec.type === "enum") {
-            const et = f.method("get_EnumType").invoke();
-            rec.ref = et.method("get_FullName").invoke().content;
+    var toByteArray = null;
+    function findToByteArray() {
+      if (toByteArray)
+        return toByteArray;
+      for (const asm of Il2Cpp.domain.assemblies) {
+        const k = asm.image.tryClass("Google.Protobuf.MessageExtensions");
+        if (!k)
+          continue;
+        for (const m of k.methods) {
+          if (m.name === "ToByteArray" && m.isStatic && m.parameterCount === 1) {
+            toByteArray = m;
+            return m;
           }
-        } catch (_) {
         }
-        out.push(rec);
       }
-      return out;
+      return null;
+    }
+    var HEX = [];
+    for (let i = 0; i < 256; i++)
+      HEX.push(i.toString(16).padStart(2, "0"));
+    function serialize(msg) {
+      const tba = findToByteArray();
+      if (!tba)
+        return null;
+      try {
+        const arr = tba.invoke(msg);
+        const len = arr.length;
+        const buf = arr.handle.add(Il2Cpp.Array.headerSize).readByteArray(len);
+        if (!buf)
+          return null;
+        const u8 = new Uint8Array(buf);
+        const parts = new Array(len);
+        for (let i = 0; i < len; i++)
+          parts[i] = HEX[u8[i]];
+        return parts.join("");
+      } catch (e) {
+        return null;
+      }
     }
     Il2Cpp.perform(() => {
-      const messages = {};
-      let idMap = {};
-      let scanned = 0, found = 0;
+      const seenFiles = {};
+      const classMap = {};
+      let messages = 0, filesOut = 0, scanned = 0;
+      if (!findToByteArray()) {
+        console.log("[agent] WARNING: MessageExtensions.ToByteArray not found; cannot serialize descriptors");
+      }
       for (const asm of Il2Cpp.domain.assemblies) {
         const t0 = Date.now();
-        let here = 0, seen = 0;
+        let here = 0;
         for (const klass of asm.image.classes) {
           scanned++;
-          seen++;
           if (!mightBeMessage(klass))
             continue;
           const gd = descriptorGetter(klass);
@@ -3465,64 +3441,38 @@ var require_agent = __commonJS({
             const full = desc.method("get_FullName").invoke().content;
             if (!full)
               continue;
-            messages[full] = { obf: klass.type.name, fields: readFields(desc) };
-            found++;
+            classMap[full] = klass.type.name;
+            messages++;
             here++;
-          } catch (e) {
-          }
-        }
-        if (here > 0 || seen > 500) {
-          console.log(`[pass1] ${asm.name}: classes=${seen} messages=${here} (${Date.now() - t0}ms)`);
-        }
-      }
-      console.log(`[pass1] done: classes scanned=${scanned} messages=${found} prefilter=${prefilterWorks}`);
-      const esg = findClass("esg");
-      const byteString = findClass("Google.Protobuf.ByteString");
-      if (esg && byteString) {
-        let dict = esg.tryField("dqft");
-        if (!dict) {
-          for (const f of esg.fields) {
-            if (f.isStatic && f.type.name.indexOf("Dictionary") >= 0 && f.type.name.indexOf("Int32") >= 0) {
-              dict = f;
-              console.log(`[pass2] dqft not found; using static field ${f.name}: ${f.type.name}`);
-              break;
+            const file = desc.method("get_File").invoke();
+            const fname = file.method("get_Name").invoke().content || "";
+            if (fname && !seenFiles[fname]) {
+              seenFiles[fname] = true;
+              const proto = file.method("ToProto").invoke();
+              const hex = serialize(proto);
+              if (hex) {
+                send({ event: "file", name: fname, hex });
+                filesOut++;
+              } else {
+                console.log(`[agent] could not serialize ${fname}`);
+              }
             }
-          }
-        }
-        if (!dict) {
-          console.log(`[pass2] no id dictionary on esg; fields: ${esg.fields.map((f) => f.name).join(",")}`);
-          send({ event: "done", messages, idMap });
-          return;
-        }
-        const dqft = dict.value;
-        const empty = byteString.method("get_Empty").invoke();
-        const en = dqft.method("GetEnumerator").invoke();
-        let n = 0;
-        while (en.method("MoveNext").invoke()) {
-          const cur = en.method("get_Current").invoke();
-          const id = cur.method("get_Key").invoke();
-          const parser = cur.method("get_Value").invoke();
-          try {
-            const parse = findOverload(parser.class, "ParseFrom", "ByteString");
-            const msg = parse.invoke(empty);
-            const desc = msg.method("get_Descriptor").invoke();
-            const full = desc.method("get_FullName").invoke().content;
-            if (!full)
-              continue;
-            idMap[full] = id;
-            if (messages[full])
-              messages[full].id = id;
-            n++;
           } catch (e) {
-            console.log(`  id ${id}: ${e}`);
           }
         }
-        console.log(`[pass2] esg entries mapped=${n}`);
-      } else {
-        console.log(`[pass2] SKIPPED: esg=${!!esg} ByteString=${!!byteString} (adjust class name)`);
+        if (here > 0) {
+          console.log(`[agent] ${asm.name}: messages=${here} (${Date.now() - t0}ms)`);
+        }
       }
-      console.log(`done: messages=${Object.keys(messages).length}, ids=${Object.keys(idMap).length}`);
-      send({ event: "done", messages, idMap });
+      const entries = Object.keys(classMap);
+      for (let i = 0; i < entries.length; i += 250) {
+        const chunk = {};
+        for (const k of entries.slice(i, i + 250))
+          chunk[k] = classMap[k];
+        send({ event: "classmap", chunk });
+      }
+      console.log(`[agent] done: classes=${scanned} messages=${messages} files=${filesOut}`);
+      send({ event: "done", messages, files: filesOut, classes: scanned });
     });
   }
 });

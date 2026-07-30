@@ -1,58 +1,31 @@
 /*
  * Dofus 3 protocol dumper — runtime, build-exact.
  *
- * Extracts, from the LIVE client:
- *   - every protobuf message: real FullName + real field names/numbers/types
- *     (read from Google.Protobuf MessageDescriptor, which carries the real
- *      proto names even though the C# type names are obfuscated)
- *   - the wire id <-> message map (static class `esg`: Dictionary<int,MessageParser> dqft)
+ * Extracts, from the LIVE client, the serialized FileDescriptorProto of every
+ * .proto file the client has loaded. That single blob per file carries real
+ * message names, real field names, numbers, types and nesting — everything
+ * `proto/messages.json` is missing.
  *
- * Writes /tmp/dofus_protocol.json on the machine running the client.
+ * WHY THIS SHAPE: walking FieldDescriptors through the bridge costs ~8 IL2CPP
+ * invokes per field, ~184k invokes over the whole protocol. That version never
+ * finished (killed at ~25 min, freezing the client). Going via
+ * FileDescriptor.ToProto() is ~4 invokes per *message* and one serialization
+ * per *file*, and the parsing happens host-side in Python instead.
  *
- * Build:  npm i frida-il2cpp-bridge && npx frida-compile agent.ts -o agent.js
- * Run:    frida -U -n Dofus -l agent.js         (attach to running client)
- *   or    frida -U -f com.ankama.dofus -l agent.js --no-pause
+ * Results stream out per file, so a kill mid-scan still yields partial data.
  *
- * NOTE: three spots depend on frida-il2cpp-bridge version — flagged with (VERIFY).
- *       If a call throws "no such method/field/property", check those first.
+ * Build: npx frida-compile agent.ts -o agent.js
+ * Run:   run.py -p <pid>          (see RUNBOOK.md part 2.5)
  */
 import "frida-il2cpp-bridge";
 
-// Google.Protobuf.Reflection.FieldType enum -> proto type keyword
-const FIELD_TYPE: Record<number, string> = {
-  0: "double", 1: "float", 2: "int64", 3: "uint64", 4: "int32",
-  5: "fixed64", 6: "fixed32", 7: "bool", 8: "string", 9: "group",
-  10: "message", 11: "bytes", 12: "uint32", 13: "enum",
-  14: "sfixed32", 15: "sfixed64", 16: "sint32", 17: "sint64",
-};
+// ---- helpers ---------------------------------------------------------------
 
-function findClass(fullName: string): Il2Cpp.Class | null {
-  for (const asm of Il2Cpp.domain.assemblies) {
-    const k = asm.image.tryClass(fullName);
-    if (k) return k;
-  }
-  return null;
-}
-
-// find a method by name whose single parameter's type name matches paramType
-function findOverload(klass: Il2Cpp.Class, name: string, paramType: string): Il2Cpp.Method | null {
-  for (const m of klass.methods) {
-    if (m.name === name && m.parameterCount === 1 && m.parameters[0].type.name.indexOf(paramType) >= 0) {
-      return m;
-    }
-  }
-  return null;
-}
-
-// Cheap prefilter: every Google.Protobuf message implements IMessage. Reading
-// the interface list costs far less than invoking get_Descriptor on all ~50k
-// classes, which is what made a full scan take longer than anyone would wait.
-// If the bridge doesn't expose `interfaces`, fall through and test everything.
+/** Cheap prefilter: every Google.Protobuf message implements IMessage. */
 let prefilterWorks = true;
 function mightBeMessage(klass: Il2Cpp.Class): boolean {
   if (!prefilterWorks) return true;
   try {
-    // generated classes declare IMessage`1 / IBufferMessage as well as IMessage
     for (const i of klass.interfaces) {
       if (i.name.indexOf("IMessage") >= 0 || i.name === "IBufferMessage") return true;
     }
@@ -63,12 +36,14 @@ function mightBeMessage(klass: Il2Cpp.Class): boolean {
   }
 }
 
-// The generated accessors are obfuscated in the game protocol assembly
-// (get_Descriptor -> `coma`, get_Parser -> `colz`), so they can't be found by
-// name. Their signatures are untouched: a static, zero-arg method returning a
-// MessageDescriptor is the descriptor getter whatever it's called.
+/**
+ * The generated accessors are obfuscated in the game protocol assembly
+ * (get_Descriptor -> `coma`, get_Parser -> `colz`), so they cannot be found by
+ * name — doing so silently yields ZERO messages while appearing to work.
+ * Signatures survive obfuscation: static, zero-arg, returns MessageDescriptor.
+ */
 function descriptorGetter(klass: Il2Cpp.Class): Il2Cpp.Method | null {
-  let byName = klass.tryMethod("get_Descriptor");
+  const byName = klass.tryMethod("get_Descriptor");
   if (byName && byName.isStatic) return byName;
   for (const m of klass.methods) {
     if (!m.isStatic || m.parameterCount !== 0) continue;
@@ -77,47 +52,78 @@ function descriptorGetter(klass: Il2Cpp.Class): Il2Cpp.Method | null {
   return null;
 }
 
-function readFields(descriptor: Il2Cpp.Object): any[] {
-  const out: any[] = [];
-  const coll = descriptor.method("get_Fields").invoke() as Il2Cpp.Object;              // FieldCollection
-  const list = coll.method("InDeclarationOrder").invoke() as Il2Cpp.Object;            // IList<FieldDescriptor>
-  const count = (list.method("get_Count").invoke() as number);
-  for (let i = 0; i < count; i++) {
-    const f = list.method("get_Item").invoke(i) as Il2Cpp.Object;                      // FieldDescriptor
-    const ftype = f.method("get_FieldType").invoke() as number;
-    const rec: any = {
-      name: (f.method("get_Name").invoke() as Il2Cpp.String).content,
-      number: f.method("get_FieldNumber").invoke() as number,
-      type: FIELD_TYPE[ftype] ?? String(ftype),
-      repeated: f.method("get_IsRepeated").invoke() as boolean,
-      map: f.method("get_IsMap").invoke() as boolean,
-    };
-    try {
-      if (rec.type === "message" || rec.type === "group") {
-        const mt = f.method("get_MessageType").invoke() as Il2Cpp.Object;
-        rec.ref = (mt.method("get_FullName").invoke() as Il2Cpp.String).content;
-      } else if (rec.type === "enum") {
-        const et = f.method("get_EnumType").invoke() as Il2Cpp.Object;
-        rec.ref = (et.method("get_FullName").invoke() as Il2Cpp.String).content;
+/** `ToByteArray()` is an extension method, so it lives on MessageExtensions. */
+let toByteArray: Il2Cpp.Method | null = null;
+function findToByteArray(): Il2Cpp.Method | null {
+  if (toByteArray) return toByteArray;
+  for (const asm of Il2Cpp.domain.assemblies) {
+    const k = asm.image.tryClass("Google.Protobuf.MessageExtensions");
+    if (!k) continue;
+    for (const m of k.methods) {
+      if (m.name === "ToByteArray" && m.isStatic && m.parameterCount === 1) {
+        toByteArray = m;
+        return m;
       }
-    } catch (_) { /* older proto lib: skip ref */ }
-    out.push(rec);
+    }
   }
-  return out;
+  return null;
 }
 
-Il2Cpp.perform(() => {
-  const messages: Record<string, any> = {};   // fullName -> {fields}
-  let idMap: Record<string, number> = {};      // fullName -> wire id
+const HEX: string[] = [];
+for (let i = 0; i < 256; i++) HEX.push(i.toString(16).padStart(2, "0"));
 
-  // ---- pass 1: every protobuf message descriptor (names + fields) ----
-  let scanned = 0, found = 0;
+/**
+ * Serialize any IMessage to a hex string, via the extension method.
+ *
+ * Hex rather than frida's binary `send(payload, data)` channel: sending the
+ * descriptor as binary stalls the scan partway through the first assembly.
+ * Built via a lookup table into a preallocated array — the obvious
+ * `out += ...` loop is quadratic and wedges on multi-megabyte descriptors.
+ */
+function serialize(msg: Il2Cpp.Object): string | null {
+  const tba = findToByteArray();
+  if (!tba) return null;
+  try {
+    const arr = tba.invoke(msg) as Il2Cpp.Array;
+    const len = arr.length;
+    // no `.elements` in bridge 0.13 — element data begins after the array header
+    const buf = arr.handle.add(Il2Cpp.Array.headerSize).readByteArray(len);
+    if (!buf) return null;
+    const u8 = new Uint8Array(buf);
+    const parts: string[] = new Array(len);
+    for (let i = 0; i < len; i++) parts[i] = HEX[u8[i]];
+    return parts.join("");
+  } catch (e) {
+    return null;
+  }
+}
+
+// ---- main ------------------------------------------------------------------
+
+// Runs at top level, synchronously inside script.load().
+//
+// Deferring it (setTimeout, with either the free or the "main" thread flag)
+// reliably stalls partway through the first assembly with the process idle —
+// blocked, not working. Synchronous execution gets through it. The cost is
+// that load() exceeds frida's RPC deadline and raises TransportError on the
+// host; the agent keeps running regardless, so run.py treats that as expected
+// and goes on pumping messages instead of tearing the session down.
+Il2Cpp.perform(() => {
+  const seenFiles: Record<string, boolean> = {};
+  const classMap: Record<string, string> = {}; // descriptor FullName -> obfuscated C# type
+  let messages = 0,
+    filesOut = 0,
+    scanned = 0;
+
+  if (!findToByteArray()) {
+    console.log("[agent] WARNING: MessageExtensions.ToByteArray not found; cannot serialize descriptors");
+  }
+
   for (const asm of Il2Cpp.domain.assemblies) {
     const t0 = Date.now();
-    let here = 0, seen = 0;
+    let here = 0;
     for (const klass of asm.image.classes) {
       scanned++;
-      seen++;
       if (!mightBeMessage(klass)) continue;
       const gd = descriptorGetter(klass);
       if (!gd) continue;
@@ -125,65 +131,42 @@ Il2Cpp.perform(() => {
         const desc = gd.invoke() as Il2Cpp.Object;
         const full = (desc.method("get_FullName").invoke() as Il2Cpp.String).content;
         if (!full) continue;
-        messages[full] = { obf: klass.type.name, fields: readFields(desc) };
-        found++;
+        classMap[full] = klass.type.name;
+        messages++;
         here++;
-      } catch (e) { /* not a descriptor-bearing message */ }
-    }
-    // per-assembly so a long scan shows progress instead of dead air
-    if (here > 0 || seen > 500) {
-      console.log(`[pass1] ${asm.name}: classes=${seen} messages=${here} (${Date.now() - t0}ms)`);
-    }
-  }
-  console.log(`[pass1] done: classes scanned=${scanned} messages=${found} prefilter=${prefilterWorks}`);
 
-  // ---- pass 2: wire id map from esg.dqft (Dictionary<int, MessageParser>) ----
-  const esg = findClass("esg");
-  const byteString = findClass("Google.Protobuf.ByteString");
-  if (esg && byteString) {
-    // the field name is obfuscated and drifts per build; fall back to whatever
-    // static Dictionary<int,...> the class holds
-    let dict = esg.tryField("dqft");
-    if (!dict) {
-      for (const f of esg.fields) {
-        if (f.isStatic && f.type.name.indexOf("Dictionary") >= 0 && f.type.name.indexOf("Int32") >= 0) {
-          dict = f;
-          console.log(`[pass2] dqft not found; using static field ${f.name}: ${f.type.name}`);
-          break;
+        // one serialization per .proto file covers every message inside it
+        const file = desc.method("get_File").invoke() as Il2Cpp.Object;
+        const fname = (file.method("get_Name").invoke() as Il2Cpp.String).content || "";
+        if (fname && !seenFiles[fname]) {
+          seenFiles[fname] = true;
+          const proto = file.method("ToProto").invoke() as Il2Cpp.Object;
+          const hex = serialize(proto);
+          if (hex) {
+            // stream it: a kill mid-scan still leaves everything sent so far
+            send({ event: "file", name: fname, hex });
+            filesOut++;
+          } else {
+            console.log(`[agent] could not serialize ${fname}`);
+          }
         }
+      } catch (e) {
+        /* not a descriptor-bearing message */
       }
     }
-    if (!dict) {
-      console.log(`[pass2] no id dictionary on esg; fields: ${esg.fields.map((f) => f.name).join(",")}`);
-      send({ event: "done", messages, idMap });
-      return;
+    if (here > 0) {
+      console.log(`[agent] ${asm.name}: messages=${here} (${Date.now() - t0}ms)`);
     }
-    const dqft = dict.value as Il2Cpp.Object;
-    const empty = byteString.method("get_Empty").invoke() as Il2Cpp.Object;
-    const en = dqft.method("GetEnumerator").invoke() as Il2Cpp.Object;
-    let n = 0;
-    while (en.method("MoveNext").invoke() as boolean) {
-      const cur = en.method("get_Current").invoke() as Il2Cpp.Object;      // KeyValuePair<int,MessageParser>
-      const id = cur.method("get_Key").invoke() as number;
-      const parser = cur.method("get_Value").invoke() as Il2Cpp.Object;    // MessageParser
-      try {
-        // parse empty -> default instance -> real descriptor name
-        const parse = findOverload(parser.class, "ParseFrom", "ByteString");   // (VERIFY) overload
-        const msg = parse!.invoke(empty) as Il2Cpp.Object;
-        const desc = msg.method("get_Descriptor").invoke() as Il2Cpp.Object;
-        const full = (desc.method("get_FullName").invoke() as Il2Cpp.String).content;
-        if (!full) continue;
-        idMap[full] = id;
-        if (messages[full]) messages[full].id = id;
-        n++;
-      } catch (e) { console.log(`  id ${id}: ${e}`); }
-    }
-    console.log(`[pass2] esg entries mapped=${n}`);
-  } else {
-    console.log(`[pass2] SKIPPED: esg=${!!esg} ByteString=${!!byteString} (adjust class name)`);
   }
 
-  console.log(`done: messages=${Object.keys(messages).length}, ids=${Object.keys(idMap).length}`);
-  // hand the result to the host runner (run.py), which writes the file and exits
-  send({ event: "done", messages, idMap });
+  // class map in batches, so one oversized message can't stall the transport
+  const entries = Object.keys(classMap);
+  for (let i = 0; i < entries.length; i += 250) {
+    const chunk: Record<string, string> = {};
+    for (const k of entries.slice(i, i + 250)) chunk[k] = classMap[k];
+    send({ event: "classmap", chunk });
+  }
+
+  console.log(`[agent] done: classes=${scanned} messages=${messages} files=${filesOut}`);
+  send({ event: "done", messages, files: filesOut, classes: scanned });
 });

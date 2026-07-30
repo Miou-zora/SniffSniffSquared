@@ -277,26 +277,66 @@ Ordered by value.
 
 ### 1. Finish the Frida scan
 
-Never completed. Killed at ~25 minutes, still running. The cost is
-`readFields()` in `agent.ts`: roughly six IL2CPP bridge invokes per field
-across ~2300 messages, each costing milliseconds, all on the game's threads.
+**Status: the method is proven, the game protocol is still blocked.**
 
-Three changes should make it practical:
+The extraction approach was rewritten and works. Rather than walking
+FieldDescriptors (~8 bridge invokes per field, ~184k total, never finished),
+`agent.ts` now pulls each loaded `.proto` file's serialized
+`FileDescriptorProto` via `FileDescriptor.ToProto()` — one blob per *file*,
+carrying real message names, real field names, numbers, types and nesting.
+`tools/parse_descriptors.py` turns those blobs into a registry.
 
-- **Scope it.** Only `Ankama.Dofus.Protocol.*` and `Core` produced messages;
-  the other ~30 000 classes contributed nothing but time.
-- **Drop unused invokes.** `messages.json` needs number + type + repeated.
-  `get_IsMap` and the `ref` lookups can go.
-- **Stream results out incrementally**, so a kill mid-scan still yields partial
-  data instead of nothing.
+Proven end-to-end on the chat service, 51 messages with real names:
+
+```
+channel.ChannelMessage
+  1  message_id          string
+  2  channel_id          string
+  3  created_timestamp   long
+  4  content             string
+  5  author              user.User
+```
+
+**The blocker.** The scan reliably emits the four chat-service descriptors
+(`channel`, `friend_invite`, `transport`, `user`), then stops before reaching
+`Ankama.Dofus.Protocol.Game` — the assembly that matters. The process sits at
+idle CPU, so it is blocked, not grinding. Ruled out by testing one variable at
+a time:
+
+| tried | result |
+|---|---|
+| deferred via `setTimeout` (free thread) | stalls at the same point |
+| deferred with `Il2Cpp.perform(..., "main")` | stalls at the same point |
+| binary `send(payload, data)` | stalls at the same point |
+| hex payload, O(n) encoder | stalls at the same point |
+| synchronous at top level | stalls at the same point |
+
+So it is not thread affinity, not payload encoding, and not the `load()`
+transport timeout (that is now tolerated — the agent keeps running and
+`run.py` keeps listening).
+
+One unexplained observation worth starting from: `[agent] Core: messages=50`
+is only delivered *after* the host interrupts, which means agent messages are
+being queued rather than the agent being entirely wedged. The scan may be
+progressing into the 5644-class game assembly with its output stuck behind a
+full queue. Next step is to test that directly — have the agent emit a
+heartbeat every N classes and see whether those also arrive only on interrupt.
+If so, this is a message-queue backpressure problem, not a hang, and the fix
+is to yield periodically rather than to change threading.
+
+Failing that, scope the scan to `Ankama.Dofus.Protocol.Game` alone and skip
+the assemblies already known to be empty.
 
 ### 2. Re-join the registry on real names
 
-Once the scan lands, `messages.json` can be keyed by the descriptor's
-`FullName` — the same token the wire puts in the `Any` URL — instead of
-guessing from the obfuscated C# class leaf. That fixes the four mis-joined keys
-at the root. Success metric already exists: the `<!! schema mismatch on N
-fields>` count should go to zero.
+`tools/parse_descriptors.py` already emits `proto/messages.runtime.json` keyed
+by protobuf `FullName` — the same token the wire puts in the `Any` URL — so the
+guesswork join from the obfuscated C# class leaf disappears. What is missing is
+only the game-protocol half of the input (item 1).
+
+Once that lands, point `Registry::load` at the runtime registry, preferring it
+and falling back to `messages.json` for anything it lacks. Success metric
+already exists: the `<!! schema mismatch on N fields>` count should go to zero.
 
 ### 3. Regenerate `dump.cs`
 
