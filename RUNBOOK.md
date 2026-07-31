@@ -91,6 +91,42 @@ part 2 step 5 for what to do when the right-hand column changes.
 > describe a client that no longer exists. Re-identify with
 > `sniffer/tools/identify.py` — see part 2 step 6.
 
+> **Static game data is not on the wire — stop looking for it.** Recipes,
+> template stat ranges and anything else a tooltip renders come from the
+> client's own data files; the server is only asked for things it alone knows,
+> which in practice means prices. Three probes, all negative, all on captures
+> verified to span the action:
+>
+> - Opening an item's craft description (Chapeau du Vulkain, `12417`) sent
+>   nothing containing its eight ingredient ids — searched 970 messages in the
+>   window, in varint, zigzag, fixed32 and fixed64.
+> - Its template ranges (`41..60`, `26..35`, `11..15`, ...) appear in no message
+>   alongside the item id. `12417` occurs in exactly two message types across
+>   23 790 messages: `iuz` and `khd`, neither of which carries stats.
+> - Opening the job workshop produced `kqm` `0801` and `kqh` `0801` — a request
+>   and its ack, two bytes each.
+>
+> What the click *does* produce is a `khb` price query per ingredient and a
+> `kea` answer, which is why browsing a craft panel fills `prices` for exactly
+> the ingredients you need. Recipes and ranges come from DofusDB instead —
+> `tools/import_items.py` in bulk, and a cached read-time fetch in `web/` for
+> anything the importer has not reached.
+
+Two more keys identified while establishing that:
+
+| semantic name | wire key (this build) | meaning |
+|---|---|---|
+| (unnamed) | `khb` | client asks the price of one item id |
+| (unnamed) | `iuz` | 7 602 `item_id -> value` pairs, whole catalog, ~80 KB |
+| (unnamed) | `khd` | every item id in the HDV category being browsed |
+
+`kea` has two shapes: a short one carrying the x1/x10/x100/x1000 ladder, and a
+long one listing the marketplace's actual offers — **each offer carries that
+copy's rolled stats**, `{8: value, 9: effect_id}`. 1 726 such observations sat
+unparsed in `packets` when this was found; the sniffer reads only the ladder.
+That is the one wire source of stat values beyond `item_detail`, and it is a
+sample of real copies, never a template.
+
 Field *names* are unknown for the game protocol. `sniffer/proto/messages.json` gives
 field **numbers** and **types** only, and describes the 2026-07-10 build.
 Because of the rotation this is worse than "partly wrong": a key that still

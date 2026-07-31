@@ -17,6 +17,12 @@ explanation, the verified command sequence, and a "dead ends" list.
   current build at all; an 861-message capture contains none of them (`ksv`
   survived). Any "key X means Y" mapping is only valid for the build it was
   observed on. Re-identify with `sniffer/tools/identify.py` rather than trusting notes.
+- **Static game data never crosses the wire.** Recipes and template stat
+  ranges — anything a tooltip draws — live in the client's data files. The
+  server is only asked what it alone knows, which is prices. Three negative
+  probes are written up in `RUNBOOK.md` part 1; do not re-run them. DofusDB is
+  the source for both, in bulk via `tools/import_items.py` and at read time in
+  `web/` for ids the importer has not reached.
 - **Messages are keyed by the `Any` type URL** (`type.ankama.com/ksv`), not by
   `Frame.Payload.id`. The `id` map is not used anywhere in `sniffer/src/`. Do not
   chase it.
