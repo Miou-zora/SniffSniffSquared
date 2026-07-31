@@ -48,6 +48,15 @@ def zigzag(n):
     return varint((n << 1) ^ (n >> 63) if n < 0 else n << 1)
 
 
+def fixed(n, width):
+    """fixed32/fixed64 encoding, little-endian.
+
+    Worth trying because a value stored fixed-width is invisible to a varint
+    search, and reading "not in the traffic" off that is how a message gets
+    written off as absent when it was there the whole time."""
+    return (n & ((1 << (width * 8)) - 1)).to_bytes(width, "little")
+
+
 def fetch(since, key):
     where = ["body IS NOT NULL"]
     if since:
@@ -94,6 +103,11 @@ def main():
             z = zigzag(v)
             if z != varint(v):
                 enc[v].append(("zigzag", z))
+        # Only for values big enough that four zero-ish bytes are not noise —
+        # a fixed32 of 3 is "03 00 00 00", which matches padding everywhere.
+        if v >= 256:
+            enc[v].append(("fixed32", fixed(v, 4)))
+            enc[v].append(("fixed64", fixed(v, 8)))
 
     hits = []           # (n_matched, pid, key, direction, matched detail)
     per_key = defaultdict(set)
