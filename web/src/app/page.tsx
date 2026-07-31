@@ -91,37 +91,74 @@ function NoStats({ view }: { view: BreakerView }) {
   );
 }
 
+/**
+ * What to actually do with the item, which is not always "focus something".
+ *
+ * Focusing concentrates the item into one rune; crushing plain yields every
+ * rune it carries. The sum of those often wins, so a card that only ever names
+ * a rune is answering a question nobody asked — the choice includes not
+ * focusing at all.
+ *
+ * Decided in kamas whenever both sides are priced. Rune counts cannot settle
+ * it: one pile of 30 against six piles totalling 40 says nothing until each is
+ * multiplied by what that rune sells for.
+ */
 function BestRune({ view, priced }: { view: BreakerView; priced: boolean }) {
   const best = view.outcomes[0];
   // Column 1 is the current coefficient — column 0 is the 100% ceiling.
   const runesNow = best.runes[1];
   const valueNow = best.value[1];
+  const noneRunes = view.noFocus.runes[1];
+  const noneValue = view.noFocus.value[1];
+
+  const comparable = valueNow !== null && noneValue !== null;
+  const focusWins = comparable ? valueNow >= noneValue : true;
+  const high = comparable ? Math.max(valueNow, noneValue) : 0;
+  const low = comparable ? Math.min(valueNow, noneValue) : 0;
+  const edge = low > 0 ? (high / low - 1) * 100 : null;
 
   return (
     <section className="border-circuit-border bg-ground-iron rounded-2xl border p-32">
       <p className="text-caption tracking-caption text-moss-70 uppercase">
-        best rune to focus
+        {focusWins ? "best rune to focus" : "best move"}
       </p>
       <div className="mt-12 flex flex-wrap items-baseline gap-x-16 gap-y-8">
         <span className="text-lime-pulse font-goga text-heading tracking-heading">
-          {best.rune}
+          {focusWins ? best.rune : "no focus"}
         </span>
         <span className="text-subheading tracking-subheading text-phosphor-white">
-          {n(runesNow, 1)} runes
+          {n(focusWins ? runesNow : noneRunes, 1)} runes
         </span>
-        {valueNow !== null && (
+        {(focusWins ? valueNow : noneValue) !== null && (
           <span className="text-subheading tracking-subheading text-moss-80">
-            {kamas.format(Math.round(valueNow))} k
+            {kamas.format(Math.round((focusWins ? valueNow : noneValue) ?? 0))} k
           </span>
         )}
       </div>
+      {comparable && edge !== null && (
+        <p className="text-body-sm tracking-body-sm text-moss-80 mt-12">
+          {focusWins ? (
+            <>
+              Worth {n(edge, 0)}% more than crushing it with no focus, which yields{" "}
+              {n(noneRunes, 1)} runes across every line for{" "}
+              {kamas.format(Math.round(noneValue ?? 0))} k.
+            </>
+          ) : (
+            <>
+              Worth {n(edge, 0)}% more than focusing {best.rune}, the best single rune,
+              which would give {n(runesNow, 1)} for{" "}
+              {kamas.format(Math.round(valueNow ?? 0))} k.
+            </>
+          )}
+        </p>
+      )}
       <p className="text-body-sm tracking-body-sm text-sage-40 mt-16 max-w-[70ch]">
         {priced
-          ? "Ranked by what the runes sell for at the current coefficient."
-          : "Ranked by rune count — no market price has been captured for these runes yet, so kamas cannot be compared. Browse runes in the HDV with the sniffer running to fill the prices in."}{" "}
+          ? "Compared on what the runes sell for at the current coefficient."
+          : "Ranked by rune count — no market price has been captured for these runes yet, so focusing and not focusing cannot be compared, and this assumes focusing. Browse runes in the HDV with the sniffer running to settle it."}{" "}
         Focus weight {n(best.focusWeight)} of {n(view.totalWeight)} total, at{" "}
         {n(view.coefficient, 3)}%
-        {view.coefficientIsAssumed && " (assumed — no crush observed yet)"}.
+        {view.coefficientIsAssumed && " (assumed — no crush of this item observed yet)"}.
       </p>
     </section>
   );
