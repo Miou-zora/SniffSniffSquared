@@ -1,5 +1,8 @@
+import Link from "next/link";
+
 import { Live } from "@/app/live";
 import { Projection } from "@/app/projection";
+import { ItemSearch } from "@/app/search";
 import { loadBreaker, type BreakerView } from "@/lib/breaker";
 
 // The breaker's contents change while you play; nothing here may be prerendered.
@@ -17,7 +20,16 @@ function n(v: number, digits = 2) {
 export default async function Home() {
   const view = await loadBreaker();
   if (!view) return <Empty />;
+  return <ItemView view={view} />;
+}
 
+/**
+ * The whole page for one item, shared by the breaker and by /item/[id].
+ *
+ * They differ only in how the item was chosen — what is worth knowing about it
+ * is the same either way, and duplicating this is how the two would drift.
+ */
+export function ItemView({ view }: { view: BreakerView }) {
   const best = view.outcomes[0];
   const priced = best !== undefined && best.unitPrice !== null;
 
@@ -58,22 +70,37 @@ function Empty() {
 }
 
 function Header({ view }: { view: BreakerView }) {
+  const browsing = view.placedAt === null;
   return (
     <header>
-      <div className="flex items-center justify-between gap-16">
+      <div className="flex flex-wrap items-center justify-between gap-16">
         <p className="text-caption tracking-caption text-moss-70 uppercase">
-          in the breaker
+          {browsing ? "browsing an item" : "in the breaker"}
         </p>
-        <Live />
+        <div className="flex items-center gap-16">
+          <ItemSearch />
+          {!browsing && <Live />}
+        </div>
       </div>
       <h1 className="text-heading-lg tracking-heading-lg mt-12">{view.item.name}</h1>
       <p className="text-body tracking-body text-sage-40 mt-12">
-        {view.item.type ?? "—"} · level {view.item.level} · placed{" "}
-        {view.placedAt.toLocaleTimeString("fr-FR")}
+        {view.item.type ?? "—"} · level {view.item.level}
+        {view.placedAt !== null &&
+          ` · placed ${view.placedAt.toLocaleTimeString("fr-FR")}`}
         {view.uid !== null && (
-          <span className="text-deep-fern"> · instance {view.uid}</span>
+          <span className="text-deep-fern">
+            {" "}
+            · {browsing ? "last instance seen" : "instance"} {view.uid}
+          </span>
         )}
       </p>
+      {browsing && (
+        <p className="text-body-sm tracking-body-sm mt-8">
+          <Link href="/" className="text-lime-pulse">
+            back to the breaker
+          </Link>
+        </p>
+      )}
     </header>
   );
 }

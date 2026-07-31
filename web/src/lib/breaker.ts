@@ -95,7 +95,8 @@ export interface ProjectionModel {
 export interface BreakerView {
   item: { itemId: number; name: string; level: number; type: string | null };
   uid: number | null;
-  placedAt: Date;
+  /** When it was put into the breaker. Null when browsing an item you do not hold. */
+  placedAt: Date | null;
   /** Every line the wire reported, rune-mapped or not. */
   lines: StatLine[];
   /** Only the lines that yield a rune, with weights. */
@@ -162,14 +163,52 @@ export async function loadBreaker(): Promise<BreakerView | null> {
   // Placements recorded before the uid column existed carry only the type, so
   // fall back to the most recently described instance of that type.
   let uid = placement.uid === null ? null : Number(placement.uid);
-  if (uid === null) {
-    const [fallback] = await query<{ uid: string }>(
-      `SELECT uid FROM item_stats WHERE item_id = $1 ORDER BY seen_at DESC LIMIT 1`,
-      [itemId],
-    );
-    uid = fallback ? Number(fallback.uid) : null;
-  }
+  if (uid === null) uid = await lastKnownInstance(itemId);
 
+  return buildView(itemId, uid, placement.placed_at);
+}
+
+/**
+ * The same view for any item id, whether or not you hold one.
+ *
+ * The interesting case is an item you broke last week or have never owned: the
+ * decision "is this worth buying to break" is made before it is in your hands,
+ * and until now the page could only answer it for whatever sat in the breaker.
+ *
+ * It reuses the last instance of that type seen on the wire, if there is one,
+ * so a copy you broke still shows what it rolled. With none, the Current item
+ * basis is empty and the Average basis carries the page — which is the honest
+ * shape of the question for an item you do not have.
+ */
+export async function loadItem(itemId: number): Promise<BreakerView | null> {
+  if (!Number.isInteger(itemId) || itemId <= 0) return null;
+
+  // An id nobody has ever heard of gets a 404 rather than a page of empty
+  // panels headed "Item 999999999", which reads like the data is missing rather
+  // than like the item does not exist.
+  const [known] = await query<{ item_id: string }>(
+    `SELECT item_id FROM items WHERE item_id = $1`,
+    [itemId],
+  );
+  if (!known && !(await fetchItems([itemId])).has(itemId)) return null;
+
+  return buildView(itemId, await lastKnownInstance(itemId), null);
+}
+
+/** The most recently described instance of an item type, if the wire saw one. */
+async function lastKnownInstance(itemId: number): Promise<number | null> {
+  const [row] = await query<{ uid: string }>(
+    `SELECT uid FROM item_stats WHERE item_id = $1 ORDER BY seen_at DESC LIMIT 1`,
+    [itemId],
+  );
+  return row ? Number(row.uid) : null;
+}
+
+async function buildView(
+  itemId: number,
+  uid: number | null,
+  placedAt: Date | null,
+): Promise<BreakerView | null> {
   const [itemRow] = await query<ItemRow>(
     `SELECT item_id, name_fr, level, type_fr FROM items WHERE item_id = $1`,
     [itemId],
@@ -306,7 +345,7 @@ export async function loadBreaker(): Promise<BreakerView | null> {
       type: itemRow?.type_fr ?? named?.type ?? null,
     },
     uid,
-    placedAt: placement.placed_at,
+    placedAt,
     lines,
     weighted,
     totalWeight,
