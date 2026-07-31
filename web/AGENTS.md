@@ -13,10 +13,19 @@ This version has breaking changes — APIs, conventions, and file structure may 
 Reads the Postgres database that the Rust sniffer writes to. **This app never
 captures traffic and never writes game data**; it is a reader.
 
-`/` is the **breaker page**: it shows the item currently in the crusher, which
-rune is best to focus, and what the crush is worth across the coefficient's
-decay curve. `src/lib/brisage.ts` holds the model as pure functions;
-`src/lib/breaker.ts` does the loading.
+`/` is the **breaker page**: the item currently in the crusher on the left, a
+projection table on the right.
+
+```
+src/lib/brisage.ts     the model, pure functions, no I/O
+src/lib/breaker.ts     loads a placement and applies it (server)
+src/app/projection.tsx the table — client, for the metric switch and n+x
+src/app/live.tsx       LISTEN/NOTIFY subscriber that refreshes the page
+```
+
+`brisage.ts` is imported from both sides, which is why it stays free of I/O.
+`Projection` receives weights and prices rather than finished rows, so the
+custom `n+x` column recomputes in the browser with no round trip.
 
 ## Where things are
 

@@ -3,12 +3,41 @@ import {
   coefficientColumns,
   focusOutcomes,
   noFocusOutcome,
+  lineWeight,
   weighLines,
   type CoefficientColumn,
   type FocusOutcome,
   type StatLine,
   type WeightedLine,
 } from "@/lib/brisage";
+
+/** What a template says a line rolls between, and the middle of that range. */
+export interface AverageStat {
+  min: number;
+  max: number;
+  avg: number;
+  /** `line_weight` if the line rolled the average instead of what it did. */
+  avgWeight: number;
+}
+
+/**
+ * Everything the projection table needs, flat enough to hand to a Client
+ * Component. The client recomputes at arbitrary coefficients for the custom
+ * column, so it gets weights and prices rather than precomputed rows.
+ */
+export interface ProjectionModel {
+  coefficient: number;
+  itemCost: number | null;
+  focuses: {
+    rune: string;
+    effectId: number;
+    runeWeight: number;
+    focusWeight: number;
+    unitPrice: number | null;
+  }[];
+  /** No-focus crushing: each line yields its own rune independently. */
+  noFocusLines: { weight: number; runeWeight: number; unitPrice: number | null }[];
+}
 
 export interface BreakerView {
   item: { itemId: number; name: string; level: number; type: string | null };
@@ -19,6 +48,11 @@ export interface BreakerView {
   /** Only the lines that yield a rune, with weights. */
   weighted: WeightedLine[];
   totalWeight: number;
+  /** Template ranges by effect id. Empty when the item has never been enriched. */
+  averages: Map<number, AverageStat>;
+  /** Total weight if every line rolled the middle of its range. */
+  averageTotalWeight: number | null;
+  projection: ProjectionModel;
   /** Lines that map to no rune — weapon damage, maluses. Shown, not summed. */
   unmapped: StatLine[];
   coefficient: number;
@@ -137,6 +171,45 @@ export async function loadBreaker(): Promise<BreakerView | null> {
 
   const [costRow] = await latestPrices([itemId]).then((m) => [m.get(itemId) ?? null]);
 
+  // What the item type can roll, for comparison against what this copy did.
+  // Absent until tools/import_items.py has seen the id; the UI says so rather
+  // than hiding the column.
+  const rangeRows = await query<{
+    effect_id: string;
+    min_value: string;
+    max_value: string;
+  }>(
+    `SELECT effect_id, min_value, max_value FROM item_effects
+      WHERE item_id = $1 ORDER BY position`,
+    [itemId],
+  );
+  const byEffect = new Map(lines.map((l) => [l.effectId, l]));
+  const averages = new Map<number, AverageStat>();
+  for (const r of rangeRows) {
+    const effectId = Number(r.effect_id);
+    // A template can list an effect twice; the first is the one a stat line
+    // would be compared against, so later duplicates are ignored.
+    if (averages.has(effectId)) continue;
+    const min = Number(r.min_value);
+    const max = Number(r.max_value);
+    const avg = (min + max) / 2;
+    const line = byEffect.get(effectId);
+    averages.set(effectId, {
+      min,
+      max,
+      avg,
+      avgWeight:
+        line && line.rune !== null
+          ? lineWeight(avg, line.runeWeight, line.statPerRune, level)
+          : 0,
+    });
+  }
+  // Only meaningful if the template covers every line that yields a rune —
+  // a partial sum would read as a smaller item rather than as missing data.
+  const averageTotalWeight = weighted.every((l) => averages.has(l.effectId))
+    ? weighted.reduce((s, l) => s + (averages.get(l.effectId)?.avgWeight ?? 0), 0)
+    : null;
+
   return {
     item: {
       itemId,
@@ -157,6 +230,25 @@ export async function loadBreaker(): Promise<BreakerView | null> {
     noFocus: noFocusOutcome(weighted, columns, priceByRuneItemId),
     itemCost: costRow,
     unpricedRunes: outcomes.filter((o) => o.unitPrice === null).map((o) => o.rune),
+    averages,
+    averageTotalWeight,
+    projection: {
+      coefficient,
+      itemCost: costRow,
+      focuses: outcomes.map((o) => ({
+        rune: o.rune,
+        effectId: o.effectId,
+        runeWeight: o.runeWeight,
+        focusWeight: o.focusWeight,
+        unitPrice: o.unitPrice,
+      })),
+      noFocusLines: weighted.map((l) => ({
+        weight: l.weight,
+        runeWeight: l.runeWeight,
+        unitPrice:
+          l.runeItemId === null ? null : (priceByRuneItemId.get(l.runeItemId) ?? null),
+      })),
+    },
   };
 }
 
