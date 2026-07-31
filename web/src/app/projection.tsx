@@ -2,15 +2,33 @@
 
 import { useMemo, useState, useId } from "react";
 import { COEFFICIENT_STEPS, decay, profitPercent, runeCount } from "@/lib/brisage";
+import { describePlan } from "@/lib/craft";
 import type { ProjectionModel } from "@/lib/breaker";
 
 type Metric = "runes" | "value" | "profit";
 type Basis = "copy" | "average";
+type Source = "market" | "manual" | "craft";
 
 const METRICS: { id: Metric; label: string; hint: string }[] = [
   { id: "runes", label: "Runes", hint: "how many runes each focus produces" },
   { id: "value", label: "Kamas", hint: "what those runes sell for" },
   { id: "profit", label: "% vs item", hint: "profit against what the item cost" },
+];
+
+/**
+ * Where "what the item cost" comes from. They answer different questions and
+ * routinely disagree: a crafted item's real cost is its ingredients, which can
+ * sit far under what a copy sells for, and the profit line is only honest
+ * against the one you actually paid.
+ */
+const SOURCES: { id: Source; label: string; hint: string }[] = [
+  { id: "market", label: "Market", hint: "the item's last captured HDV price" },
+  { id: "manual", label: "Manual", hint: "a price you type in" },
+  {
+    id: "craft",
+    label: "Craft",
+    hint: "what the ingredients cost, bought in the best batches",
+  },
 ];
 
 /**
@@ -28,6 +46,8 @@ const BASES: { id: Basis; label: string; hint: string }[] = [
   },
   { id: "average", label: "Average", hint: "what an average copy of this item rolls" },
 ];
+
+const kamas = new Intl.NumberFormat("fr-FR");
 
 const fmt = (v: number, digits: number) =>
   v.toLocaleString("fr-FR", {
@@ -52,7 +72,10 @@ export function Projection({ model }: { model: ProjectionModel }) {
   const [metric, setMetric] = useState<Metric>("runes");
   const [basis, setBasis] = useState<Basis>("copy");
   const [customX, setCustomX] = useState("");
+  const [source, setSource] = useState<Source>("market");
+  const [manualCost, setManualCost] = useState("");
   const inputId = useId();
+  const costId = useId();
 
   // The average basis is absent whenever the template does not cover every
   // line, so a switch left on it would silently fall back. It cannot be
@@ -60,8 +83,21 @@ export function Projection({ model }: { model: ProjectionModel }) {
   const active =
     basis === "average" && model.average !== null ? model.average : model.copy;
 
+  const manual = useMemo(() => {
+    const v = Number.parseInt(manualCost.replace(/[\s.]/g, ""), 10);
+    return Number.isFinite(v) && v > 0 ? v : null;
+  }, [manualCost]);
+
+  const craftCost = model.craft?.cost ?? null;
+  // What "% vs item" is measured against. Each source can be absent on its own
+  // terms — nothing captured, nothing typed, an ingredient with no price — and
+  // an absent one disables the metric rather than falling back to another,
+  // which would answer a different question than the one selected.
+  const itemCost =
+    source === "manual" ? manual : source === "craft" ? craftCost : model.itemCost;
+
   const priced = active.focuses.some((f) => f.unitPrice !== null);
-  const canProfit = priced && model.itemCost !== null;
+  const canProfit = priced && itemCost !== null;
 
   const customCoefficient = useMemo(() => {
     const x = Number.parseInt(customX, 10);
@@ -137,14 +173,57 @@ export function Projection({ model }: { model: ProjectionModel }) {
           options={METRICS.map((m) => ({
             ...m,
             disabled: (m.id === "value" && !priced) || (m.id === "profit" && !canProfit),
+            // Profit needs both sides, and which one is missing decides what to
+            // do about it — browse runes, or give the item a price.
             reason:
-              m.id === "value"
+              m.id === "value" || !priced
                 ? "No rune prices captured yet"
-                : "No price captured for this item",
+                : source === "manual"
+                  ? "Type a price for the item"
+                  : source === "craft"
+                    ? "The craft cost is incomplete"
+                    : "No price captured for this item",
           }))}
           value={metric}
           onChange={setMetric}
         />
+        <div className="flex basis-full flex-wrap items-center gap-x-16 gap-y-8">
+          <span className="text-caption tracking-caption text-deep-fern uppercase">
+            item price
+          </span>
+          <Switch
+            label="item price source"
+            options={SOURCES.map((s) => ({
+              ...s,
+              disabled: s.id === "market" && model.itemCost === null,
+              reason: "No price captured for this item yet",
+            }))}
+            value={source}
+            onChange={setSource}
+          />
+          {source === "manual" ? (
+            <label
+              htmlFor={costId}
+              className="text-body-sm tracking-body-sm text-sage-40 flex items-center gap-8"
+            >
+              <input
+                id={costId}
+                type="number"
+                inputMode="numeric"
+                min={1}
+                value={manualCost}
+                onChange={(e) => setManualCost(e.target.value)}
+                placeholder={model.itemCost === null ? "kamas" : String(model.itemCost)}
+                aria-label="item price in kamas"
+                className="border-circuit-border focus:border-lime-pulse text-body-sm text-phosphor-white placeholder:text-deep-fern w-128 border-0 border-b bg-transparent px-0 py-4 text-right tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+              k
+            </label>
+          ) : (
+            <CostReadout source={source} model={model} cost={itemCost} />
+          )}
+        </div>
+
         {/* Always its own row. It used to sit beside the switches above xl and
             wrap under them below it, so a sentence that grows — Kamas or % vs
             item under Average — jumped from one place to the other, which reads
@@ -231,7 +310,7 @@ export function Projection({ model }: { model: ProjectionModel }) {
                     key={j}
                     metric={metric}
                     cell={cell}
-                    itemCost={model.itemCost}
+                    itemCost={itemCost}
                     muted={row.key === "no-focus"}
                     custom={j === row.cells.length - 1}
                   />
@@ -250,6 +329,97 @@ export function Projection({ model }: { model: ProjectionModel }) {
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * What the selected source says the item cost, and when it says nothing, why.
+ *
+ * The craft line names the ingredients it could not price rather than reporting
+ * a total over the rest: a partial craft cost is not a cheaper craft, and it
+ * would be the most attractive number on the page.
+ */
+function CostReadout({
+  source,
+  model,
+  cost,
+}: {
+  source: Source;
+  model: ProjectionModel;
+  cost: number | null;
+}) {
+  const base = "text-body-sm tracking-body-sm";
+
+  if (source === "market") {
+    return (
+      <p className={`${base} text-sage-40`}>
+        {cost === null ? (
+          "nothing captured for this item yet"
+        ) : (
+          <>
+            <span className="text-phosphor-white tabular-nums">{kamas.format(cost)}</span>{" "}
+            k, last seen on the market
+          </>
+        )}
+      </p>
+    );
+  }
+
+  const craft = model.craft;
+  if (craft === null) {
+    return (
+      <p className={`${base} text-sage-40`}>
+        no recipe for this item — most items have none, and DofusDB was asked directly
+      </p>
+    );
+  }
+
+  const via =
+    craft.source === "dofusdb" ? (
+      <span
+        className="text-deep-fern"
+        title="Fetched from DofusDB — the importer has not seen this item yet"
+      >
+        {" "}
+        · via DofusDB
+      </span>
+    ) : null;
+
+  const unpriced = craft.ingredients.filter((i) => i.plan === null);
+  if (craft.cost === null) {
+    return (
+      <p className={`${base} text-sage-40`}>
+        <span className="text-phosphor-white">invalid</span> — nothing captured for{" "}
+        {unpriced.map((i) => i.name).join(", ")}. Open this item&apos;s craft panel in
+        game — the client prices every ingredient and the sniffer stores them.
+        {via}
+      </p>
+    );
+  }
+
+  return (
+    <p className={`${base} text-sage-40`}>
+      <span className="text-phosphor-white tabular-nums">{kamas.format(craft.cost)}</span>{" "}
+      k for{" "}
+      {craft.ingredients.map((i, n) => (
+        <span key={i.itemId}>
+          {n > 0 && ", "}
+          {i.quantity}x {i.name}
+          <span
+            className="text-deep-fern"
+            title={
+              i.plan
+                ? `${describePlan(i.plan)} = ${kamas.format(i.plan.cost)} k for ${i.plan.units} units, ${i.plan.rule === "mixed" ? "filled from the largest batch down" : "one batch size for the lot, it prices better"}`
+                : undefined
+            }
+          >
+            {" "}
+            ({i.plan ? describePlan(i.plan) : "—"})
+          </span>
+        </span>
+      ))}
+      {via}
+    </p>
   );
 }
 

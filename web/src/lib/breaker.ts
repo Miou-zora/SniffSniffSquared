@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { planBuy, type BuyPlan, type Ladder } from "@/lib/craft";
 import {
   coefficientColumns,
   focusOutcomes,
@@ -33,6 +34,33 @@ export interface ProjectionBasis {
   noFocusLines: { weight: number; runeWeight: number; unitPrice: number | null }[];
 }
 
+/** One line of a recipe, with what buying that many actually costs. */
+export interface CraftIngredient {
+  itemId: number;
+  name: string;
+  quantity: number;
+  /** Null when nothing has been captured for this ingredient. */
+  plan: BuyPlan | null;
+}
+
+/**
+ * What the item costs to make rather than to buy.
+ *
+ * `cost` is null whenever a single ingredient is unpriced: a sum over the ones
+ * that happen to be on the market is not a cheaper craft, it is a wrong one,
+ * and it would read as the best number on the page.
+ */
+export interface CraftEstimate {
+  cost: number | null;
+  ingredients: CraftIngredient[];
+  /**
+   * `db` came from the `recipes` table, `dofusdb` was fetched live because the
+   * table had no row. Worth showing: the second means the importer has not seen
+   * this item, so a DofusDB outage would make the estimate disappear.
+   */
+  source: "db" | "dofusdb";
+}
+
 /**
  * Everything the projection table needs, flat enough to hand to a Client
  * Component. The client recomputes at arbitrary coefficients for the custom
@@ -44,7 +72,10 @@ export interface ProjectionBasis {
  */
 export interface ProjectionModel {
   coefficient: number;
+  /** The item's last captured market price. */
   itemCost: number | null;
+  /** What its ingredients cost, or null when the item has no recipe at all. */
+  craft: CraftEstimate | null;
   /** What this instance rolled, off the wire. */
   copy: ProjectionBasis;
   /**
@@ -251,6 +282,7 @@ export async function loadBreaker(): Promise<BreakerView | null> {
     projection: {
       coefficient,
       itemCost: costRow,
+      craft: await craftEstimate(itemId),
       copy: basisOf(weighted, outcomes, priceByRuneItemId),
       average: averageBasis(weighted, outcomes, columns, priceByRuneItemId, averages),
     },
@@ -312,6 +344,202 @@ function averageBasis(
   if (ordered.length !== outcomes.length) return null;
 
   return basisOf(avgLines, ordered, priceByRuneItemId);
+}
+
+/**
+ * What the item costs to craft, ingredient by ingredient.
+ *
+ * Null when the item has no recipe — most resources do not, and that is not a
+ * failure. Recipes come from `recipes`, filled offline by tools/import_items.py,
+ * so an item whose recipe has never been imported reads the same as one that
+ * has none. Both are answered by running the importer.
+ */
+async function craftEstimate(itemId: number): Promise<CraftEstimate | null> {
+  const stored = await query<{
+    ingredient_id: string;
+    quantity: number;
+    name_fr: string | null;
+  }>(
+    `SELECT r.ingredient_id, r.quantity, i.name_fr
+       FROM recipes r
+       LEFT JOIN items i ON i.item_id = r.ingredient_id
+      WHERE r.item_id = $1
+      ORDER BY r.position`,
+    [itemId],
+  );
+
+  let source: CraftEstimate["source"] = "db";
+  let lines = stored.map((r) => ({
+    itemId: Number(r.ingredient_id),
+    quantity: r.quantity,
+    name: r.name_fr,
+  }));
+
+  // An item the importer has not seen yet is the common case while playing —
+  // you put something in the breaker minutes after first meeting it. Falling
+  // back to DofusDB means the page answers now instead of after a manual run.
+  if (lines.length === 0) {
+    const live = await fetchRecipe(itemId);
+    if (live === null) return null;
+    source = "dofusdb";
+    lines = live;
+    const names = await query<{ item_id: string; name_fr: string | null }>(
+      `SELECT item_id, name_fr FROM items WHERE item_id = ANY($1::bigint[])`,
+      [lines.map((l) => l.itemId)],
+    );
+    const byId = new Map(names.map((n) => [Number(n.item_id), n.name_fr]));
+    // A recipe the importer has never seen has ingredients it has never named
+    // either, and "Item 6841" is unreadable in the one message that matters —
+    // the list of what still needs a price.
+    const unnamed = lines.filter((l) => !byId.get(l.itemId)).map((l) => l.itemId);
+    if (unnamed.length > 0) {
+      for (const [id, name] of await fetchItemNames(unnamed)) byId.set(id, name);
+    }
+    lines = lines.map((l) => ({ ...l, name: byId.get(l.itemId) ?? null }));
+  }
+
+  const ladders = await latestLadders(lines.map((l) => l.itemId));
+  const ingredients: CraftIngredient[] = lines.map((l) => {
+    const ladder = ladders.get(l.itemId);
+    return {
+      itemId: l.itemId,
+      name: l.name ?? `Item ${l.itemId}`,
+      quantity: l.quantity,
+      plan: ladder ? planBuy(l.quantity, ladder) : null,
+    };
+  });
+
+  const priced = ingredients.every((i) => i.plan !== null);
+  return {
+    cost: priced ? ingredients.reduce((sum, i) => sum + (i.plan?.cost ?? 0), 0) : null,
+    ingredients,
+    source,
+  };
+}
+
+/** Name, level and type for ids the `items` table has never been told about. */
+interface ItemMeta {
+  name: string | null;
+  level: number | null;
+  type: string | null;
+}
+
+async function fetchItems(itemIds: number[]): Promise<Map<number, ItemMeta>> {
+  const out = new Map<number, ItemMeta>();
+  if (itemIds.length === 0) return out;
+  try {
+    const params = itemIds.map((id) => `id[$in][]=${id}`).join("&");
+    const res = await fetch(
+      `https://api.dofusdb.fr/items?$limit=${itemIds.length}&${params}`,
+      { next: { revalidate: 604_800 }, signal: AbortSignal.timeout(4_000) },
+    );
+    if (!res.ok) return out;
+    const body: unknown = await res.json();
+    const data = (body as { data?: unknown }).data;
+    if (!Array.isArray(data)) return out;
+    for (const raw of data) {
+      const it = raw as {
+        id?: unknown;
+        level?: unknown;
+        name?: { fr?: unknown };
+        type?: { name?: { fr?: unknown } };
+      };
+      const id = Number(it.id);
+      if (!Number.isFinite(id)) continue;
+      out.set(id, {
+        name: typeof it.name?.fr === "string" ? it.name.fr : null,
+        level: Number.isFinite(Number(it.level)) ? Number(it.level) : null,
+        type: typeof it.type?.name?.fr === "string" ? it.type.name.fr : null,
+      });
+    }
+  } catch {
+    // Enrichment is a nicety; every caller has a fallback.
+  }
+  return out;
+}
+
+async function fetchItemNames(itemIds: number[]): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  for (const [id, meta] of await fetchItems(itemIds)) {
+    if (meta.name !== null) out.set(id, meta.name);
+  }
+  return out;
+}
+
+/**
+ * One item's recipe from DofusDB, or null when it has none — most items do not,
+ * and that is not a failure.
+ *
+ * Cached for a week: recipes are static between game patches, so this is one
+ * request per item per week rather than one per page view. Every failure path
+ * returns null, because a craft estimate is worth less than the page: an
+ * outage, a timeout or a shape we cannot read must all degrade to "no recipe"
+ * rather than take the breaker view down with them.
+ */
+async function fetchRecipe(
+  itemId: number,
+): Promise<{ itemId: number; quantity: number; name: string | null }[] | null> {
+  try {
+    const res = await fetch(
+      `https://api.dofusdb.fr/recipes?resultId=${itemId}&$limit=1`,
+      { next: { revalidate: 604_800 }, signal: AbortSignal.timeout(4_000) },
+    );
+    if (!res.ok) return null;
+    const body: unknown = await res.json();
+    const data = (body as { data?: unknown }).data;
+    if (!Array.isArray(data) || data.length === 0) return null;
+    const first = data[0] as { ingredientIds?: unknown; quantities?: unknown };
+    const ids = first.ingredientIds;
+    const quantities = first.quantities;
+    if (!Array.isArray(ids) || !Array.isArray(quantities)) return null;
+    // A mismatched pair is a recipe we cannot read rather than a partial one,
+    // and half a recipe would price the item too cheaply.
+    if (ids.length === 0 || ids.length !== quantities.length) return null;
+    return ids.map((id, i) => ({
+      itemId: Number(id),
+      quantity: Number(quantities[i]),
+      name: null,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Latest full ladder per item id.
+ *
+ * Rows where every batch size reads 0 are skipped rather than taken as the
+ * latest word: that is a capture in which nothing was on sale, and letting it
+ * mask an earlier real ladder would turn a priced ingredient into an unpriced
+ * one for no reason.
+ */
+async function latestLadders(itemIds: number[]): Promise<Map<number, Ladder>> {
+  if (itemIds.length === 0) return new Map();
+  const rows = await query<{
+    item_id: string;
+    b1: string;
+    b10: string;
+    b100: string;
+    b1000: string;
+  }>(
+    `SELECT DISTINCT ON (item_id) item_id, b1, b10, b100, b1000
+       FROM prices
+      WHERE item_id = ANY($1::bigint[])
+        AND (b1 > 0 OR b10 > 0 OR b100 > 0 OR b1000 > 0)
+      ORDER BY item_id, seen_at DESC`,
+    [[...new Set(itemIds)]],
+  );
+  return new Map(
+    rows.map((r) => [
+      Number(r.item_id),
+      {
+        b1: Number(r.b1),
+        b10: Number(r.b10),
+        b100: Number(r.b100),
+        b1000: Number(r.b1000),
+      },
+    ]),
+  );
 }
 
 /**
