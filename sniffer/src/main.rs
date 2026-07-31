@@ -148,11 +148,13 @@ CREATE TABLE IF NOT EXISTS crush_placements (
     placed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     item_id  BIGINT NOT NULL
 );
+ALTER TABLE crush_placements ADD COLUMN IF NOT EXISTS uid BIGINT;
 CREATE INDEX IF NOT EXISTS idx_placements_item ON crush_placements (item_id, placed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_crushes_item ON crushes (item_id, seen_at DESC)";
 
 const CRUSH_INSERT: &str = "INSERT INTO crushes (item_id, yield_percent) VALUES ($1,$2)";
-const PLACEMENT_INSERT: &str = "INSERT INTO crush_placements (item_id) VALUES ($1)";
+const PLACEMENT_INSERT: &str =
+    "INSERT INTO crush_placements (item_id, uid) VALUES ($1,$2)";
 
 /// Mirrors `item_stats` and `items` in init.sql, for databases created before
 /// they existed. `items` is created but never written here — the sniffer takes
@@ -278,7 +280,9 @@ fn build_dispatch() -> Dispatcher {
                 // taken, so one placement can only ever produce one row
                 if pending.borrow_mut().take_if(|p| *p == uid).is_some() {
                     if let Some(client) = placement_db.as_mut() {
-                        if let Err(err) = client.execute(PLACEMENT_INSERT, &[&(item as i64)]) {
+                        if let Err(err) =
+                            client.execute(PLACEMENT_INSERT, &[&(item as i64), &(uid as i64)])
+                        {
                             eprintln!("[db] placement insert failed: {err}");
                         }
                     }

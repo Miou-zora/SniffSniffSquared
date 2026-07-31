@@ -13,9 +13,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
 Reads the Postgres database that the Rust sniffer writes to. **This app never
 captures traffic and never writes game data**; it is a reader.
 
-Scaffolded and empty on purpose — the default create-next-app page is still
-there. Nothing here is load-bearing yet, so feel free to delete it when real
-pages arrive.
+`/` is the **breaker page**: it shows the item currently in the crusher, which
+rune is best to focus, and what the crush is worth across the coefficient's
+decay curve. `src/lib/brisage.ts` holds the model as pure functions;
+`src/lib/breaker.ts` does the loading.
 
 ## Where things are
 
@@ -31,23 +32,35 @@ web/                    you are here
 
 ## The data you will be reading
 
-Two tables, both defined in `../init.sql`:
+All defined in `../init.sql`:
 
 - **`prices`** — marketplace price ladders. One row per observation, so it is a
   time series, not current state: `item_id`, `b1`, `b10`, `b100`, `b1000`
   (price for x1 / x10 / x100 / x1000), `seen_at`. A `0` means that batch size
   was not on sale.
-- **`crush_placements`** — an item put into the breaker: `item_id`,
+- **`crush_placements`** — an item put into the breaker: `item_id`, `uid`,
   `placed_at`. A placement does not imply a crush; the item may sit there and
-  never be broken. Pair it with `crushes` by time if you need the outcome.
+  never be broken, which is exactly when the breaker page is useful. `uid` is
+  the instance and joins to `item_stats`; it is NULL on rows recorded before
+  that column existed.
+- **`item_stats`** — `(uid, effect_id) -> item_id, value`. What one _instance_
+  actually rolled, off the wire. Keyed by instance because two copies of an item
+  roll differently, and the instance does not survive the crush.
+- **`items`** — `item_id -> name_fr, level, type_fr`. Filled offline by
+  `../tools/import_items.py`, so a name may be missing for a freshly seen id.
+- **`item_effects`** — the min/max an item _type_ can roll per line, from
+  DofusDB. Use it to estimate a copy you do not own; use `item_stats` for one
+  you do. Views `item_effect_weights` and `item_break_weight` average it.
+- **`runes`** — rune reference: `effect_id -> rune, rune_weight, stat_per_rune,
+item_id`. `effect_id` is the join from a stat line to the rune it yields;
+  `item_id` is the join to `prices`.
 - **`crushes`** — item crushing ("brisage"). One row per crush: `item_id`,
   `yield_percent` (0-100), `seen_at`. That is the whole table, and it is
   deliberate: the runes follow from the item's stats and the coefficient, and
   the focus does not change the coefficient. Only the yield varies per crush,
-  so it is the only thing worth recording. Derive the rest. `focus_effect_id` is the
-  rune **effect** id when a focus was set (125 = Rune Vi), NULL otherwise —
-  resolve it via DofusDB, where each rune item exposes `effects[].effectId`.
-  `item_id` is nullable when the uid could not be mapped.
+  so it is the only thing worth recording. Derive the rest. `item_id` is
+  nullable when the uid could not be mapped. There is no focus column: the focus
+  travels in a separate message and does not change the yield.
 - **`packets`** — every captured message, decoded or not. Large, append-only,
   and mostly of interest for protocol work rather than the UI.
 
@@ -131,20 +144,23 @@ Worth knowing before moving anything:
   Body copy is `text-sage-60`; `text-phosphor-white` is for headings.
 - Depth comes from hairline borders (`border-circuit-border`), not shadows.
 
-`src/app/page.tsx` is a placeholder proving the tokens resolve. Delete it when
-real pages arrive.
-
 ## The kamas maths
 
 `../docs/brisage-model.md` transcribes the profitability model from
-`Book 3.xlsx`: how many runes an item yields, what they are worth, and whether
-crushing it beats selling it. `../docs/brisage-runes.json` holds the 50-rune
-reference table (weights are game constants; the prices in it are a stale
-snapshot — use the `prices` table instead).
+`Book 3.xlsx` and measures it against real captured crushes. Read it before
+touching `src/lib/brisage.ts`, which implements it.
 
-Nothing implements it yet, and the formulas are transcribed but not verified
-against a real crush. Read that document before building anything that computes
-profit.
+Two things in there that are easy to get wrong:
+
+- **`line_weight` ends in `+ 1`.** Every stat line carries a flat +1. Dropping
+  it makes the focus branch come out low by `(lines + 1) / 2`, which looks like
+  a missing constant rather than a missing per-line term. That cost a session.
+- **Lines that map to no rune are excluded entirely** — weapon damage lines and
+  maluses contribute neither weight nor their +1.
+
+Rune prices come from the `prices` table and **may simply not be there**: the
+sniffer only sees a price when you browse that item in the HDV. Missing price is
+not zero, and the UI shows it blank rather than valuing a rune at nothing.
 
 ## Conventions
 
@@ -186,12 +202,15 @@ something else is already on it** — usually the `web` container; stop it with
   cached. The database keeps ids only; nothing is denormalised into it.
 - **Deployment: compose service `web`**, production build on port 3000. Inside
   compose the database host is `db`. Development stays `pnpm dev` on the host.
+- **Postgres client: `pg`**, plain SQL, no ORM. `src/lib/db.ts` holds one pool,
+  cached on `globalThis` so hot reload does not leak connections.
+- **The first page is the breaker view**, since that is the decision the data
+  actually informs while playing.
 
 ## Not decided yet
 
-Worth asking about rather than assuming:
-
-- **How to query Postgres.** No client library is installed. `pg` for plain SQL
-  is the smallest option; an ORM is a bigger commitment. Nothing is wired yet.
-- **What the first page actually shows.** Price history per item is the obvious
-  candidate, since `prices` is a time series, but nothing is designed.
+- **Live updates.** The page reads on request (`dynamic = "force-dynamic"`) and
+  needs a manual refresh to notice a new placement. Polling or streaming would
+  fix that; neither is wired.
+- **Item icons.** `iconId` from DofusDB is available and unused.
+- **Price history.** `prices` is a time series and only its latest row is read.

@@ -57,7 +57,8 @@ CREATE INDEX IF NOT EXISTS idx_crushes_item ON crushes (item_id, seen_at DESC);
 CREATE TABLE IF NOT EXISTS crush_placements (
     id        BIGSERIAL PRIMARY KEY,
     placed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    item_id   BIGINT NOT NULL
+    item_id   BIGINT NOT NULL,
+    uid       BIGINT              -- instance uid, joins to item_stats.uid
 );
 
 CREATE INDEX IF NOT EXISTS idx_placements_item ON crush_placements (item_id, placed_at DESC);
