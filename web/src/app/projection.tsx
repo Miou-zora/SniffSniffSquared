@@ -18,6 +18,19 @@ const fmt = (v: number, digits: number) =>
     maximumFractionDigits: digits,
   });
 
+/**
+ * Profit needs more precision than it looks.
+ *
+ * An item worth far more than its runes lands just above -100%, and at zero
+ * decimals that renders as a flat "-100%" — indistinguishable from a sentinel
+ * for missing data, which is exactly how it gets misread. Below -99 the extra
+ * digits are the whole message, so keep them.
+ */
+function formatProfit(p: number): string {
+  const digits = p < -99 ? 2 : Math.abs(p) >= 100 ? 0 : 1;
+  return `${p >= 0 ? "+" : ""}${fmt(p, digits)}%`;
+}
+
 export function Projection({ model }: { model: ProjectionModel }) {
   const [metric, setMetric] = useState<Metric>("runes");
   const [customX, setCustomX] = useState("");
@@ -26,36 +39,39 @@ export function Projection({ model }: { model: ProjectionModel }) {
   const priced = model.focuses.some((f) => f.unitPrice !== null);
   const canProfit = priced && model.itemCost !== null;
 
-  // n, n+1, n+2, ... plus 100% as a ceiling and the user's own n+x.
-  const columns = useMemo(() => {
-    const base = [
-      { label: "100%", coefficient: 100, custom: false },
+  const customCoefficient = useMemo(() => {
+    const x = Number.parseInt(customX, 10);
+    if (!Number.isFinite(x) || x < 1 || x > 100_000) return null;
+    return decay(model.coefficient, x);
+  }, [customX, model.coefficient]);
+
+  const columns = useMemo(
+    () => [
+      { label: "100%", coefficient: 100 },
       ...COEFFICIENT_STEPS.map((s) => ({
         label: s === 0 ? "n" : `n+${s}`,
         coefficient: decay(model.coefficient, s),
-        custom: false,
       })),
-    ];
-    const x = Number.parseInt(customX, 10);
-    if (Number.isFinite(x) && x > 0 && x <= 100_000) {
-      base.push({
-        label: `n+${x}`,
-        coefficient: decay(model.coefficient, x),
-        custom: true,
-      });
-    }
-    return base;
-  }, [model.coefficient, customX]);
+    ],
+    [model.coefficient],
+  );
+
+  /** Cell values for one row, across the fixed columns plus the custom one. */
+  const cellsFor = (
+    at: (coefficient: number) => { runes: number; value: number | null },
+  ) => [
+    ...columns.map((c) => at(c.coefficient)),
+    customCoefficient === null ? null : at(customCoefficient),
+  ];
 
   const rows = useMemo(() => {
     const focusRows = model.focuses.map((f) => ({
       key: String(f.effectId),
       label: f.rune,
       unpriced: f.unitPrice === null,
-      cells: columns.map((c) => {
-        const runes = runeCount(f.focusWeight, f.runeWeight, c.coefficient);
-        const value = f.unitPrice === null ? null : runes * f.unitPrice;
-        return { runes, value };
+      cells: cellsFor((coefficient) => {
+        const runes = runeCount(f.focusWeight, f.runeWeight, coefficient);
+        return { runes, value: f.unitPrice === null ? null : runes * f.unitPrice };
       }),
     }));
 
@@ -63,11 +79,11 @@ export function Projection({ model }: { model: ProjectionModel }) {
       key: "no-focus",
       label: "no focus",
       unpriced: model.noFocusLines.every((l) => l.unitPrice === null),
-      cells: columns.map((c) => {
+      cells: cellsFor((coefficient) => {
         let runes = 0;
         let value: number | null = null;
         for (const l of model.noFocusLines) {
-          const r = runeCount(l.weight, l.runeWeight, c.coefficient);
+          const r = runeCount(l.weight, l.runeWeight, coefficient);
           runes += r;
           if (l.unitPrice !== null) value = (value ?? 0) + r * l.unitPrice;
         }
@@ -76,99 +92,99 @@ export function Projection({ model }: { model: ProjectionModel }) {
     };
 
     return [...focusRows, noFocus];
-  }, [model, columns]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, columns, customCoefficient]);
 
   return (
-    <section>
-      <div className="flex flex-wrap items-end justify-between gap-16">
-        <div>
-          <h2 className="text-heading-sm tracking-heading-sm">Projection</h2>
-          <p className="text-body-sm tracking-body-sm text-sage-40 mt-4">
-            {METRICS.find((m) => m.id === metric)?.hint}, as the coefficient decays.
-          </p>
+    <section className="border-circuit-border overflow-hidden rounded-2xl border">
+      <div className="border-phosphor-blue-black flex flex-wrap items-center justify-between gap-x-24 gap-y-12 border-b px-20 py-16">
+        <div
+          role="group"
+          aria-label="metric"
+          className="border-circuit-border flex rounded-xl border p-4"
+        >
+          {METRICS.map((m) => {
+            const disabled =
+              (m.id === "value" && !priced) || (m.id === "profit" && !canProfit);
+            const active = metric === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                disabled={disabled}
+                onClick={() => setMetric(m.id)}
+                title={
+                  disabled
+                    ? m.id === "value"
+                      ? "No rune prices captured yet"
+                      : "No price captured for this item"
+                    : m.hint
+                }
+                className={`text-body-sm tracking-body-sm rounded-lg px-16 py-8 ${
+                  active
+                    ? "bg-lime-pulse text-void-black font-medium"
+                    : disabled
+                      ? "text-deep-fern cursor-not-allowed"
+                      : "text-sage-60 hover:text-phosphor-white cursor-pointer"
+                }`}
+              >
+                {m.label}
+              </button>
+            );
+          })}
         </div>
-
-        <div className="flex flex-wrap items-center gap-12">
-          <div
-            role="group"
-            aria-label="metric"
-            className="border-circuit-border flex rounded-xl border p-4"
-          >
-            {METRICS.map((m) => {
-              const disabled =
-                (m.id === "value" && !priced) || (m.id === "profit" && !canProfit);
-              const active = metric === m.id;
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => setMetric(m.id)}
-                  title={
-                    disabled
-                      ? m.id === "value"
-                        ? "No rune prices captured yet"
-                        : "No price captured for this item"
-                      : m.hint
-                  }
-                  className={`text-body-sm tracking-body-sm rounded-lg px-16 py-8 ${
-                    active
-                      ? "bg-lime-pulse text-void-black font-medium"
-                      : disabled
-                        ? "text-deep-fern cursor-not-allowed"
-                        : "text-sage-60 hover:text-phosphor-white cursor-pointer"
-                  }`}
-                >
-                  {m.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <label
-            htmlFor={inputId}
-            className="text-caption tracking-caption text-deep-fern flex items-center gap-8 uppercase"
-          >
-            n+
-            <input
-              id={inputId}
-              type="number"
-              min={1}
-              max={100000}
-              value={customX}
-              onChange={(e) => setCustomX(e.target.value)}
-              placeholder="x"
-              className="border-circuit-border text-body-sm text-phosphor-white w-80 rounded-lg border bg-transparent px-12 py-8 text-right normal-case"
-            />
-          </label>
-        </div>
+        <p className="text-body-sm tracking-body-sm text-sage-40">
+          {METRICS.find((m) => m.id === metric)?.hint}, as the coefficient decays.
+        </p>
       </div>
 
-      <div className="mt-16 overflow-x-auto">
-        <table className="w-full min-w-[640px] border-collapse text-left">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[680px] border-collapse text-left">
           <thead>
             <tr className="border-phosphor-blue-black text-caption tracking-caption text-deep-fern border-b uppercase">
-              <th className="py-8 pr-16 font-medium">focus</th>
+              <th className="py-10 pr-16 pl-20 font-medium">focus</th>
               {columns.map((c) => (
-                <th
-                  key={c.label + (c.custom ? "-custom" : "")}
-                  className="py-8 pl-16 text-right font-medium"
-                >
-                  <span className={c.custom ? "text-lime-pulse" : "text-moss-70"}>
-                    {c.label}
-                  </span>
-                  <span className="text-deep-fern block normal-case">
+                <th key={c.label} className="py-10 pl-16 font-medium">
+                  <span className="text-moss-70 block text-right">{c.label}</span>
+                  <span className="text-deep-fern block text-right normal-case">
                     {fmt(c.coefficient, 2)}%
                   </span>
                 </th>
               ))}
+              {/* The custom column is always present, so the table looks the
+                  same before and after a value is typed. */}
+              <th className="border-phosphor-blue-black border-l py-10 pr-20 pl-16 font-medium">
+                <label
+                  htmlFor={inputId}
+                  className="text-lime-pulse flex items-center justify-end gap-4"
+                >
+                  n+
+                  <input
+                    id={inputId}
+                    type="number"
+                    min={1}
+                    max={100000}
+                    value={customX}
+                    onChange={(e) => setCustomX(e.target.value)}
+                    placeholder="x"
+                    aria-label="custom number of runes"
+                    className="border-circuit-border text-body-sm text-phosphor-white w-64 rounded-md border bg-transparent px-8 py-2 text-right normal-case"
+                  />
+                </label>
+                <span className="text-deep-fern block text-right normal-case">
+                  {customCoefficient === null ? "—" : `${fmt(customCoefficient, 2)}%`}
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody className="text-body-sm tracking-body-sm">
             {rows.map((row, i) => (
-              <tr key={row.key} className="border-phosphor-blue-black border-b">
+              <tr
+                key={row.key}
+                className="border-phosphor-blue-black border-b last:border-0"
+              >
                 <td
-                  className={`py-10 pr-16 ${
+                  className={`py-10 pr-16 pl-20 ${
                     row.key === "no-focus"
                       ? "text-sage-40"
                       : i === 0
@@ -177,18 +193,15 @@ export function Projection({ model }: { model: ProjectionModel }) {
                   }`}
                 >
                   {row.label}
-                  {row.unpriced && metric !== "runes" && (
-                    <span className="text-deep-fern"> · no price</span>
-                  )}
                 </td>
                 {row.cells.map((cell, j) => (
                   <Cell
                     key={j}
                     metric={metric}
-                    runes={cell.runes}
-                    value={cell.value}
+                    cell={cell}
                     itemCost={model.itemCost}
                     muted={row.key === "no-focus"}
+                    custom={j === row.cells.length - 1}
                   />
                 ))}
               </tr>
@@ -196,57 +209,87 @@ export function Projection({ model }: { model: ProjectionModel }) {
           </tbody>
         </table>
       </div>
+
+      {metric === "profit" && (
+        <p className="border-phosphor-blue-black text-body-sm tracking-body-sm text-sage-40 border-t px-20 py-12">
+          Profit against the item&apos;s last captured price. A figure just above -100% is
+          a real result, not a missing one — it means the runes are worth almost nothing
+          next to what the item sells for. Cells with no rune price say so instead.
+        </p>
+      )}
     </section>
   );
 }
 
 function Cell({
   metric,
-  runes,
-  value,
+  cell,
   itemCost,
   muted,
+  custom,
 }: {
   metric: Metric;
-  runes: number;
-  value: number | null;
+  cell: { runes: number; value: number | null } | null;
   itemCost: number | null;
   muted: boolean;
+  custom: boolean;
 }) {
+  const edge = custom ? "border-phosphor-blue-black border-l pr-20" : "";
   const tone = muted ? "text-sage-40" : "text-moss-80";
+
+  // No x typed yet: the column exists but has nothing to show.
+  if (cell === null) {
+    return <td className={`text-deep-fern py-10 pl-16 text-right ${edge}`}>—</td>;
+  }
 
   if (metric === "runes") {
     return (
-      <td className={`py-10 pl-16 text-right tabular-nums ${tone}`}>{fmt(runes, 1)}</td>
-    );
-  }
-
-  // A missing price is not zero. Showing a dash keeps an unknown from being
-  // averaged into a total as if the rune were worthless.
-  if (value === null) {
-    return <td className="text-deep-fern py-10 pl-16 text-right">—</td>;
-  }
-
-  if (metric === "value") {
-    return (
-      <td className={`py-10 pl-16 text-right tabular-nums ${tone}`}>
-        {Math.round(value).toLocaleString("fr-FR")}
+      <td className={`py-10 pl-16 text-right tabular-nums ${tone} ${edge}`}>
+        {fmt(cell.runes, 1)}
       </td>
     );
   }
 
-  const profit = itemCost === null ? null : profitPercent(value, itemCost);
+  // Missing is spelled out rather than shown as a dash or a zero: an unknown
+  // price is not a price of nothing, and a reader should not have to guess
+  // which a blank cell meant.
+  if (cell.value === null) {
+    return (
+      <td
+        className={`text-deep-fern text-caption py-10 pl-16 text-right ${edge}`}
+        title="No market price captured for this rune yet"
+      >
+        no price
+      </td>
+    );
+  }
+
+  if (metric === "value") {
+    return (
+      <td className={`py-10 pl-16 text-right tabular-nums ${tone} ${edge}`}>
+        {Math.round(cell.value).toLocaleString("fr-FR")}
+      </td>
+    );
+  }
+
+  const profit = itemCost === null ? null : profitPercent(cell.value, itemCost);
   if (profit === null) {
-    return <td className="text-deep-fern py-10 pl-16 text-right">—</td>;
+    return (
+      <td
+        className={`text-deep-fern text-caption py-10 pl-16 text-right ${edge}`}
+        title="No market price captured for this item, so profit cannot be computed"
+      >
+        no item price
+      </td>
+    );
   }
   return (
     <td
-      className={`py-10 pl-16 text-right tabular-nums ${
+      className={`py-10 pl-16 text-right tabular-nums ${edge} ${
         profit >= 0 ? "text-lime-pulse" : "text-sage-40"
       }`}
     >
-      {profit >= 0 ? "+" : ""}
-      {fmt(profit, 0)}%
+      {formatProfit(profit)}
     </td>
   );
 }

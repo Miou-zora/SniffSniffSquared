@@ -27,7 +27,7 @@ export default async function Home() {
       {view.weighted.length === 0 ? (
         <NoStats view={view} />
       ) : (
-        <div className="mt-40 grid items-start gap-48 lg:grid-cols-[minmax(0,30rem)_minmax(0,1fr)]">
+        <div className="mt-40 grid items-start gap-24 md:grid-cols-[minmax(0,21rem)_minmax(0,1fr)] xl:gap-40 xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
           <div>
             <BestRune view={view} priced={priced} />
             <StatLines view={view} />
@@ -148,7 +148,7 @@ function StatLines({ view }: { view: BreakerView }) {
       )}
 
       <div className="mt-16 overflow-x-auto">
-        <table className="w-full min-w-[440px] border-collapse text-left">
+        <table className="w-full min-w-[360px] border-collapse text-left">
           <thead>
             <tr className="border-phosphor-blue-black text-caption tracking-caption text-deep-fern border-b uppercase">
               <th className="py-8 pr-16 font-medium">rune</th>
