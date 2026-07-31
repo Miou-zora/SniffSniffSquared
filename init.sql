@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS crushes (
     item_uid      BIGINT NOT NULL,      -- instance id of the destroyed item
     item_id       BIGINT,               -- type id; NULL if the uid was never mapped
     yield_percent REAL NOT NULL,        -- 0-100, from a float32 fraction on the wire
-    focus_rune_id BIGINT                -- always NULL for now; focus not yet located
+    focus_effect_id BIGINT              -- rune EFFECT id (125 = Vi); NULL = no focus
 );
 
 CREATE TABLE IF NOT EXISTS crush_runes (

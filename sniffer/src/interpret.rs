@@ -145,6 +145,39 @@ pub fn crush_result(body: &[u8]) -> Option<CrushResult> {
     Some(out)
 }
 
+// ---- crush_request: the client's "crush it" command ------------------------
+//
+// Sent immediately before every crush result. Field 1 carries the focus and is
+// ABSENT when no focus is set — established across three crushes:
+//
+//   1=125 4=1 5=1   Baton d'Oubli, focus Vi
+//         4=1 5=1   Arc Anum,      no focus      <- field 1 missing
+//   1=125 4=1 5=2   Anneau Bsene,  focus Vi
+//
+// 125 is the rune's *effect id*, not its item id: DofusDB gives Rune Vi (1523)
+// effectId 125, Rune Ine (1522) 126, Rune Age (1524) 119. Storing the effect id
+// keeps what the wire actually said; the web app resolves it back to a rune.
+//
+// Fields 4 and 5 vary (1/1, 1/1, 1/2) and are not understood, so not stored.
+
+/// The focus effect id from a crush request, or None when no focus was set.
+pub fn crush_focus(body: &[u8]) -> Option<u64> {
+    let mut r = Reader::new(body);
+    let mut focus = None;
+    while !r.eof() {
+        let (field, wt) = r.tag()?;
+        match (field, wt) {
+            (1, WireType::Varint) => focus = Some(r.varint()?),
+            (_, wt) => {
+                if !r.skip(wt) {
+                    return None;
+                }
+            }
+        }
+    }
+    focus
+}
+
 // ---- item_detail: instance uid -> item type id -----------------------------
 //
 // Sent just before a crush result, describing the item about to be destroyed.
@@ -438,6 +471,24 @@ mod tests {
         0x05, 0x40, 0x02, 0x48, 0xd5, 0x01, 0x2a, 0x05, 0x40, 0x02, 0x48, 0xd3,
         0x01, 0x2a, 0x05, 0x40, 0x01, 0x48, 0xb6, 0x01,
     ];
+
+    // Real crush requests. Field 1 is the focus effect id and is absent when
+    // no focus is set — the whole difference between these three.
+    const REQ_FOCUS_VI: &[u8] = &[0x08, 0x7d, 0x20, 0x01, 0x28, 0x01]; // Baton d'Oubli
+    const REQ_NO_FOCUS: &[u8] = &[0x20, 0x01, 0x28, 0x01]; // Arc Anum
+    const REQ_FOCUS_VI2: &[u8] = &[0x08, 0x7d, 0x20, 0x01, 0x28, 0x02]; // Anneau Bsene
+
+    #[test]
+    fn crush_focus_is_read_when_set() {
+        // 125 is Rune Vi's effectId in DofusDB, not its item id (1523)
+        assert_eq!(crush_focus(REQ_FOCUS_VI), Some(125));
+        assert_eq!(crush_focus(REQ_FOCUS_VI2), Some(125));
+    }
+
+    #[test]
+    fn crush_focus_is_none_when_unset() {
+        assert_eq!(crush_focus(REQ_NO_FOCUS), None, "field 1 absent = no focus");
+    }
 
     #[test]
     fn crush_decodes_many_rune_types() {

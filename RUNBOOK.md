@@ -704,29 +704,33 @@ app enriches at read time. Keeping the network dependency out of the capture
 path means a DofusDB outage degrades the UI rather than interrupting
 collection.
 
-### Open: where is the crush "focus" (focalisation)?
+### Resolved: the crush focus is in `crush_request`
 
-`crush_result` gives the runes, quantities and yield. It does **not** carry the
-focus, and neither does the client request.
+`crush_result` does not carry the focus. `crush_request` (`ker`) does, in
+field 1, which is **absent** when no focus is set:
 
-Ruled out across three real crushes (two focused on Vi, one unfocused):
+```
+1=125 4=1 5=1     Baton d'Oubli, focus Vi
+      4=1 5=1     Arc Anum,      no focus     <- field 1 missing
+1=125 4=1 5=2     Anneau Bsene,  focus Vi
+```
 
-- the result messages are structurally identical whether focused or not
-- all three client requests are byte-identical in shape: `{1: 1, 2: <uid>}`
-- no client message between the unfocused and the focused crush mentions the
-  focused rune id (1523), and for two of the three crushes there were **no**
-  client messages at all in the 40 packets preceding the request
+`125` is the rune's **effect id**, not its item id. DofusDB confirms: Rune Vi
+(item 1523) has `effectId` 125, Rune Ine 126, Rune Age 119. The database stores
+the effect id because that is what the wire says; resolve it to a rune on the
+read side.
 
-So focus is not sent per-crush. It is presumably persisted server-side from an
-earlier UI action, outside the capture window.
+Two corrections this produced, both worth knowing:
 
-Next experiment, and it is cheap: run the sniffer and **toggle the focus in the
-UI several times without crushing anything**. That action alone should produce a
-client message; `tools/identify.py` will name the key. Then check whether the
-value is the rune id (1523) or a characteristic id — Vitality is `char11` in
-DofusDB terms, and the ids seen in `item_detail` effects were 23, 22, 16, 2, 30.
+- **`kch` is "select item", not "crush it".** A `kch` with no crush following
+  produced only an `item_detail` and no result. The actual trigger is `ker`.
+- **Toggling focus in the UI sends nothing.** A capture across four deliberate
+  focus changes contained only heartbeats; the focus is transmitted with the
+  crush command, not when it is chosen. An experiment designed to watch the
+  toggles was therefore looking in the wrong place — the answer was already in
+  the original crush captures.
 
-`crushes.focus_rune_id` exists and stays NULL until then.
+Fields 4 and 5 of `crush_request` vary (1/1, 1/1, 1/2) and remain unexplained.
 
 ### Dead ends — do not repeat these
 

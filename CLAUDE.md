@@ -170,6 +170,7 @@ name it in `messages::DEFAULTS`, parse it in `interpret.rs` matching on the
 | `chat_message` | `ksv` | chat/trade channel |
 | `crush_result` | `kfy` | brisage: runes + counts + yield -> `crushes`/`crush_runes` |
 | `item_detail` | `kev` | uid -> item type id; cached to fill `crushes.item_id` |
+| `crush_request` | `ker` | the crush command; field 1 = focus effect id, absent if none |
 | `price_list_legacy` | `kdh` | the 2026-07-10 price list; gone from the wire, kept for tests |
 
 Next up (RUNBOOK part 3 items 5-6): identify `iuz` — 3 seen, 68-80 KB each,

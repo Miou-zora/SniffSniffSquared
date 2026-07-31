@@ -40,9 +40,10 @@ Two tables, both defined in `../init.sql`:
 - **`crushes`** + **`crush_runes`** — item crushing ("brisage"). One row per
   crush with `item_id`, `yield_percent` (0-100) and `seen_at`; the runes it
   produced are rows in `crush_runes` (`rune_id`, `quantity`). Rune ids are
-  DofusDB item ids too, so they resolve the same way. `focus_rune_id` exists
-  but is always NULL — focus has not been located on the wire yet. `item_id`
-  is nullable when the uid could not be mapped.
+  DofusDB item ids too, so they resolve the same way. `focus_effect_id` is the
+  rune **effect** id when a focus was set (125 = Rune Vi), NULL otherwise —
+  resolve it via DofusDB, where each rune item exposes `effects[].effectId`.
+  `item_id` is nullable when the uid could not be mapped.
 - **`packets`** — every captured message, decoded or not. Large, append-only,
   and mostly of interest for protocol work rather than the UI.
 

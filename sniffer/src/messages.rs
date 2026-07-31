@@ -35,6 +35,8 @@ pub const DEFAULTS: &[(&str, &str)] = &[
     ("crush_result", "kfy"),
     // item instance detail; supplies the uid -> type id the crush result lacks
     ("item_detail", "kev"),
+    // the client's "crush it" command — carries the focus, which the result does not
+    ("crush_request", "ker"),
 ];
 
 /// Where an override file is looked for, relative to the working directory.
