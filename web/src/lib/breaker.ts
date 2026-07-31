@@ -169,6 +169,15 @@ export async function loadBreaker(): Promise<BreakerView | null> {
     [itemId],
   );
 
+  // The level is not decoration: line_weight multiplies by level/200, so an
+  // unimported item defaulting to level 1 does not read as "unknown", it reads
+  // as a plausible and completely wrong projection. DofusDB fills it in for
+  // items the importer has not reached yet.
+  const meta =
+    itemRow?.level === null || itemRow === undefined
+      ? ((await fetchItems([itemId])).get(itemId) ?? null)
+      : null;
+
   const statRows = uid
     ? await query<StatRow>(
         `SELECT s.effect_id, s.value, r.rune, r.rune_weight, r.stat_per_rune,
@@ -190,7 +199,7 @@ export async function loadBreaker(): Promise<BreakerView | null> {
     runeItemId: r.rune_item_id === null ? null : Number(r.rune_item_id),
   }));
 
-  const level = itemRow?.level ?? 1;
+  const level = itemRow?.level ?? meta?.level ?? 1;
   const weighted = weighLines(lines, level).sort((a, b) => b.weight - a.weight);
   const totalWeight = weighted.reduce((s, l) => s + l.weight, 0);
   const unmapped = lines.filter((l) => l.rune === null);
@@ -260,9 +269,9 @@ export async function loadBreaker(): Promise<BreakerView | null> {
   return {
     item: {
       itemId,
-      name: itemRow?.name_fr ?? `Item ${itemId}`,
+      name: itemRow?.name_fr ?? meta?.name ?? `Item ${itemId}`,
       level,
-      type: itemRow?.type_fr ?? null,
+      type: itemRow?.type_fr ?? meta?.type ?? null,
     },
     uid,
     placedAt: placement.placed_at,
