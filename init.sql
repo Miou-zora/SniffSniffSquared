@@ -33,17 +33,19 @@ CREATE INDEX IF NOT EXISTS idx_prices_item ON prices (item_id, seen_at DESC);
 
 -- Crushing an item into runes ("brisage"), decoded from `crush_result`.
 --
--- The runes produced are NOT stored: given the item's stats and the yield
--- coefficient they are derivable, so a rune table would duplicate what DofusDB
--- plus arithmetic already provide. The raw messages stay in `packets`, so the
--- actual counts remain recoverable for checking a derivation.
+-- Only the yield is recorded, because only the yield varies:
+--   * the runes produced follow from the item's stats and the coefficient
+--   * the focus does not change the coefficient, so the same item crushed with
+--     any focus, or none, yields the same percentage
+--   * the item instance id identifies one destroyed copy and says nothing about
+--     what it was
+-- The raw messages stay in `packets`, so runes, focus and instance ids all
+-- remain recoverable if a derivation ever needs checking.
 CREATE TABLE IF NOT EXISTS crushes (
     id            BIGSERIAL PRIMARY KEY,
     seen_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    item_uid      BIGINT NOT NULL,      -- instance id of the destroyed item
     item_id       BIGINT,               -- type id; NULL if the uid was never mapped
-    yield_percent REAL NOT NULL,        -- 0-100, from a float32 fraction on the wire
-    focus_effect_id BIGINT              -- rune EFFECT id (125 = Vi); NULL = no focus
+    yield_percent REAL NOT NULL         -- 0-100, from a float32 fraction on the wire
 );
 
 

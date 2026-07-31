@@ -716,9 +716,13 @@ field 1, which is **absent** when no focus is set:
 ```
 
 `125` is the rune's **effect id**, not its item id. DofusDB confirms: Rune Vi
-(item 1523) has `effectId` 125, Rune Ine 126, Rune Age 119. The database stores
-the effect id because that is what the wire says; resolve it to a rune on the
-read side.
+(item 1523) has `effectId` 125, Rune Ine 126, Rune Age 119. One effect id spans
+several runes — 125 covers Rune Vi, Rune Pa Vi and Rune Ra Vi.
+
+**It is decoded for display but not stored.** The focus does not affect the
+yield: the same item crushed with any focus, or none, returns the same
+coefficient. Only the yield varies per crush, so `crushes` records only
+`item_id` and `yield_percent`.
 
 Two corrections this produced, both worth knowing:
 

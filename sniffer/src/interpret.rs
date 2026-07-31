@@ -21,6 +21,12 @@ pub fn interpret(key: &str, body: &[u8]) -> Option<String> {
     match messages::keymap().name(key)? {
         "price_list" => price_list(body).map(|p| p.to_string()),
         "crush_result" => crush_result(body).map(|c| c.to_string()),
+        // Shown in --all output but deliberately not stored: the focus does
+        // not change the yield, so it says nothing the crush row needs.
+        "crush_request" => Some(match crush_focus(body) {
+            Some(effect) => format!("crush requested {{ focus effect {effect} }}"),
+            None => "crush requested { no focus }".to_string(),
+        }),
         _ => None,
     }
 }
@@ -29,7 +35,7 @@ pub fn interpret(key: &str, body: &[u8]) -> Option<String> {
 pub fn is_known_key(key: &str) -> bool {
     matches!(
         messages::keymap().name(key),
-        Some("price_list") | Some("crush_result")
+        Some("price_list") | Some("crush_result") | Some("crush_request")
     )
 }
 
@@ -155,8 +161,12 @@ pub fn crush_result(body: &[u8]) -> Option<CrushResult> {
 //   1=125 4=1 5=2   Anneau Bsene,  focus Vi
 //
 // 125 is the rune's *effect id*, not its item id: DofusDB gives Rune Vi (1523)
-// effectId 125, Rune Ine (1522) 126, Rune Age (1524) 119. Storing the effect id
-// keeps what the wire actually said; the web app resolves it back to a rune.
+// effectId 125, Rune Ine (1522) 126, Rune Age (1524) 119. One effect id covers
+// several runes — 125 is Rune Vi, Rune Pa Vi and Rune Ra Vi alike.
+//
+// This is decoded for --all output but NOT stored. The focus does not affect
+// the yield: the same item crushed with any focus, or none, returns the same
+// percentage. Only the yield varies per crush, so only the yield is recorded.
 //
 // Fields 4 and 5 vary (1/1, 1/1, 1/2) and are not understood, so not stored.
 

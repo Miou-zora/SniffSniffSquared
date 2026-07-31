@@ -121,28 +121,26 @@ const PRICES_INSERT: &str = "INSERT INTO prices
 /// Crushes ("brisage") and the runes each produced. Two tables because one
 /// crush yields many rune types — up to 8 observed.
 ///
-/// `item_id` is nullable: the crush result carries only the item's instance
-/// uid, and the type id comes from an `item_detail` message seen earlier. If
-/// capture started mid-session that mapping may be missing.
+/// The yield varies per crush and is the whole point of the table. Focus is
+/// deliberately not recorded: it does not affect the yield, so the same item
+/// crushed with any focus, or none, produces the same percentage.
 ///
-/// `focus_effect_id` is the rune *effect* id from the crush request (125 for
-/// Rune Vi), NULL when no focus was set. It is an effect id rather than a rune
-/// item id because that is what the wire carries; DofusDB maps between them.
+/// `item_id` is nullable. The crush result carries only the item's instance
+/// uid, and the type comes from an `item_detail` seen earlier; if capture
+/// started mid-session that mapping is missing and the row lands without it.
 const CRUSH_DDL: &str = "CREATE TABLE IF NOT EXISTS crushes (
     id            BIGSERIAL PRIMARY KEY,
     seen_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    item_uid      BIGINT NOT NULL,
     item_id       BIGINT,
-    yield_percent REAL NOT NULL,
-    focus_effect_id BIGINT
+    yield_percent REAL NOT NULL
 );
-ALTER TABLE crushes ADD COLUMN IF NOT EXISTS focus_effect_id BIGINT;
+ALTER TABLE crushes DROP COLUMN IF EXISTS item_uid;
 ALTER TABLE crushes DROP COLUMN IF EXISTS focus_rune_id;
+ALTER TABLE crushes DROP COLUMN IF EXISTS focus_effect_id;
 DROP TABLE IF EXISTS crush_runes;
 CREATE INDEX IF NOT EXISTS idx_crushes_item ON crushes (item_id, seen_at DESC)";
 
-const CRUSH_INSERT: &str = "INSERT INTO crushes (item_uid, item_id, yield_percent, focus_effect_id)
-    VALUES ($1,$2,$3,$4)";
+const CRUSH_INSERT: &str = "INSERT INTO crushes (item_id, yield_percent) VALUES ($1,$2)";
 
 /// Matches the `packets` table in init.sql. Re-declared here so the sniffer
 /// works against a database that was created before that table existed.
@@ -195,16 +193,6 @@ fn build_dispatch() -> Dispatcher {
     // crush result that follows has only the uid, so the mapping is cached to
     // join them. Bounded so a long session cannot grow it without limit.
     let uid_to_item: Rc<RefCell<HashMap<u64, u64>>> = Rc::new(RefCell::new(HashMap::new()));
-    // The focus lives in the request, the runes in the result. Crushes are
-    // strictly sequential, so carrying the last request's focus across is safe;
-    // it is taken (not copied) so a result can never inherit a stale focus.
-    let pending_focus: Rc<RefCell<Option<u64>>> = Rc::new(RefCell::new(None));
-    if let Some(req_key) = messages::keymap().key("crush_request") {
-        let focus = pending_focus.clone();
-        d.on(req_key, move |e| {
-            *focus.borrow_mut() = interpret::crush_focus(e.body);
-        });
-    }
     if let Some(detail_key) = messages::keymap().key("item_detail") {
         let cache = uid_to_item.clone();
         d.on(detail_key, move |e| {
@@ -222,12 +210,15 @@ fn build_dispatch() -> Dispatcher {
         match db_client_with(CRUSH_DDL) {
             Some(mut client) => {
                 println!("[db] connected; crush_result ({crush_key}) -> table crushes");
-                let focus = pending_focus.clone();
                 d.on(crush_key, move |e| {
                     if let Some(c) = interpret::crush_result(e.body) {
                         let item = cache.borrow().get(&c.item_uid).copied();
-                        let f = focus.borrow_mut().take();
-                        if let Err(err) = insert_crush(&mut client, &c, item, f) {
+                        if item.is_none() {
+                            // the row is still worth having, but say so: without
+                            // the type it cannot be grouped or resolved
+                            eprintln!("[db] crush uid {} has no known item type", c.item_uid);
+                        }
+                        if let Err(err) = insert_crush(&mut client, &c, item) {
                             eprintln!("[db] crush insert failed: {err}");
                         }
                     }
@@ -312,16 +303,10 @@ fn insert_crush(
     client: &mut postgres::Client,
     c: &interpret::CrushResult,
     item_id: Option<u64>,
-    focus_effect_id: Option<u64>,
 ) -> Result<(), postgres::Error> {
     client.execute(
         CRUSH_INSERT,
-        &[
-            &(c.item_uid as i64),
-            &item_id.map(|v| v as i64),
-            &(c.yield_fraction * 100.0),
-            &focus_effect_id.map(|v| v as i64),
-        ],
+        &[&item_id.map(|v| v as i64), &(c.yield_fraction * 100.0)],
     )?;
     Ok(())
 }

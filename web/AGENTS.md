@@ -38,9 +38,10 @@ Two tables, both defined in `../init.sql`:
   (price for x1 / x10 / x100 / x1000), `seen_at`. A `0` means that batch size
   was not on sale.
 - **`crushes`** — item crushing ("brisage"). One row per crush: `item_id`,
-  `yield_percent` (0-100), `seen_at`. The runes produced are **not** stored —
-  they follow from the item's stats and the coefficient, so derive them rather
-  than expecting a column. `focus_effect_id` is the
+  `yield_percent` (0-100), `seen_at`. That is the whole table, and it is
+  deliberate: the runes follow from the item's stats and the coefficient, and
+  the focus does not change the coefficient. Only the yield varies per crush,
+  so it is the only thing worth recording. Derive the rest. `focus_effect_id` is the
   rune **effect** id when a focus was set (125 = Rune Vi), NULL otherwise —
   resolve it via DofusDB, where each rune item exposes `effects[].effectId`.
   `item_id` is nullable when the uid could not be mapped.
