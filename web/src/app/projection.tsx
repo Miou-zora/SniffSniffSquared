@@ -5,11 +5,24 @@ import { COEFFICIENT_STEPS, decay, profitPercent, runeCount } from "@/lib/brisag
 import type { ProjectionModel } from "@/lib/breaker";
 
 type Metric = "runes" | "value" | "profit";
+type Basis = "copy" | "average";
 
 const METRICS: { id: Metric; label: string; hint: string }[] = [
   { id: "runes", label: "Runes", hint: "how many runes each focus produces" },
   { id: "value", label: "Kamas", hint: "what those runes sell for" },
   { id: "profit", label: "% vs item", hint: "profit against what the item cost" },
+];
+
+/**
+ * The two things a stat line can mean, and they are not interchangeable: the
+ * copy is what this instance rolled and dies with the crush, the average is
+ * what an unowned copy of the type would roll. Deciding whether to buy one to
+ * break needs the second; deciding what to do with the one in the slot needs
+ * the first.
+ */
+const BASES: { id: Basis; label: string; hint: string }[] = [
+  { id: "copy", label: "This copy", hint: "the stats this instance actually rolled" },
+  { id: "average", label: "Average", hint: "what an average copy of this item rolls" },
 ];
 
 const fmt = (v: number, digits: number) =>
@@ -33,10 +46,17 @@ function formatProfit(p: number): string {
 
 export function Projection({ model }: { model: ProjectionModel }) {
   const [metric, setMetric] = useState<Metric>("runes");
+  const [basis, setBasis] = useState<Basis>("copy");
   const [customX, setCustomX] = useState("");
   const inputId = useId();
 
-  const priced = model.focuses.some((f) => f.unitPrice !== null);
+  // The average basis is absent whenever the template does not cover every
+  // line, so a switch left on it would silently fall back. It cannot be
+  // selected in that state, and the button says why.
+  const active =
+    basis === "average" && model.average !== null ? model.average : model.copy;
+
+  const priced = active.focuses.some((f) => f.unitPrice !== null);
   const canProfit = priced && model.itemCost !== null;
 
   const customCoefficient = useMemo(() => {
@@ -65,7 +85,7 @@ export function Projection({ model }: { model: ProjectionModel }) {
   ];
 
   const rows = useMemo(() => {
-    const focusRows = model.focuses.map((f) => ({
+    const focusRows = active.focuses.map((f) => ({
       key: String(f.effectId),
       label: f.rune,
       unpriced: f.unitPrice === null,
@@ -78,11 +98,11 @@ export function Projection({ model }: { model: ProjectionModel }) {
     const noFocus = {
       key: "no-focus",
       label: "no focus",
-      unpriced: model.noFocusLines.every((l) => l.unitPrice === null),
+      unpriced: active.noFocusLines.every((l) => l.unitPrice === null),
       cells: cellsFor((coefficient) => {
         let runes = 0;
         let value: number | null = null;
-        for (const l of model.noFocusLines) {
+        for (const l of active.noFocusLines) {
           const r = runeCount(l.weight, l.runeWeight, coefficient);
           runes += r;
           if (l.unitPrice !== null) value = (value ?? 0) + r * l.unitPrice;
@@ -93,56 +113,37 @@ export function Projection({ model }: { model: ProjectionModel }) {
 
     return [...focusRows, noFocus];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, columns, customCoefficient]);
+  }, [active, columns, customCoefficient]);
 
   return (
     <section className="border-circuit-border overflow-hidden rounded-2xl border">
-      <div className="border-phosphor-blue-black flex flex-wrap items-center justify-between gap-x-24 gap-y-12 border-b px-20 py-16">
-        {/* A segmented control, so every state has the same box: the weight and
-            padding never change between active and idle, only the colours. A
-            font-weight that only the active button carries reflows the group on
-            every click, which reads as the switch being broken. */}
-        <div
-          role="group"
-          aria-label="metric"
-          className="border-circuit-border bg-ground-iron flex rounded-xl border p-4"
-        >
-          {METRICS.map((m) => {
-            const disabled =
-              (m.id === "value" && !priced) || (m.id === "profit" && !canProfit);
-            const active = metric === m.id;
-            return (
-              <button
-                key={m.id}
-                type="button"
-                // aria-disabled rather than disabled: a disabled button swallows
-                // pointer events, so the title saying *why* it is off would never
-                // appear — which is the one moment it is worth reading.
-                aria-disabled={disabled || undefined}
-                aria-pressed={active}
-                onClick={() => !disabled && setMetric(m.id)}
-                title={
-                  disabled
-                    ? m.id === "value"
-                      ? "No rune prices captured yet"
-                      : "No price captured for this item"
-                    : m.hint
-                }
-                className={`text-body-sm tracking-body-sm focus-visible:ring-lime-pulse rounded-lg px-16 py-12 font-medium transition-colors duration-150 outline-none focus-visible:ring-2 ${
-                  active
-                    ? "bg-lime-pulse text-void-black"
-                    : disabled
-                      ? "text-deep-fern cursor-not-allowed"
-                      : "text-sage-60 hover:bg-carbon-veil hover:text-phosphor-white cursor-pointer"
-                }`}
-              >
-                {m.label}
-              </button>
-            );
-          })}
-        </div>
-        <p className="text-body-sm tracking-body-sm text-sage-40">
-          {METRICS.find((m) => m.id === metric)?.hint}, as the coefficient decays.
+      <div className="border-phosphor-blue-black flex flex-wrap items-center gap-x-16 gap-y-12 border-b px-20 py-16">
+        <Switch
+          label="stats"
+          options={BASES.map((b) => ({
+            ...b,
+            disabled: b.id === "average" && model.average === null,
+            reason: "No template ranges for every line — run tools/import_items.py",
+          }))}
+          value={basis}
+          onChange={setBasis}
+        />
+        <Switch
+          label="metric"
+          options={METRICS.map((m) => ({
+            ...m,
+            disabled: (m.id === "value" && !priced) || (m.id === "profit" && !canProfit),
+            reason:
+              m.id === "value"
+                ? "No rune prices captured yet"
+                : "No price captured for this item",
+          }))}
+          value={metric}
+          onChange={setMetric}
+        />
+        <p className="text-body-sm tracking-body-sm text-sage-40 basis-full xl:basis-auto">
+          {METRICS.find((m) => m.id === metric)?.hint}, as the coefficient decays
+          {basis === "average" && model.average !== null && ", for an average copy"}.
         </p>
       </div>
 
@@ -240,6 +241,58 @@ export function Projection({ model }: { model: ProjectionModel }) {
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * A segmented control. Every state has the same box: padding and weight never
+ * change between active and idle, only the colours — a font weight carried by
+ * the active button alone reflows the whole group on every click, which reads
+ * as the switch being broken.
+ */
+function Switch<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { id: T; label: string; hint: string; disabled?: boolean; reason?: string }[];
+  value: T;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className="border-circuit-border bg-ground-iron flex rounded-xl border p-4"
+    >
+      {options.map((o) => {
+        const active = value === o.id;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            // aria-disabled rather than disabled: a disabled button swallows
+            // pointer events, so the title saying *why* it is off would never
+            // appear — which is the one moment it is worth reading.
+            aria-disabled={o.disabled || undefined}
+            aria-pressed={active}
+            onClick={() => !o.disabled && onChange(o.id)}
+            title={o.disabled ? o.reason : o.hint}
+            className={`text-body-sm tracking-body-sm focus-visible:ring-lime-pulse rounded-lg px-16 py-12 font-medium transition-colors duration-150 outline-none focus-visible:ring-2 ${
+              active
+                ? "bg-lime-pulse text-void-black"
+                : o.disabled
+                  ? "text-deep-fern cursor-not-allowed"
+                  : "text-sage-60 hover:bg-carbon-veil hover:text-phosphor-white cursor-pointer"
+            }`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

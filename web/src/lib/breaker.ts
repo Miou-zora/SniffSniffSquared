@@ -20,14 +20,8 @@ export interface AverageStat {
   avgWeight: number;
 }
 
-/**
- * Everything the projection table needs, flat enough to hand to a Client
- * Component. The client recomputes at arbitrary coefficients for the custom
- * column, so it gets weights and prices rather than precomputed rows.
- */
-export interface ProjectionModel {
-  coefficient: number;
-  itemCost: number | null;
+/** One set of weights — either what this copy rolled or what the type averages. */
+export interface ProjectionBasis {
   focuses: {
     rune: string;
     effectId: number;
@@ -37,6 +31,28 @@ export interface ProjectionModel {
   }[];
   /** No-focus crushing: each line yields its own rune independently. */
   noFocusLines: { weight: number; runeWeight: number; unitPrice: number | null }[];
+}
+
+/**
+ * Everything the projection table needs, flat enough to hand to a Client
+ * Component. The client recomputes at arbitrary coefficients for the custom
+ * column, so it gets weights and prices rather than precomputed rows.
+ *
+ * Both bases are computed here rather than on demand: they differ only in the
+ * weight per line, the prices and columns are shared, and sending both means
+ * the switch is instant and needs no round trip.
+ */
+export interface ProjectionModel {
+  coefficient: number;
+  itemCost: number | null;
+  /** What this instance rolled, off the wire. */
+  copy: ProjectionBasis;
+  /**
+   * The same item if every line rolled the middle of its template range. Null
+   * when the template does not cover every line that yields a rune — a partial
+   * average would read as a worse item rather than as missing data.
+   */
+  average: ProjectionBasis | null;
 }
 
 export interface BreakerView {
@@ -235,21 +251,67 @@ export async function loadBreaker(): Promise<BreakerView | null> {
     projection: {
       coefficient,
       itemCost: costRow,
-      focuses: outcomes.map((o) => ({
-        rune: o.rune,
-        effectId: o.effectId,
-        runeWeight: o.runeWeight,
-        focusWeight: o.focusWeight,
-        unitPrice: o.unitPrice,
-      })),
-      noFocusLines: weighted.map((l) => ({
-        weight: l.weight,
-        runeWeight: l.runeWeight,
-        unitPrice:
-          l.runeItemId === null ? null : (priceByRuneItemId.get(l.runeItemId) ?? null),
-      })),
+      copy: basisOf(weighted, outcomes, priceByRuneItemId),
+      average: averageBasis(weighted, outcomes, columns, priceByRuneItemId, averages),
     },
   };
+}
+
+/** A basis in the shape the client wants, ordered to match `outcomes`. */
+function basisOf(
+  lines: WeightedLine[],
+  outcomes: FocusOutcome[],
+  priceByRuneItemId: Map<number, number>,
+): ProjectionBasis {
+  return {
+    focuses: outcomes.map((o) => ({
+      rune: o.rune,
+      effectId: o.effectId,
+      runeWeight: o.runeWeight,
+      focusWeight: o.focusWeight,
+      unitPrice: o.unitPrice,
+    })),
+    noFocusLines: lines.map((l) => ({
+      weight: l.weight,
+      runeWeight: l.runeWeight,
+      unitPrice:
+        l.runeItemId === null ? null : (priceByRuneItemId.get(l.runeItemId) ?? null),
+    })),
+  };
+}
+
+/**
+ * The projection for an average copy of this item type.
+ *
+ * Rows keep the order the copy's outcomes were sorted into, so switching basis
+ * changes the figures and never reshuffles the table under the cursor. The best
+ * focus can differ between the two, which is a thing to read rather than a thing
+ * to animate.
+ */
+function averageBasis(
+  weighted: WeightedLine[],
+  outcomes: FocusOutcome[],
+  columns: CoefficientColumn[],
+  priceByRuneItemId: Map<number, number>,
+  averages: Map<number, AverageStat>,
+): ProjectionBasis | null {
+  if (weighted.length === 0) return null;
+  if (!weighted.every((l) => averages.has(l.effectId))) return null;
+
+  const avgLines = weighted.map((l) => ({
+    ...l,
+    weight: averages.get(l.effectId)?.avgWeight ?? l.weight,
+  }));
+  const avgOutcomes = focusOutcomes(avgLines, columns, priceByRuneItemId);
+  const byEffectId = new Map(avgOutcomes.map((o) => [o.effectId, o]));
+  // Ordered by the copy's ranking, dropping nothing: every line that has an
+  // outcome under one basis has one under the other.
+  const ordered = outcomes
+    .map((o) => byEffectId.get(o.effectId))
+    .filter((o): o is FocusOutcome => o !== undefined);
+  if (ordered.length !== outcomes.length) return null;
+
+  return basisOf(avgLines, ordered, priceByRuneItemId);
 }
 
 /**
