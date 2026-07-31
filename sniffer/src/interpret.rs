@@ -23,7 +23,13 @@ pub fn interpret(key: &str, body: &[u8]) -> Option<String> {
         "crush_result" => crush_result(body).map(|c| c.to_string()),
         // Shown in --all output but deliberately not stored: the focus does
         // not change the yield, so it says nothing the crush row needs.
-        "crush_slot_put" => crush_slot_put(body).map(|uid| format!("placed in breaker {{ uid={uid} }}")),
+        "crush_slot_put" => crush_slot_change(body).map(|(delta, uid)| {
+            if delta > 0 {
+                format!("placed in breaker {{ uid={uid} x{delta} }}")
+            } else {
+                format!("taken out of breaker {{ uid={uid} x{} }}", -delta)
+            }
+        }),
         "crush_request" => Some(match crush_focus(body) {
             Some(effect) => format!("crush requested {{ focus effect {effect} }}"),
             None => "crush requested { no focus }".to_string(),
@@ -60,10 +66,10 @@ pub fn is_known_key(key: &str) -> bool {
 // The item *type* is not in this message. It arrives earlier as `item_detail`
 // keyed by the same uid, which main.rs caches to fill it in.
 //
-// Focus (focalisation) is NOT here, and is not sent per-crush: two crushes with
-// focus and one without produced structurally identical messages and identical
-// client requests. It is presumably persisted server-side from an earlier UI
-// action. See RUNBOOK part 3.
+// Focus (focalisation) is NOT here. It travels in the `crush_request` the client
+// sends immediately before, as field 1 — see that section below. An earlier note
+// claiming it was not sent per-crush was wrong: the requests do differ, but only
+// in a field that is absent entirely when no focus is set, which is easy to miss.
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CrushResult {
@@ -161,16 +167,32 @@ pub fn crush_result(body: &[u8]) -> Option<CrushResult> {
 // `item_detail` for the same uid. Confirmed by a placement with no crush after
 // it: the item sat in the slot while the focus was changed and was never broken.
 //
-//   field 1  varint   always 1 in every sample
+//   field 1  varint   SIGNED quantity delta: +1 adds one, -1 takes one back out
 //   field 2  varint   instance uid of the item placed
+//
+// Field 1 is not always 1. A capture where an item was placed and then pulled
+// back out carries `1=-1` (0xFFFF_FFFF_FFFF_FFFF as a two's-complement varint)
+// for the same uid. Both directions are answered by an identical `item_detail`,
+// so the sign is the only thing distinguishing a placement from a removal — read
+// it, or the breaker's contents are tracked wrong and a removed item still looks
+// like it is about to be crushed.
 
-/// The instance uid of an item just put into the breaker.
+/// The instance uid of an item just put into the breaker, and `None` for a
+/// removal — the caller only cares about what is going *in*.
 pub fn crush_slot_put(body: &[u8]) -> Option<u64> {
+    let (delta, uid) = crush_slot_change(body)?;
+    (delta > 0).then_some(uid)
+}
+
+/// The raw `(quantity delta, uid)`, negative delta meaning the item left the
+/// slot. Split out so the sign is testable independently of the filtering.
+pub fn crush_slot_change(body: &[u8]) -> Option<(i64, u64)> {
     let mut r = Reader::new(body);
-    let mut uid = None;
+    let (mut delta, mut uid) = (None, None);
     while !r.eof() {
         let (field, wt) = r.tag()?;
         match (field, wt) {
+            (1, WireType::Varint) => delta = Some(r.varint()? as i64),
             (2, WireType::Varint) => uid = Some(r.varint()?),
             (_, wt) => {
                 if !r.skip(wt) {
@@ -179,7 +201,10 @@ pub fn crush_slot_put(body: &[u8]) -> Option<u64> {
             }
         }
     }
-    uid
+    // A missing field 1 is protobuf's default of 0, but every sample carries it
+    // explicitly; treat its absence as "one, going in" rather than dropping the
+    // message, since the uid is the part that matters.
+    Some((delta.unwrap_or(1), uid?))
 }
 
 // ---- crush_request: the client's "crush it" command ------------------------
@@ -522,11 +547,29 @@ mod tests {
     // real placement: the item that was loaded into the breaker and never broken
     const SLOT_PUT: &[u8] = &[0x08, 0x01, 0x10, 0x95, 0xa9, 0xc3, 0x3c];
 
+    // real removal: a Kwape de Glace put into the breaker and then pulled back
+    // out before the crush. Field 1 is -1 as a two's-complement varint.
+    const SLOT_REMOVE: &[u8] = &[
+        0x08, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01, 0x10, 0xfe, 0xca, 0xfb,
+        0x3e,
+    ];
+    // the same uid going the other way, captured moments earlier
+    const SLOT_ADD: &[u8] = &[0x08, 0x01, 0x10, 0xfe, 0xca, 0xfb, 0x3e];
+
     #[test]
     fn slot_put_reads_the_uid() {
         assert_eq!(crush_slot_put(SLOT_PUT), Some(126932117));
         // a crush request is not a placement
         assert_eq!(crush_slot_put(REQ_NO_FOCUS), None);
+    }
+
+    #[test]
+    fn slot_removal_is_not_a_placement() {
+        // same uid, opposite directions — only the sign of field 1 separates them
+        assert_eq!(crush_slot_change(SLOT_ADD), Some((1, 132048254)));
+        assert_eq!(crush_slot_change(SLOT_REMOVE), Some((-1, 132048254)));
+        assert_eq!(crush_slot_put(SLOT_ADD), Some(132048254));
+        assert_eq!(crush_slot_put(SLOT_REMOVE), None);
     }
 
     #[test]
