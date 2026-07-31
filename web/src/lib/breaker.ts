@@ -72,8 +72,14 @@ export interface CraftEstimate {
  */
 export interface ProjectionModel {
   coefficient: number;
-  /** The item's last captured market price. */
+  /** True when no crush of THIS item has been seen, so 100% is a placeholder. */
+  coefficientAssumed: boolean;
+  /** When the crush it came from was observed. */
+  coefficientSeenAt: string | null;
+  /** The item's market price: cheapest current listing, or the last ladder. */
   itemCost: number | null;
+  /** How many listings that price was the cheapest of. 0 when it came from a ladder. */
+  offerCount: number;
   /** What its ingredients cost, or null when the item has no recipe at all. */
   craft: CraftEstimate | null;
   /** What this instance rolled, off the wire. */
@@ -208,10 +214,20 @@ export async function loadBreaker(): Promise<BreakerView | null> {
   const totalWeight = weighted.reduce((s, l) => s + l.weight, 0);
   const unmapped = lines.filter((l) => l.rune === null);
 
-  // The coefficient is account state, not item state: it decays as you craft.
-  // The most recent crush is the best observation of it available.
-  const [coeffRow] = await query<{ yield_percent: number }>(
-    `SELECT yield_percent FROM crushes ORDER BY seen_at DESC, id DESC LIMIT 1`,
+  // The coefficient belongs to the item type, not to the account. Two capes
+  // crushed a minute apart came out at 88.06% and 87.60%, a hat two hours later
+  // at 17.95%, and a bow at 32.19% — each item type carries its own rate, so
+  // the only crush that says anything about this one is a crush of this one.
+  //
+  // This used to take the most recent crush of anything, which meant the page
+  // confidently applied a hat's rate to a belt. An unrelated item's figure is
+  // not a weaker estimate, it is a different number entirely; with none of this
+  // item's own, the honest answer is that it is unknown.
+  const [coeffRow] = await query<{ yield_percent: number; seen_at: Date }>(
+    `SELECT yield_percent, seen_at FROM crushes
+      WHERE item_id = $1
+      ORDER BY seen_at DESC, id DESC LIMIT 1`,
+    [itemId],
   );
   const coefficient = coeffRow?.yield_percent ?? 100;
 
@@ -229,7 +245,8 @@ export async function loadBreaker(): Promise<BreakerView | null> {
     return b.runes[1] - a.runes[1];
   });
 
-  const [costRow] = await latestPrices([itemId]).then((m) => [m.get(itemId) ?? null]);
+  const market = await marketPrice(itemId);
+  const costRow = market.cost;
 
   // What the item type can roll, for comparison against what this copy did.
   // From item_effects when the importer has seen the id, and from DofusDB when
@@ -305,7 +322,10 @@ export async function loadBreaker(): Promise<BreakerView | null> {
     averageTotalWeight,
     projection: {
       coefficient,
+      coefficientAssumed: !coeffRow,
+      coefficientSeenAt: coeffRow ? coeffRow.seen_at.toISOString() : null,
       itemCost: costRow,
+      offerCount: market.offers,
       craft: await craftEstimate(itemId),
       copy: basisOf(weighted, outcomes, priceByRuneItemId),
       average: averageBasis(weighted, outcomes, columns, priceByRuneItemId, averages),
@@ -553,6 +573,39 @@ async function fetchRecipe(
   } catch {
     return null;
   }
+}
+
+/**
+ * What one copy of this item costs on the market right now.
+ *
+ * Gear is sold as individual listings, so "the price" is the cheapest one
+ * currently on offer, not an arbitrary seller's asking price — the spread is
+ * routinely two orders of magnitude, and picking wrong makes every profit
+ * figure on the page wrong with it.
+ *
+ * Only the most recent snapshot counts. Every listing in a panel arrives in one
+ * message and lands within the same instant, so a short window around the
+ * newest row is exactly that panel; older rows are listings that may well be
+ * sold by now.
+ *
+ * Resources have no listings, only a stack quote, and fall back to `prices`.
+ */
+async function marketPrice(
+  itemId: number,
+): Promise<{ cost: number | null; offers: number }> {
+  const [row] = await query<{ cheapest: string | null; offers: string }>(
+    `SELECT min(price) AS cheapest, count(*) AS offers
+       FROM offers
+      WHERE item_id = $1
+        AND seen_at >= (SELECT max(seen_at) - interval '10 seconds'
+                          FROM offers WHERE item_id = $1)`,
+    [itemId],
+  );
+  if (row?.cheapest != null) {
+    return { cost: Number(row.cheapest), offers: Number(row.offers) };
+  }
+  const ladder = await latestPrices([itemId]);
+  return { cost: ladder.get(itemId) ?? null, offers: 0 };
 }
 
 /**

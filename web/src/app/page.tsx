@@ -32,7 +32,7 @@ export default async function Home() {
             <BestRune view={view} priced={priced} />
             <StatLines view={view} />
           </div>
-          <Projection model={view.projection} />
+          <Projection model={view.projection} itemName={view.item.name} />
         </div>
       )}
     </main>

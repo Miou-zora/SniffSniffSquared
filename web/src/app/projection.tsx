@@ -68,14 +68,22 @@ function formatProfit(p: number): string {
   return `${p >= 0 ? "+" : ""}${fmt(p, digits)}%`;
 }
 
-export function Projection({ model }: { model: ProjectionModel }) {
+export function Projection({
+  model,
+  itemName,
+}: {
+  model: ProjectionModel;
+  itemName: string;
+}) {
   const [metric, setMetric] = useState<Metric>("runes");
   const [basis, setBasis] = useState<Basis>("copy");
   const [customX, setCustomX] = useState("");
   const [source, setSource] = useState<Source>("market");
   const [manualCost, setManualCost] = useState("");
+  const [coefficientInput, setCoefficientInput] = useState("");
   const inputId = useId();
   const costId = useId();
+  const coeffId = useId();
 
   // The average basis is absent whenever the template does not cover every
   // line, so a switch left on it would silently fall back. It cannot be
@@ -99,21 +107,30 @@ export function Projection({ model }: { model: ProjectionModel }) {
   const priced = active.focuses.some((f) => f.unitPrice !== null);
   const canProfit = priced && itemCost !== null;
 
+  // The rate belongs to the item type, so an item never crushed has no observed
+  // one. Typing it in is not a preference, it is the only way to get a real
+  // answer for an item you have not broken yet — the game shows the figure.
+  const typedCoefficient = useMemo(() => {
+    const v = Number.parseFloat(coefficientInput.replace(",", "."));
+    return Number.isFinite(v) && v > 0 && v <= 100 ? v : null;
+  }, [coefficientInput]);
+  const coefficient = typedCoefficient ?? model.coefficient;
+
   const customCoefficient = useMemo(() => {
     const x = Number.parseInt(customX, 10);
     if (!Number.isFinite(x) || x < 1 || x > 100_000) return null;
-    return decay(model.coefficient, x);
-  }, [customX, model.coefficient]);
+    return decay(coefficient, x);
+  }, [customX, coefficient]);
 
   const columns = useMemo(
     () => [
       { label: "100%", coefficient: 100 },
       ...COEFFICIENT_STEPS.map((s) => ({
         label: s === 0 ? "n" : `n+${s}`,
-        coefficient: decay(model.coefficient, s),
+        coefficient: decay(coefficient, s),
       })),
     ],
-    [model.coefficient],
+    [coefficient],
   );
 
   /** Cell values for one row, across the fixed columns plus the custom one. */
@@ -222,6 +239,36 @@ export function Projection({ model }: { model: ProjectionModel }) {
           ) : (
             <CostReadout source={source} model={model} cost={itemCost} />
           )}
+        </div>
+
+        <div className="flex basis-full flex-wrap items-center gap-x-16 gap-y-8">
+          <label
+            htmlFor={coeffId}
+            className="text-caption tracking-caption text-deep-fern uppercase"
+          >
+            coefficient n
+          </label>
+          <span className="text-body-sm tracking-body-sm text-sage-40 flex items-center gap-4">
+            <input
+              id={coeffId}
+              type="number"
+              inputMode="decimal"
+              min={0}
+              max={100}
+              step={0.01}
+              value={coefficientInput}
+              onChange={(e) => setCoefficientInput(e.target.value)}
+              placeholder={fmt(model.coefficient, 2)}
+              aria-label="coefficient percentage"
+              className="border-circuit-border focus:border-lime-pulse text-body-sm text-phosphor-white placeholder:text-deep-fern w-64 border-0 border-b bg-transparent px-0 py-4 text-right tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            />
+            %
+          </span>
+          <CoefficientNote
+            model={model}
+            typed={typedCoefficient !== null}
+            itemName={itemName}
+          />
         </div>
 
         {/* Always its own row. It used to sit beside the switches above xl and
@@ -333,6 +380,46 @@ export function Projection({ model }: { model: ProjectionModel }) {
 }
 
 /**
+ * Where the coefficient came from, which is the difference between a figure and
+ * a guess.
+ *
+ * The rate belongs to the item type: two capes crushed a minute apart came out
+ * at 88.06% and 87.60%, a hat at 17.95%. So a crush of anything else says
+ * nothing about this item, and 100% with no crush behind it is a placeholder
+ * that happens to be a plausible-looking number.
+ */
+function CoefficientNote({
+  model,
+  typed,
+  itemName,
+}: {
+  model: ProjectionModel;
+  typed: boolean;
+  itemName: string;
+}) {
+  const base = "text-body-sm tracking-body-sm";
+  if (typed) {
+    return <p className={`${base} text-sage-40`}>yours, overriding what was captured</p>;
+  }
+  if (model.coefficientAssumed) {
+    return (
+      <p className={`${base} text-sage-40`}>
+        <span className="text-phosphor-white">assumed</span> — no crush of {itemName} has
+        been captured, and the rate is per item, so nothing else stands in for it. Type
+        the figure the game shows, or crush one with the sniffer running.
+      </p>
+    );
+  }
+  const seen = model.coefficientSeenAt;
+  return (
+    <p className={`${base} text-sage-40`}>
+      from the last crush of {itemName}
+      {seen !== null && ` at ${new Date(seen).toLocaleTimeString("fr-FR")}`}
+    </p>
+  );
+}
+
+/**
  * What the selected source says the item cost, and when it says nothing, why.
  *
  * The craft line names the ingredients it could not price rather than reporting
@@ -358,7 +445,12 @@ function CostReadout({
         ) : (
           <>
             <span className="text-phosphor-white tabular-nums">{kamas.format(cost)}</span>{" "}
-            k, last seen on the market
+            k,{" "}
+            {model.offerCount > 1
+              ? `cheapest of ${model.offerCount} listings`
+              : model.offerCount === 1
+                ? "the only listing seen"
+                : "last quoted on the market"}
           </>
         )}
       </p>
