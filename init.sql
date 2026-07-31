@@ -61,3 +61,17 @@ CREATE TABLE IF NOT EXISTS crush_placements (
 );
 
 CREATE INDEX IF NOT EXISTS idx_placements_item ON crush_placements (item_id, placed_at DESC);
+
+-- Rune reference: game constants from docs/brisage-runes.json, plus the DofusDB
+-- ids that join them to captured data. Loaded by tools/import_runes.py, which
+-- also creates this table; declared here so the schema is readable in one place.
+CREATE TABLE IF NOT EXISTS runes (
+    rune          TEXT PRIMARY KEY,   -- short name, e.g. 'Vi'
+    stat_fr       TEXT NOT NULL,
+    rune_weight   REAL NOT NULL,      -- game constant
+    stat_per_rune REAL NOT NULL,
+    item_id       BIGINT,             -- DofusDB item id
+    effect_id     BIGINT              -- joins to item_detail effects and the crush focus
+);
+
+CREATE INDEX IF NOT EXISTS idx_runes_effect ON runes (effect_id);

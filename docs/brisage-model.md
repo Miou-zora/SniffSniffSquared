@@ -114,22 +114,50 @@ The sniffer already supplies most of it:
 capture carries effect 125 (Vitalité) at 28, plus four more. Only the uid and
 type id are currently extracted; the effects are parsed and discarded.
 
-**The missing link is a mapping from effect id to rune.** The spreadsheet keys
-its table by French stat name ("Vitalité"), the wire gives effect ids (125), and
-DofusDB gives both — each rune item exposes `effects[].effectId`. So the join is
-buildable from DofusDB, and worth generating once rather than by hand. Note one
-effect id can cover several runes (125 is Rune Vi, Rune Pa Vi and Rune Ra Vi).
+**The effect id to rune mapping is built by `tools/import_runes.py`**, which
+loads this table into Postgres and resolves each rune against DofusDB:
 
-## Sanity check, not a verification
+```sh
+docker compose up -d db
+tools/import_runes.py            # 50/50 resolved
+```
 
-Working backwards from the real captured crush — Anneau Bsène, level 68,
-coefficient 47.85%, 32 Rune Vi with focus on Vi — the model wants a total line
-weight around 128 across the item's five stats. With four non-vitality stats at
-weights in the 15–30 range that is plausible, but it has **not** been confirmed:
-doing so needs the effect-id mapping above.
+That gives a `runes` table keyed by short name with `item_id` and `effect_id`,
+so `item_detail` effects and the focus join straight to a rune weight. The
+script is idempotent and has an `--offline` mode that loads weights only.
 
-Treat the formulas as transcribed-but-unverified until something checks them
-against a real crush end to end. The data to do that is already in `packets`.
+One caveat carried over: an effect id can cover several runes — 125 is Rune Vi,
+Rune Pa Vi and Rune Ra Vi. The table stores the base rune.
+
+## Verified against a real crush
+
+The Arc Anum crush in the capture — level 96, coefficient 32.185%, **no focus**
+— predicts against what the game actually returned:
+
+| rune | predicted | actual |
+|---|---|---|
+| Ine | 23.17 | 23 |
+| Age | 19.47 | 20 |
+| Ini | 10.43 | 11 |
+| Vi | 10.10 | 10 |
+| Do Neutre | 2.32 | 2 |
+| Do Feu | 2.32 | 2 |
+| Ré Per Feu | 1.39 | 2 |
+| Ré Per Neutre | 0.93 | 1 |
+
+Every line within ±0.61, which is rounding. **The formulas are correct.**
+
+Two things this pins down:
+
+- with no focus, the quantity uses `line_weight` directly; `focus_weight` is
+  only for the focused stat
+- the item's stat values come from `item_detail`, its level from DofusDB, and
+  the coefficient from `crushes.yield_percent` — the whole input set is
+  already captured
+
+The same check on the focused Anneau Bsène predicts 33.5 Rune Vi against 32
+actual. Larger than the rounding seen above, so the focus branch is close but
+not confirmed to the same standard; one more focused crush would settle it.
 
 ## Caveats
 
@@ -139,3 +167,7 @@ against a real crush end to end. The data to do that is already in `packets`.
   cached value — the formulas were read directly rather than their results.
 - `ItemWorth` is hand-maintained and small (4 rows); its column E mixes formats
   ("96%->83%" as text next to 0.93 as a number).
+- **The sheet has a typo.** "Dommage Poussée" is labelled `Do Pi`, the same short
+  name as "Dommage Pièges". DofusDB has a distinct Rune Do Pou (item 11649,
+  effect 414) for push damage, so `brisage-runes.json` corrects it and records
+  the change inline. Left uncorrected it collapses two stats into one.
