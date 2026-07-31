@@ -99,6 +99,25 @@ fn main() {
     }
 }
 
+/// Announces a change to anyone LISTENing, so the web app can update without
+/// polling. Prepended to every DDL block that installs a trigger using it, by
+/// `with_notify` — each block runs on its own connection and none may assume
+/// another ran first.
+///
+/// Statement-level, not row-level: a single item's stat lines arrive as several
+/// inserts and the listener only needs to know *that* something changed.
+const NOTIFY_FN: &str = "CREATE OR REPLACE FUNCTION notify_breaker() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM pg_notify('breaker', TG_TABLE_NAME);
+    RETURN NULL;
+END $$;";
+
+/// `NOTIFY_FN` followed by a DDL block that depends on it.
+fn with_notify(ddl: &str) -> String {
+    format!("{NOTIFY_FN}\n{ddl}")
+}
+
 /// Marketplace prices from `kea`. Unlike the old `kdh` table this keeps
 /// history — one row per observation — because the point of watching the
 /// marketplace is how prices move, and an upsert throws that away.
@@ -150,7 +169,13 @@ CREATE TABLE IF NOT EXISTS crush_placements (
 );
 ALTER TABLE crush_placements ADD COLUMN IF NOT EXISTS uid BIGINT;
 CREATE INDEX IF NOT EXISTS idx_placements_item ON crush_placements (item_id, placed_at DESC);
-CREATE INDEX IF NOT EXISTS idx_crushes_item ON crushes (item_id, seen_at DESC)";
+CREATE INDEX IF NOT EXISTS idx_crushes_item ON crushes (item_id, seen_at DESC);
+DROP TRIGGER IF EXISTS trg_crush_placements_notify ON crush_placements;
+CREATE TRIGGER trg_crush_placements_notify AFTER INSERT ON crush_placements
+    FOR EACH STATEMENT EXECUTE FUNCTION notify_breaker();
+DROP TRIGGER IF EXISTS trg_crushes_notify ON crushes;
+CREATE TRIGGER trg_crushes_notify AFTER INSERT ON crushes
+    FOR EACH STATEMENT EXECUTE FUNCTION notify_breaker()";
 
 const CRUSH_INSERT: &str = "INSERT INTO crushes (item_id, yield_percent) VALUES ($1,$2)";
 const PLACEMENT_INSERT: &str =
@@ -168,6 +193,9 @@ const ITEM_STATS_DDL: &str = "CREATE TABLE IF NOT EXISTS item_stats (
     PRIMARY KEY (uid, effect_id)
 );
 CREATE INDEX IF NOT EXISTS idx_item_stats_item ON item_stats (item_id);
+DROP TRIGGER IF EXISTS trg_item_stats_notify ON item_stats;
+CREATE TRIGGER trg_item_stats_notify AFTER INSERT ON item_stats
+    FOR EACH STATEMENT EXECUTE FUNCTION notify_breaker();
 CREATE TABLE IF NOT EXISTS items (
     item_id    BIGINT PRIMARY KEY,
     name_fr    TEXT,
@@ -246,11 +274,11 @@ fn build_dispatch() -> Dispatcher {
         });
     }
 
-    let mut placement_db = db_client_with(CRUSH_DDL);
+    let mut placement_db = db_client_with(&with_notify(CRUSH_DDL));
     if placement_db.is_some() {
         println!("[db] connected; crush_slot_put -> table crush_placements");
     }
-    let mut stats_db = db_client_with(ITEM_STATS_DDL);
+    let mut stats_db = db_client_with(&with_notify(ITEM_STATS_DDL));
     if stats_db.is_some() {
         println!("[db] connected; item_detail stat lines -> table item_stats");
     }
@@ -292,7 +320,7 @@ fn build_dispatch() -> Dispatcher {
     }
     if let Some(crush_key) = messages::keymap().key("crush_result") {
         let cache = uid_to_item.clone();
-        match db_client_with(CRUSH_DDL) {
+        match db_client_with(&with_notify(CRUSH_DDL)) {
             Some(mut client) => {
                 println!("[db] connected; crush_result ({crush_key}) -> table crushes");
                 d.on(crush_key, move |e| {

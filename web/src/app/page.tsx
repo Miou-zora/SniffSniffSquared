@@ -1,3 +1,4 @@
+import { Live } from "@/app/live";
 import { loadBreaker, type BreakerView } from "@/lib/breaker";
 import { profitPercent } from "@/lib/brisage";
 
@@ -40,7 +41,10 @@ export default async function Home() {
 function Empty() {
   return (
     <main className="mx-auto w-full max-w-[1280px] px-24 py-96">
-      <p className="text-caption tracking-caption text-moss-70 uppercase">breaker</p>
+      <div className="flex items-center justify-between gap-16">
+        <p className="text-caption tracking-caption text-moss-70 uppercase">breaker</p>
+        <Live />
+      </div>
       <h1 className="text-heading-lg tracking-heading-lg mt-16">
         Nothing in the breaker
       </h1>
@@ -55,9 +59,12 @@ function Empty() {
 function Header({ view }: { view: BreakerView }) {
   return (
     <header>
-      <p className="text-caption tracking-caption text-moss-70 uppercase">
-        in the breaker
-      </p>
+      <div className="flex items-center justify-between gap-16">
+        <p className="text-caption tracking-caption text-moss-70 uppercase">
+          in the breaker
+        </p>
+        <Live />
+      </div>
       <h1 className="text-heading-lg tracking-heading-lg mt-12">{view.item.name}</h1>
       <p className="text-body tracking-body text-sage-40 mt-12">
         {view.item.type ?? "—"} · level {view.item.level} · placed{" "}

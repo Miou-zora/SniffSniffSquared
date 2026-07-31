@@ -207,10 +207,18 @@ something else is already on it** — usually the `web` container; stop it with
 - **The first page is the breaker view**, since that is the decision the data
   actually informs while playing.
 
+- **Live updates: Postgres LISTEN/NOTIFY over SSE.** The sniffer's inserts fire
+  triggers that `pg_notify('breaker', ...)`; `/api/breaker/stream` relays them
+  and `src/app/live.tsx` calls `router.refresh()`. No polling.
+
+  **The LISTEN connection is shared process-wide** (`src/lib/notify.ts`), not one
+  per client. A connection per SSE client leaks: `LISTEN` is connection state so
+  it cannot come from the pool, and a client that dies without a clean close does
+  not reliably fire the request's abort signal. One was measured surviving five
+  minutes with nothing behind it. Verified: five concurrent streams use one
+  connection, and still one after all five are SIGKILLed.
+
 ## Not decided yet
 
-- **Live updates.** The page reads on request (`dynamic = "force-dynamic"`) and
-  needs a manual refresh to notice a new placement. Polling or streaming would
-  fix that; neither is wired.
 - **Item icons.** `iconId` from DofusDB is available and unused.
 - **Price history.** `prices` is a time series and only its latest row is read.
