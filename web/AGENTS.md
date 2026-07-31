@@ -48,6 +48,15 @@ All defined in `../init.sql`:
   time series, not current state: `item_id`, `b1`, `b10`, `b100`, `b1000`
   (price for x1 / x10 / x100 / x1000), `seen_at`. A `0` means that batch size
   was not on sale.
+- **`offers`** / **`offer_stats`** — individual marketplace listings and the
+  stats each listed copy rolled. **This, not `prices`, is what a piece of gear
+  costs**: equipment is sold one copy at a time and the spread between the
+  cheapest and dearest listing is routinely 100x, so the price is
+  `min(price)` over the latest snapshot. `prices` is for fungible stacks, where
+  a batch ladder is the right shape. The wire distinguishes them with no
+  guesswork — an offer carrying stat lines is one specific copy.
+  `offer_stats` is the only record of what copies _other than yours_ rolled;
+  nothing reads it yet.
 - **`crush_placements`** — an item put into the breaker: `item_id`, `uid`,
   `placed_at`. A placement does not imply a crush; the item may sit there and
   never be broken, which is exactly when the breaker page is useful. `uid` is

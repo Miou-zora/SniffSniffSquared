@@ -145,6 +145,47 @@ CREATE TRIGGER trg_prices_notify AFTER INSERT ON prices
 const PRICES_INSERT: &str = "INSERT INTO prices
     (item_id, category, listing_id, b1, b10, b100, b1000) VALUES ($1,$2,$3,$4,$5,$6,$7)";
 
+/// Individual marketplace offers, and the stats the copy on sale rolled.
+///
+/// Separate from `prices` because they answer different questions. A row in
+/// `prices` is a stack quote for a fungible resource — one price per batch
+/// size. A row here is one specific piece of gear somebody listed, at one
+/// price, with the stats it happens to have. Browsing equipment produces
+/// dozens at once, and folding them into `prices` meant recording the last
+/// seller's asking price as if it were the market's.
+///
+/// Keyed by `(listing_id, seen_at)` so a listing re-observed at a new price
+/// keeps both observations: the point of watching a market is the movement.
+const OFFERS_DDL: &str = "CREATE TABLE IF NOT EXISTS offers (
+    listing_id BIGINT      NOT NULL,
+    seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    item_id    BIGINT      NOT NULL,
+    category   BIGINT,
+    price      BIGINT      NOT NULL,
+    PRIMARY KEY (listing_id, seen_at)
+);
+CREATE INDEX IF NOT EXISTS idx_offers_item ON offers (item_id, seen_at DESC);
+CREATE TABLE IF NOT EXISTS offer_stats (
+    listing_id BIGINT NOT NULL,
+    effect_id  BIGINT NOT NULL,
+    item_id    BIGINT NOT NULL,
+    value      BIGINT NOT NULL,
+    seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (listing_id, effect_id)
+);
+CREATE INDEX IF NOT EXISTS idx_offer_stats_item ON offer_stats (item_id, effect_id);
+DROP TRIGGER IF EXISTS trg_offers_notify ON offers;
+CREATE TRIGGER trg_offers_notify AFTER INSERT ON offers
+    FOR EACH STATEMENT EXECUTE FUNCTION notify_breaker()";
+
+const OFFER_INSERT: &str = "INSERT INTO offers (listing_id, item_id, category, price)
+    VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING";
+
+const OFFER_STAT_INSERT: &str =
+    "INSERT INTO offer_stats (listing_id, effect_id, item_id, value) VALUES ($1,$2,$3,$4)
+     ON CONFLICT (listing_id, effect_id) DO UPDATE SET value = EXCLUDED.value,
+     seen_at = now()";
+
 /// Crushes ("brisage") and the runes each produced. Two tables because one
 /// crush yields many rune types — up to 8 observed.
 ///
@@ -249,7 +290,7 @@ fn build_dispatch() -> Dispatcher {
             return d;
         }
     };
-    match db_client_with(&with_notify(PRICES_DDL)) {
+    match db_client_with(&with_notify(&format!("{PRICES_DDL};\n{OFFERS_DDL}"))) {
         Some(mut client) => {
             println!("[db] connected; price_list ({price_key}) -> table prices");
             d.on(&price_key, move |e| {
@@ -432,7 +473,14 @@ fn insert_crush(
     Ok(())
 }
 
-/// One row per observed price ladder, so history is preserved.
+/// One row per observed price, so history is preserved.
+///
+/// Which table depends on what the offer is, and the wire says so plainly: an
+/// offer carrying rolled stats is one specific copy of a piece of gear and goes
+/// to `offers`, while a bare quote is a fungible stack and goes to `prices` as
+/// a ladder. Sending gear to `prices` would claim x10 and x100 quotes that do
+/// not exist, and sending a resource stack to `offers` would invent a listing
+/// for something that has no individual identity.
 fn insert_price(
     client: &mut postgres::Client,
     e: &dispatch::Event,
@@ -441,19 +489,44 @@ fn insert_price(
         Some(p) => p,
         None => return Ok(()), // not a price message after all
     };
-    let at = |i: usize| p.ladder.get(i).map(|&v| v as i64);
-    client.execute(
-        PRICES_INSERT,
-        &[
-            &(p.item_id as i64),
-            &(p.category as i64),
-            &(p.listing_id as i64),
-            &at(0),
-            &at(1),
-            &at(2),
-            &at(3),
-        ],
-    )?;
+    for offer in &p.offers {
+        if offer.stats.is_empty() {
+            let at = |i: usize| offer.ladder.get(i).map(|&v| v as i64);
+            client.execute(
+                PRICES_INSERT,
+                &[
+                    &(offer.item_id as i64),
+                    &(p.category as i64),
+                    &(offer.listing_id as i64),
+                    &at(0),
+                    &at(1),
+                    &at(2),
+                    &at(3),
+                ],
+            )?;
+            continue;
+        }
+        client.execute(
+            OFFER_INSERT,
+            &[
+                &(offer.listing_id as i64),
+                &(offer.item_id as i64),
+                &(p.category as i64),
+                &(offer.unit_price() as i64),
+            ],
+        )?;
+        for (effect_id, value) in &offer.stats {
+            client.execute(
+                OFFER_STAT_INSERT,
+                &[
+                    &(offer.listing_id as i64),
+                    &(*effect_id as i64),
+                    &(offer.item_id as i64),
+                    value,
+                ],
+            )?;
+        }
+    }
     Ok(())
 }
 

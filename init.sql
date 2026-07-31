@@ -41,6 +41,44 @@ CREATE INDEX IF NOT EXISTS idx_prices_item ON prices (item_id, seen_at DESC);
 --     what it was
 -- The raw messages stay in `packets`, so runes, focus and instance ids all
 -- remain recoverable if a derivation ever needs checking.
+-- Individual marketplace offers, and the stats the copy on sale rolled.
+--
+-- `prices` and this table are both "what the market says" and they are not the
+-- same thing. A price row is a stack quote for a fungible resource: one price
+-- per batch size, and any two units are interchangeable. A row here is one
+-- specific piece of gear somebody listed, at one price, with the stats it
+-- happens to carry -- browsing equipment yields dozens at once, each a
+-- different roll of the same item type.
+--
+-- The wire tells them apart with no guesswork: an offer carrying stat lines is
+-- a single copy, an offer without them is a stack.
+--
+-- This is also the only source of *observed* rolls beyond the items you have
+-- held yourself. item_effects says what an item type can roll; this says what
+-- the copies actually on sale did roll.
+CREATE TABLE IF NOT EXISTS offers (
+    listing_id BIGINT      NOT NULL,
+    seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    item_id    BIGINT      NOT NULL,
+    category   BIGINT,
+    price      BIGINT      NOT NULL,
+    -- keyed with the timestamp so a relisting at a new price keeps both
+    PRIMARY KEY (listing_id, seen_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_offers_item ON offers (item_id, seen_at DESC);
+
+CREATE TABLE IF NOT EXISTS offer_stats (
+    listing_id BIGINT NOT NULL,
+    effect_id  BIGINT NOT NULL,
+    item_id    BIGINT NOT NULL,
+    value      BIGINT NOT NULL,
+    seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (listing_id, effect_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_offer_stats_item ON offer_stats (item_id, effect_id);
+
 CREATE TABLE IF NOT EXISTS crushes (
     id            BIGSERIAL PRIMARY KEY,
     seen_at       TIMESTAMPTZ NOT NULL DEFAULT now(),

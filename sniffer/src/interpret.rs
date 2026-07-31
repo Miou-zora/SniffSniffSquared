@@ -356,25 +356,77 @@ fn stat_line(body: &[u8]) -> Option<(u64, i64)> {
 // older build and cannot be trusted for this key.
 //
 //   field 1  varint            category (repeats as inner field 6)
-//   field 2  message
+//   field 2  message           REPEATED, one per offer
 //       field 1  varint        item id
+//       field 4  message       REPEATED, one per stat line — equipment only
+//           field 8  varint    value this copy rolled
+//           field 9  varint    effect id
 //       field 5  packed        price ladder: x1, x10, x100, x1000
 //       field 7  varint        listing id
 //   field 3  varint            item id (repeats inner field 1)
 //
 // A ladder entry of 0 means that batch size is not on sale.
+//
+// **The message has two shapes and they mean different things.** Browsing a
+// resource yields one offer whose ladder is a real x1/x10/x100/x1000 quote.
+// Browsing equipment yields one offer *per copy on sale* — 34 in the message
+// this was found in — each quoting a single price in the x1 slot and carrying
+// the stats that copy actually rolled.
+//
+// This parser used to keep only the last offer, which for equipment meant an
+// arbitrary seller's asking price recorded as if it were a market ladder, and
+// every rolled stat discarded. The distinction the rest of the code needs is
+// `stats.is_empty()`: a ladder describes a fungible stack, an offer with stats
+// describes one specific copy.
+
+/// One entry in a price message: a stack quote, or a single copy on sale.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Offer {
+    pub item_id: u64,
+    /// x1, x10, x100, x1000. Equipment quotes only the first.
+    pub ladder: Vec<u64>,
+    pub listing_id: u64,
+    /// `(effect id, value)` this copy rolled. Empty for a resource ladder.
+    pub stats: Vec<(u64, i64)>,
+}
+
+impl Offer {
+    /// The single-unit price, which is the whole price for one piece of gear.
+    pub fn unit_price(&self) -> u64 {
+        self.ladder.first().copied().unwrap_or(0)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PriceList {
     pub category: u64,
-    pub item_id: u64,
-    pub ladder: Vec<u64>,
-    pub listing_id: u64,
+    pub offers: Vec<Offer>,
+}
+
+impl PriceList {
+    /// The item every offer is about. Messages mix no item types in practice.
+    pub fn item_id(&self) -> u64 {
+        self.offers.first().map(|o| o.item_id).unwrap_or(0)
+    }
 }
 
 impl std::fmt::Display for PriceList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let batches: Vec<String> = self
+        let Some(first) = self.offers.first() else {
+            return write!(f, "prices {{ empty }}");
+        };
+        if self.offers.len() > 1 || !first.stats.is_empty() {
+            let cheapest = self.offers.iter().map(|o| o.unit_price()).min().unwrap_or(0);
+            return write!(
+                f,
+                "listings {{ item={} category={} offers={} cheapest={} }}",
+                first.item_id,
+                self.category,
+                self.offers.len(),
+                cheapest
+            );
+        }
+        let batches: Vec<String> = first
             .ladder
             .iter()
             .enumerate()
@@ -383,9 +435,9 @@ impl std::fmt::Display for PriceList {
         write!(
             f,
             "prices {{ item={} category={} listing={} {} }}",
-            self.item_id,
+            first.item_id,
             self.category,
-            self.listing_id,
+            first.listing_id,
             batches.join(" ")
         )
     }
@@ -393,28 +445,31 @@ impl std::fmt::Display for PriceList {
 
 /// Parse a price-list message straight off the wire.
 pub fn price_list(body: &[u8]) -> Option<PriceList> {
-    let mut out = PriceList { category: 0, item_id: 0, ladder: Vec::new(), listing_id: 0 };
+    let mut out = PriceList { category: 0, offers: Vec::new() };
+    // Only some offers repeat the item id inline; the outer copy fills the rest.
+    let mut outer_item = 0u64;
     let mut r = Reader::new(body);
     while !r.eof() {
         let (field, wt) = r.tag()?;
         match (field, wt) {
             (1, WireType::Varint) => out.category = r.varint()?,
-            (3, WireType::Varint) => out.item_id = r.varint()?,
+            (3, WireType::Varint) => outer_item = r.varint()?,
             (2, WireType::Len) => {
                 let inner = r.len_field()?;
+                let mut offer =
+                    Offer { item_id: 0, ladder: Vec::new(), listing_id: 0, stats: Vec::new() };
                 let mut ir = Reader::new(inner);
                 while !ir.eof() {
                     let (f, w) = ir.tag()?;
                     match (f, w) {
-                        // the outer copy is authoritative when both are present
-                        (1, WireType::Varint) => {
-                            let v = ir.varint()?;
-                            if out.item_id == 0 {
-                                out.item_id = v;
+                        (1, WireType::Varint) => offer.item_id = ir.varint()?,
+                        (4, WireType::Len) => {
+                            if let Some(stat) = stat_line(ir.len_field()?) {
+                                offer.stats.push(stat);
                             }
                         }
-                        (5, WireType::Len) => out.ladder = packed(ir.len_field()?),
-                        (7, WireType::Varint) => out.listing_id = ir.varint()?,
+                        (5, WireType::Len) => offer.ladder = packed(ir.len_field()?),
+                        (7, WireType::Varint) => offer.listing_id = ir.varint()?,
                         (_, w) => {
                             if !ir.skip(w) {
                                 return None;
@@ -422,6 +477,7 @@ pub fn price_list(body: &[u8]) -> Option<PriceList> {
                         }
                     }
                 }
+                out.offers.push(offer);
             }
             (_, wt) => {
                 if !r.skip(wt) {
@@ -430,12 +486,19 @@ pub fn price_list(body: &[u8]) -> Option<PriceList> {
             }
         }
     }
-    // a price message without a ladder is not one
-    if out.ladder.is_empty() {
+    for offer in &mut out.offers {
+        if offer.item_id == 0 {
+            offer.item_id = outer_item;
+        }
+    }
+    // a price message with nothing priced in it is not one
+    if out.offers.iter().all(|o| o.ladder.is_empty()) {
         return None;
     }
+    out.offers.retain(|o| !o.ladder.is_empty());
     Some(out)
 }
+
 
 /// Schema-guided decoded values for a message key: every varint (in traversal
 /// order) and every packed repeated-scalar array. Handlers receive this.
@@ -561,6 +624,19 @@ mod tests {
     const PRICE_LIST: &[u8] = &[
         0x08, 0x6b, 0x12, 0x12, 0x08, 0xb1, 0x14, 0x2a, 0x08, 0x4b, 0xc6, 0x02, 0x84, 0x34,
         0x9f, 0x8d, 0x06, 0x30, 0x6b, 0x38, 0xc2, 0x4e, 0x18, 0xb1, 0x14,
+    ];
+
+    /// Real capture, packet #11319: the HDV listing panel for item 12502, two
+    /// copies on sale at 9999 each with different rolls.
+    const EQUIPMENT_LISTING: &[u8] = &[
+        0x08, 0x0a, 0x12, 0x30, 0x08, 0xd6, 0x61, 0x22, 0x04, 0x40, 0x1f, 0x48, 0x7d, 0x22,
+        0x04, 0x40, 0x10, 0x48, 0x7e, 0x22, 0x04, 0x40, 0x0b, 0x48, 0x7c, 0x22, 0x05, 0x40,
+        0x05, 0x48, 0xb2, 0x01, 0x22, 0x05, 0x40, 0x02, 0x48, 0xf0, 0x05, 0x2a, 0x05, 0x8f,
+        0x4e, 0x00, 0x00, 0x00, 0x30, 0x0a, 0x38, 0xf4, 0x9f, 0x02, 0x12, 0x30, 0x08, 0xd6,
+        0x61, 0x22, 0x04, 0x40, 0x27, 0x48, 0x7d, 0x22, 0x04, 0x40, 0x15, 0x48, 0x7e, 0x22,
+        0x04, 0x40, 0x0f, 0x48, 0x7c, 0x22, 0x05, 0x40, 0x05, 0x48, 0xb2, 0x01, 0x22, 0x05,
+        0x40, 0x02, 0x48, 0xf0, 0x05, 0x2a, 0x05, 0x8f, 0x4e, 0x00, 0x00, 0x00, 0x30, 0x0a,
+        0x38, 0xf5, 0x9f, 0x02, 0x18, 0xd6, 0x61,
     ];
 
 
@@ -696,11 +772,44 @@ mod tests {
     #[test]
     fn price_list_decodes_the_ladder() {
         let p = price_list(PRICE_LIST).expect("parses");
-        assert_eq!(p.ladder, vec![75, 326, 6660, 99999], "prices shown in game");
-        assert_eq!(p.item_id, 2609);
+        assert_eq!(p.offers.len(), 1, "a resource quote is one stack, not listings");
+        let o = &p.offers[0];
+        assert_eq!(o.ladder, vec![75, 326, 6660, 99999], "prices shown in game");
+        assert_eq!(o.item_id, 2609);
         assert_eq!(p.category, 107);
-        assert_eq!(p.listing_id, 10050);
+        assert_eq!(o.listing_id, 10050);
+        assert!(o.stats.is_empty(), "a stack of resources has no rolled stats");
         assert!(is_known_key(messages::keymap().key("price_list").unwrap()));
+    }
+
+    /// Equipment browsing, packet #11319: two copies of item 12502 on sale.
+    ///
+    /// The parser used to keep the last offer only, so this message became one
+    /// row claiming a ladder — an arbitrary seller's price recorded as the
+    /// market's, with both sets of rolled stats thrown away.
+    #[test]
+    fn price_list_keeps_every_offer_with_its_rolled_stats() {
+        let p = price_list(EQUIPMENT_LISTING).expect("parses");
+        assert_eq!(p.category, 10);
+        assert_eq!(p.offers.len(), 2, "one offer per copy on sale");
+
+        let first = &p.offers[0];
+        assert_eq!(first.item_id, 12502);
+        assert_eq!(first.listing_id, 36852);
+        assert_eq!(first.unit_price(), 9999, "gear quotes one price, in the x1 slot");
+        assert_eq!(
+            first.stats,
+            vec![(125, 31), (126, 16), (124, 11), (178, 5), (752, 2)],
+            "what this copy rolled, effect id then value"
+        );
+
+        let second = &p.offers[1];
+        assert_eq!(second.listing_id, 36853);
+        assert_eq!(
+            second.stats,
+            vec![(125, 39), (126, 21), (124, 15), (178, 5), (752, 2)],
+            "the same item type rolls differently per copy — the whole point"
+        );
     }
 
     #[test]

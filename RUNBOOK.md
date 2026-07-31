@@ -122,10 +122,17 @@ Two more keys identified while establishing that:
 
 `kea` has two shapes: a short one carrying the x1/x10/x100/x1000 ladder, and a
 long one listing the marketplace's actual offers — **each offer carries that
-copy's rolled stats**, `{8: value, 9: effect_id}`. 1 726 such observations sat
-unparsed in `packets` when this was found; the sniffer reads only the ladder.
-That is the one wire source of stat values beyond `item_detail`, and it is a
-sample of real copies, never a template.
+copy's rolled stats**, `{8: value, 9: effect_id}`. Both are parsed now; the
+discriminator is whether an offer has stat lines, since a stack of resources
+has none and a piece of gear always does. Stacks go to `prices`, copies go to
+`offers` + `offer_stats`.
+
+Until that was understood the parser kept only the *last* offer of a message,
+so a panel of 34 listings became one row claiming a ladder. It was recording an
+arbitrary seller's asking price as the market's: item 6925 read 700 000 when
+the cheapest of its 13 listings was 2 852. `tools/backfill_offers.py` recovers
+all of it from `packets` — 469 offers and 1 800 stat lines on the first run,
+with no re-capture.
 
 Field *names* are unknown for the game protocol. `sniffer/proto/messages.json` gives
 field **numbers** and **types** only, and describes the 2026-07-10 build.
