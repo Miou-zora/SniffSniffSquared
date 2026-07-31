@@ -1,0 +1,356 @@
+{
+ "_source": "Book 3.xlsx, sheet Feuil1 columns F:J",
+ "_note": "rune_weight and stat_per_rune are game constants; observed_price is a market snapshot and goes stale",
+ "runes": [
+  {
+   "stat_fr": "% Dommages aux sorts",
+   "rune": "Do Per So",
+   "rune_weight": 15,
+   "stat_per_rune": 1,
+   "observed_price": 27934
+  },
+  {
+   "stat_fr": "% Dommages d'armes",
+   "rune": "Do Per Ar",
+   "rune_weight": 15,
+   "stat_per_rune": 1,
+   "observed_price": 6321
+  },
+  {
+   "stat_fr": "% Dommages distance",
+   "rune": "Do Per Di",
+   "rune_weight": 15,
+   "stat_per_rune": 1,
+   "observed_price": 29031
+  },
+  {
+   "stat_fr": "% Dommages mêlée",
+   "rune": "Do Per Mé",
+   "rune_weight": 15,
+   "stat_per_rune": 1,
+   "observed_price": 9398
+  },
+  {
+   "stat_fr": "% Résistance Air",
+   "rune": "Ré Per Air",
+   "rune_weight": 6,
+   "stat_per_rune": 1,
+   "observed_price": 1264
+  },
+  {
+   "stat_fr": "% Résistance Distance",
+   "rune": "Ré Per Di",
+   "rune_weight": 10,
+   "stat_per_rune": 1,
+   "observed_price": 1898
+  },
+  {
+   "stat_fr": "% Résistance Eau",
+   "rune": "Ré Per Eau",
+   "rune_weight": 6,
+   "stat_per_rune": 1,
+   "observed_price": 1514
+  },
+  {
+   "stat_fr": "% Résistance Feu",
+   "rune": "Ré Per Feu",
+   "rune_weight": 6,
+   "stat_per_rune": 1,
+   "observed_price": 1051
+  },
+  {
+   "stat_fr": "% Résistance Mêlée",
+   "rune": "Ré Per Mé",
+   "rune_weight": 10,
+   "stat_per_rune": 1,
+   "observed_price": 3961
+  },
+  {
+   "stat_fr": "% Résistance Neutre",
+   "rune": "Ré Per Neutre",
+   "rune_weight": 6,
+   "stat_per_rune": 1,
+   "observed_price": 1209
+  },
+  {
+   "stat_fr": "% Résistance Terre",
+   "rune": "Ré Per Terre",
+   "rune_weight": 6,
+   "stat_per_rune": 1,
+   "observed_price": 1438
+  },
+  {
+   "stat_fr": "Agilité",
+   "rune": "Age",
+   "rune_weight": 1,
+   "stat_per_rune": 1,
+   "observed_price": 99
+  },
+  {
+   "stat_fr": "Chance",
+   "rune": "Cha",
+   "rune_weight": 1,
+   "stat_per_rune": 1,
+   "observed_price": 75
+  },
+  {
+   "stat_fr": "Critique",
+   "rune": "Cri",
+   "rune_weight": 10,
+   "stat_per_rune": 1,
+   "observed_price": 2335
+  },
+  {
+   "stat_fr": "Dommage",
+   "rune": "Do",
+   "rune_weight": 20,
+   "stat_per_rune": 1,
+   "observed_price": 883
+  },
+  {
+   "stat_fr": "Dommage Air",
+   "rune": "Do Air",
+   "rune_weight": 5,
+   "stat_per_rune": 1,
+   "observed_price": 1237
+  },
+  {
+   "stat_fr": "Dommage Critique",
+   "rune": "Do Cri",
+   "rune_weight": 5,
+   "stat_per_rune": 1,
+   "observed_price": 1562
+  },
+  {
+   "stat_fr": "Dommage Eau",
+   "rune": "Do Eau",
+   "rune_weight": 5,
+   "stat_per_rune": 1,
+   "observed_price": 1208
+  },
+  {
+   "stat_fr": "Dommage Feu",
+   "rune": "Do Feu",
+   "rune_weight": 5,
+   "stat_per_rune": 1,
+   "observed_price": 951
+  },
+  {
+   "stat_fr": "Dommage Neutre",
+   "rune": "Do Neutre",
+   "rune_weight": 5,
+   "stat_per_rune": 1,
+   "observed_price": 1143
+  },
+  {
+   "stat_fr": "Dommage Pièges",
+   "rune": "Do Pi",
+   "rune_weight": 5,
+   "stat_per_rune": 1,
+   "observed_price": 315
+  },
+  {
+   "stat_fr": "Dommage Poussée",
+   "rune": "Do Pi",
+   "rune_weight": 5,
+   "stat_per_rune": 1,
+   "observed_price": 244
+  },
+  {
+   "stat_fr": "Dommage Terre",
+   "rune": "Do Terre",
+   "rune_weight": 5,
+   "stat_per_rune": 1,
+   "observed_price": 1188
+  },
+  {
+   "stat_fr": "Dommages Renvoyés",
+   "rune": "Do Ren",
+   "rune_weight": 5,
+   "stat_per_rune": 1,
+   "observed_price": 736
+  },
+  {
+   "stat_fr": "Esquive Pa",
+   "rune": "Ré Pa",
+   "rune_weight": 7,
+   "stat_per_rune": 1,
+   "observed_price": 580
+  },
+  {
+   "stat_fr": "Esquive Pm",
+   "rune": "Ré Pme",
+   "rune_weight": 7,
+   "stat_per_rune": 1,
+   "observed_price": 330
+  },
+  {
+   "stat_fr": "Force",
+   "rune": "Fo",
+   "rune_weight": 1,
+   "stat_per_rune": 1,
+   "observed_price": 70
+  },
+  {
+   "stat_fr": "Fuite",
+   "rune": "Fui",
+   "rune_weight": 4,
+   "stat_per_rune": 1,
+   "observed_price": 391
+  },
+  {
+   "stat_fr": "Initiative",
+   "rune": "Ini",
+   "rune_weight": 1,
+   "stat_per_rune": 10,
+   "observed_price": 75
+  },
+  {
+   "stat_fr": "Intelligence",
+   "rune": "Ine",
+   "rune_weight": 1,
+   "stat_per_rune": 1,
+   "observed_price": 57
+  },
+  {
+   "stat_fr": "Invocation",
+   "rune": "Invo",
+   "rune_weight": 30,
+   "stat_per_rune": 1,
+   "observed_price": 5297
+  },
+  {
+   "stat_fr": "PA",
+   "rune": "Ga Pa",
+   "rune_weight": 100,
+   "stat_per_rune": 1,
+   "observed_price": 24815
+  },
+  {
+   "stat_fr": "PM",
+   "rune": "Ga Pme",
+   "rune_weight": 90,
+   "stat_per_rune": 1,
+   "observed_price": 22929
+  },
+  {
+   "stat_fr": "PO",
+   "rune": "Po",
+   "rune_weight": 51,
+   "stat_per_rune": 1,
+   "observed_price": 9260
+  },
+  {
+   "stat_fr": "Pods",
+   "rune": "Pod",
+   "rune_weight": 2.5,
+   "stat_per_rune": 10,
+   "observed_price": 152
+  },
+  {
+   "stat_fr": "Prospection",
+   "rune": "Prospe",
+   "rune_weight": 3,
+   "stat_per_rune": 1,
+   "observed_price": 413
+  },
+  {
+   "stat_fr": "Puissance",
+   "rune": "Pui",
+   "rune_weight": 2,
+   "stat_per_rune": 1,
+   "observed_price": 241
+  },
+  {
+   "stat_fr": "Puissances Pièges",
+   "rune": "Per Pi",
+   "rune_weight": 2,
+   "stat_per_rune": 1,
+   "observed_price": 97
+  },
+  {
+   "stat_fr": "Résistance Air",
+   "rune": "Ré Air",
+   "rune_weight": 2,
+   "stat_per_rune": 1,
+   "observed_price": 328
+  },
+  {
+   "stat_fr": "Résistance Critiques",
+   "rune": "Ré Cri",
+   "rune_weight": 2,
+   "stat_per_rune": 1,
+   "observed_price": 334
+  },
+  {
+   "stat_fr": "Résistance Feu",
+   "rune": "Ré Feu",
+   "rune_weight": 2,
+   "stat_per_rune": 1,
+   "observed_price": 184
+  },
+  {
+   "stat_fr": "Résistance Neutre",
+   "rune": "Ré Neutre",
+   "rune_weight": 2,
+   "stat_per_rune": 1,
+   "observed_price": 95
+  },
+  {
+   "stat_fr": "Résistance Poussée",
+   "rune": "Ré Pou",
+   "rune_weight": 2,
+   "stat_per_rune": 1,
+   "observed_price": 284
+  },
+  {
+   "stat_fr": "Résistance Terre",
+   "rune": "Ré Terre",
+   "rune_weight": 2,
+   "stat_per_rune": 1,
+   "observed_price": 424
+  },
+  {
+   "stat_fr": "Retrait Pa",
+   "rune": "Ret Pa",
+   "rune_weight": 7,
+   "stat_per_rune": 1,
+   "observed_price": 358
+  },
+  {
+   "stat_fr": "Retrait Pm",
+   "rune": "Ret Pme",
+   "rune_weight": 7,
+   "stat_per_rune": 1,
+   "observed_price": 330
+  },
+  {
+   "stat_fr": "Sagesse",
+   "rune": "Sa",
+   "rune_weight": 3,
+   "stat_per_rune": 1,
+   "observed_price": 269
+  },
+  {
+   "stat_fr": "Soin",
+   "rune": "So",
+   "rune_weight": 10,
+   "stat_per_rune": 1,
+   "observed_price": 391
+  },
+  {
+   "stat_fr": "Tacle",
+   "rune": "Tac",
+   "rune_weight": 4,
+   "stat_per_rune": 1,
+   "observed_price": 877
+  },
+  {
+   "stat_fr": "Vitalité",
+   "rune": "Vi",
+   "rune_weight": 1,
+   "stat_per_rune": 5,
+   "observed_price": 183
+  }
+ ]
+}

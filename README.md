@@ -197,6 +197,7 @@ Adding a brand-new message takes four steps, documented in
 | **[RUNBOOK.md](RUNBOOK.md)** | **Start here.** How the protocol works, a copy-pasteable command sequence, every trap, and what remains to be done. |
 | [CLAUDE.md](CLAUDE.md) | Condensed orientation: ground truth, layout, conventions, traps. |
 | [docs/observations.md](docs/observations.md) | Annotated real captures with byte-level analysis. |
+| [docs/brisage-model.md](docs/brisage-model.md) | The kamas maths: how crushing an item into runes pays, transcribed from `Book 3.xlsx`. |
 | [sniffer/tools/frida/README.md](sniffer/tools/frida/README.md) | Runtime schema extraction routes. Partly stale — RUNBOOK.md supersedes it. |
 
 ## Layout

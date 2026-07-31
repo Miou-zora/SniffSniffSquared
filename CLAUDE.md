@@ -41,6 +41,8 @@ run from `sniffer/`** (it resolves `keymap.json` and `proto/` relative to cwd).
 docker-compose.yml  postgres + pgadmin + web; `sniffer` service is Linux-only
 init.sql            schema both apps depend on (packets, prices)
 docs/               observations.md — annotated real captures
+                    brisage-model.md + brisage-runes.json — the kamas maths,
+                    transcribed from Book 3.xlsx (kept at the repo root)
 RUNBOOK.md          the guide. Start here for anything protocol-related.
 
 sniffer/            the Rust capture app — RUN IT FROM THIS DIRECTORY

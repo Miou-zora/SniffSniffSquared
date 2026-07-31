@@ -134,6 +134,18 @@ Worth knowing before moving anything:
 `src/app/page.tsx` is a placeholder proving the tokens resolve. Delete it when
 real pages arrive.
 
+## The kamas maths
+
+`../docs/brisage-model.md` transcribes the profitability model from
+`Book 3.xlsx`: how many runes an item yields, what they are worth, and whether
+crushing it beats selling it. `../docs/brisage-runes.json` holds the 50-rune
+reference table (weights are game constants; the prices in it are a stale
+snapshot — use the `prices` table instead).
+
+Nothing implements it yet, and the formulas are transcribed but not verified
+against a real crush. Read that document before building anything that computes
+profit.
+
 ## Conventions
 
 - **TypeScript strict** is on. Keep it on.
