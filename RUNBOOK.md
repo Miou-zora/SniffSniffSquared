@@ -77,7 +77,7 @@ never uses.
 |---|---|---|
 | `price_list` | `kea` | marketplace price ladder: x1 / x10 / x100 / x1000 |
 | `chat_message` | `ksv` | chat / trade channel: author, timestamp, free text |
-| `crush_result` | `kfy` | crushing an item into runes: rune types + counts, yield % |
+| `crush_result` | `kfy` | crushing an item into runes: yield %, and the runes (parsed, not stored) |
 | `item_detail` | `kev` | item instance uid -> type id; joins the above to an item |
 
 106 distinct keys observed in one session; `idd` is the most frequent and is

@@ -138,18 +138,11 @@ const CRUSH_DDL: &str = "CREATE TABLE IF NOT EXISTS crushes (
 );
 ALTER TABLE crushes ADD COLUMN IF NOT EXISTS focus_effect_id BIGINT;
 ALTER TABLE crushes DROP COLUMN IF EXISTS focus_rune_id;
-CREATE TABLE IF NOT EXISTS crush_runes (
-    crush_id BIGINT NOT NULL REFERENCES crushes(id) ON DELETE CASCADE,
-    rune_id  BIGINT NOT NULL,
-    quantity BIGINT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_crushes_item ON crushes (item_id, seen_at DESC);
-CREATE INDEX IF NOT EXISTS idx_crush_runes ON crush_runes (crush_id)";
+DROP TABLE IF EXISTS crush_runes;
+CREATE INDEX IF NOT EXISTS idx_crushes_item ON crushes (item_id, seen_at DESC)";
 
 const CRUSH_INSERT: &str = "INSERT INTO crushes (item_uid, item_id, yield_percent, focus_effect_id)
-    VALUES ($1,$2,$3,$4) RETURNING id";
-const CRUSH_RUNE_INSERT: &str =
-    "INSERT INTO crush_runes (crush_id, rune_id, quantity) VALUES ($1,$2,$3)";
+    VALUES ($1,$2,$3,$4)";
 
 /// Matches the `packets` table in init.sql. Re-declared here so the sniffer
 /// works against a database that was created before that table existed.
@@ -228,7 +221,7 @@ fn build_dispatch() -> Dispatcher {
         let cache = uid_to_item.clone();
         match db_client_with(CRUSH_DDL) {
             Some(mut client) => {
-                println!("[db] connected; crush_result ({crush_key}) -> tables crushes/crush_runes");
+                println!("[db] connected; crush_result ({crush_key}) -> table crushes");
                 let focus = pending_focus.clone();
                 d.on(crush_key, move |e| {
                     if let Some(c) = interpret::crush_result(e.body) {
@@ -314,16 +307,14 @@ fn insert_packet(
     Ok(())
 }
 
-/// One crush plus its rune rows, in a transaction so a partial crush cannot
-/// land if the rune inserts fail.
+/// One row per crush. The runes it produced are not stored — see CRUSH_DDL.
 fn insert_crush(
     client: &mut postgres::Client,
     c: &interpret::CrushResult,
     item_id: Option<u64>,
     focus_effect_id: Option<u64>,
 ) -> Result<(), postgres::Error> {
-    let mut tx = client.transaction()?;
-    let row = tx.query_one(
+    client.execute(
         CRUSH_INSERT,
         &[
             &(c.item_uid as i64),
@@ -332,11 +323,7 @@ fn insert_crush(
             &focus_effect_id.map(|v| v as i64),
         ],
     )?;
-    let crush_id: i64 = row.get(0);
-    for (rune, qty) in &c.runes {
-        tx.execute(CRUSH_RUNE_INSERT, &[&crush_id, &(*rune as i64), &(*qty as i64)])?;
-    }
-    tx.commit()
+    Ok(())
 }
 
 /// One row per observed price ladder, so history is preserved.

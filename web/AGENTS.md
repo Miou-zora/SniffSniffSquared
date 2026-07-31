@@ -37,10 +37,10 @@ Two tables, both defined in `../init.sql`:
   time series, not current state: `item_id`, `b1`, `b10`, `b100`, `b1000`
   (price for x1 / x10 / x100 / x1000), `seen_at`. A `0` means that batch size
   was not on sale.
-- **`crushes`** + **`crush_runes`** — item crushing ("brisage"). One row per
-  crush with `item_id`, `yield_percent` (0-100) and `seen_at`; the runes it
-  produced are rows in `crush_runes` (`rune_id`, `quantity`). Rune ids are
-  DofusDB item ids too, so they resolve the same way. `focus_effect_id` is the
+- **`crushes`** — item crushing ("brisage"). One row per crush: `item_id`,
+  `yield_percent` (0-100), `seen_at`. The runes produced are **not** stored —
+  they follow from the item's stats and the coefficient, so derive them rather
+  than expecting a column. `focus_effect_id` is the
   rune **effect** id when a focus was set (125 = Rune Vi), NULL otherwise —
   resolve it via DofusDB, where each rune item exposes `effects[].effectId`.
   `item_id` is nullable when the uid could not be mapped.
