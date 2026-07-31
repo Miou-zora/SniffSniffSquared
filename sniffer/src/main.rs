@@ -121,6 +121,11 @@ fn with_notify(ddl: &str) -> String {
 /// Marketplace prices from `kea`. Unlike the old `kdh` table this keeps
 /// history — one row per observation — because the point of watching the
 /// marketplace is how prices move, and an upsert throws that away.
+///
+/// It notifies like the crush tables do: the breaker page prices an item's
+/// craft off this table, so browsing an ingredient in the HDV changes what that
+/// page says while it is open. Without the trigger the figure only appears on
+/// the next manual reload, which reads as the page being wrong.
 const PRICES_DDL: &str = "CREATE TABLE IF NOT EXISTS prices (
     id          BIGSERIAL PRIMARY KEY,
     seen_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -132,7 +137,10 @@ const PRICES_DDL: &str = "CREATE TABLE IF NOT EXISTS prices (
     b100        BIGINT,
     b1000       BIGINT
 );
-CREATE INDEX IF NOT EXISTS idx_prices_item ON prices (item_id, seen_at DESC)";
+CREATE INDEX IF NOT EXISTS idx_prices_item ON prices (item_id, seen_at DESC);
+DROP TRIGGER IF EXISTS trg_prices_notify ON prices;
+CREATE TRIGGER trg_prices_notify AFTER INSERT ON prices
+    FOR EACH STATEMENT EXECUTE FUNCTION notify_breaker()";
 
 const PRICES_INSERT: &str = "INSERT INTO prices
     (item_id, category, listing_id, b1, b10, b100, b1000) VALUES ($1,$2,$3,$4,$5,$6,$7)";
@@ -241,7 +249,7 @@ fn build_dispatch() -> Dispatcher {
             return d;
         }
     };
-    match db_client_with(PRICES_DDL) {
+    match db_client_with(&with_notify(PRICES_DDL)) {
         Some(mut client) => {
             println!("[db] connected; price_list ({price_key}) -> table prices");
             d.on(&price_key, move |e| {
