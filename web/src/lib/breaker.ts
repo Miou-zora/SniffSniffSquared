@@ -169,14 +169,18 @@ export async function loadBreaker(): Promise<BreakerView | null> {
     [itemId],
   );
 
+  // Everything the `items` and `item_effects` tables would have held if the
+  // importer had reached this id, fetched once and only when something is
+  // actually missing. Memoised because two unrelated gaps — no level, no
+  // template — must not cost two requests for the same item.
+  let metaOnce: Promise<ItemMeta | null> | undefined;
+  const meta = () =>
+    (metaOnce ??= fetchItems([itemId]).then((m) => m.get(itemId) ?? null));
+
   // The level is not decoration: line_weight multiplies by level/200, so an
   // unimported item defaulting to level 1 does not read as "unknown", it reads
-  // as a plausible and completely wrong projection. DofusDB fills it in for
-  // items the importer has not reached yet.
-  const meta =
-    itemRow?.level === null || itemRow === undefined
-      ? ((await fetchItems([itemId])).get(itemId) ?? null)
-      : null;
+  // as a plausible and completely wrong projection.
+  const named = itemRow?.level == null ? await meta() : null;
 
   const statRows = uid
     ? await query<StatRow>(
@@ -199,7 +203,7 @@ export async function loadBreaker(): Promise<BreakerView | null> {
     runeItemId: r.rune_item_id === null ? null : Number(r.rune_item_id),
   }));
 
-  const level = itemRow?.level ?? meta?.level ?? 1;
+  const level = itemRow?.level ?? named?.level ?? 1;
   const weighted = weighLines(lines, level).sort((a, b) => b.weight - a.weight);
   const totalWeight = weighted.reduce((s, l) => s + l.weight, 0);
   const unmapped = lines.filter((l) => l.rune === null);
@@ -228,8 +232,10 @@ export async function loadBreaker(): Promise<BreakerView | null> {
   const [costRow] = await latestPrices([itemId]).then((m) => [m.get(itemId) ?? null]);
 
   // What the item type can roll, for comparison against what this copy did.
-  // Absent until tools/import_items.py has seen the id; the UI says so rather
-  // than hiding the column.
+  // From item_effects when the importer has seen the id, and from DofusDB when
+  // it has not — the Average basis is the whole answer to "is this item worth
+  // buying to break", so waiting on an offline run to have it is the wrong
+  // trade. Both carry the same numbers; only the latency differs.
   const rangeRows = await query<{
     effect_id: string;
     min_value: string;
@@ -239,15 +245,24 @@ export async function loadBreaker(): Promise<BreakerView | null> {
       WHERE item_id = $1 ORDER BY position`,
     [itemId],
   );
+  const ranges =
+    rangeRows.length > 0
+      ? rangeRows.map((r) => ({
+          effectId: Number(r.effect_id),
+          min: Number(r.min_value),
+          max: Number(r.max_value),
+        }))
+      : ((await meta())?.ranges ?? []);
+
   const byEffect = new Map(lines.map((l) => [l.effectId, l]));
   const averages = new Map<number, AverageStat>();
-  for (const r of rangeRows) {
-    const effectId = Number(r.effect_id);
+  for (const r of ranges) {
+    const effectId = r.effectId;
     // A template can list an effect twice; the first is the one a stat line
     // would be compared against, so later duplicates are ignored.
     if (averages.has(effectId)) continue;
-    const min = Number(r.min_value);
-    const max = Number(r.max_value);
+    const min = r.min;
+    const max = r.max;
     const avg = (min + max) / 2;
     const line = byEffect.get(effectId);
     averages.set(effectId, {
@@ -269,9 +284,9 @@ export async function loadBreaker(): Promise<BreakerView | null> {
   return {
     item: {
       itemId,
-      name: itemRow?.name_fr ?? meta?.name ?? `Item ${itemId}`,
+      name: itemRow?.name_fr ?? named?.name ?? `Item ${itemId}`,
       level,
-      type: itemRow?.type_fr ?? meta?.type ?? null,
+      type: itemRow?.type_fr ?? named?.type ?? null,
     },
     uid,
     placedAt: placement.placed_at,
@@ -431,6 +446,31 @@ interface ItemMeta {
   name: string | null;
   level: number | null;
   type: string | null;
+  /** The template: what each line on this item type can roll between. */
+  ranges: { effectId: number; min: number; max: number }[];
+}
+
+/**
+ * `[(effectId, min, max)]` from a DofusDB item's template.
+ *
+ * DofusDB reports a fixed-value line as `from = N, to = 0`, so a `to` below
+ * `from` means "always N" rather than an inverted range. Reading it the other
+ * way silently halves those lines. Mirrors `effect_ranges` in
+ * tools/import_items.py — the same rule, applied at read time.
+ */
+function effectRanges(raw: unknown): ItemMeta["ranges"] {
+  const effects = (raw as { effects?: unknown }).effects;
+  if (!Array.isArray(effects)) return [];
+  const out: ItemMeta["ranges"] = [];
+  for (const e of effects) {
+    const eff = e as { effectId?: unknown; from?: unknown; to?: unknown };
+    const effectId = Number(eff.effectId);
+    const min = Number(eff.from);
+    if (!Number.isFinite(effectId) || !Number.isFinite(min)) continue;
+    const to = Number(eff.to);
+    out.push({ effectId, min, max: Number.isFinite(to) && to >= min ? to : min });
+  }
+  return out;
 }
 
 async function fetchItems(itemIds: number[]): Promise<Map<number, ItemMeta>> {
@@ -459,6 +499,7 @@ async function fetchItems(itemIds: number[]): Promise<Map<number, ItemMeta>> {
         name: typeof it.name?.fr === "string" ? it.name.fr : null,
         level: Number.isFinite(Number(it.level)) ? Number(it.level) : null,
         type: typeof it.type?.name?.fr === "string" ? it.type.name.fr : null,
+        ranges: effectRanges(raw),
       });
     }
   } catch {
