@@ -39,6 +39,7 @@ import subprocess
 import sys
 
 API = "https://api.dofusdb.fr/items"
+RECIPES_API = "https://api.dofusdb.fr/recipes"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KEYMAP = os.path.join(ROOT, "sniffer", "keymap.json")
 
@@ -69,6 +70,14 @@ CREATE TABLE IF NOT EXISTS item_effects (
     PRIMARY KEY (item_id, position)
 );
 CREATE INDEX IF NOT EXISTS idx_item_effects_effect ON item_effects (effect_id);
+CREATE TABLE IF NOT EXISTS recipes (
+    item_id       BIGINT NOT NULL,
+    position      INT    NOT NULL,
+    ingredient_id BIGINT NOT NULL,
+    quantity      INT    NOT NULL,
+    PRIMARY KEY (item_id, position)
+);
+CREATE INDEX IF NOT EXISTS idx_recipes_ingredient ON recipes (ingredient_id);
 
 -- Mirrors init.sql. Declared here too because init.sql only runs on a fresh
 -- database, and these views are what make item_effects useful.
@@ -268,13 +277,9 @@ def effect_ranges(item):
     return out
 
 
-def enrich(refresh, dry_run):
+def fetch_items(ids):
+    """({item_id: (name, level, type_id, type_name)}, {item_id: ranges}) from DofusDB."""
     import requests
-
-    ids = observed_item_ids(refresh)
-    print("enrich: %d item id(s) to resolve%s" % (len(ids), "" if ids else " — nothing to do"))
-    if not ids:
-        return
 
     found, ranges = {}, {}
     for i in range(0, len(ids), 50):
@@ -296,10 +301,87 @@ def enrich(refresh, dry_run):
                 (t.get("name") or {}).get("fr"),
             )
             ranges[iid] = effect_ranges(it)
+    return found, ranges
+
+
+def fetch_recipes(ids):
+    """{item_id: [(position, ingredient_id, quantity)]} from DofusDB.
+
+    Most items have no recipe -- every resource, and anything that only drops --
+    and an absent recipe is not an error. An item listed twice keeps the last
+    recipe seen; the API returns one per item for everything observed so far.
+    """
+    import requests
+
+    out = {}
+    for i in range(0, len(ids), 50):
+        chunk = ids[i:i + 50]
+        params = [("$limit", "100")] + [("resultId[$in][]", str(x)) for x in chunk]
+        try:
+            r = requests.get(RECIPES_API, params=params, timeout=30)
+            r.raise_for_status()
+        except Exception as e:  # noqa: BLE001 — network is best-effort
+            print("  ! DofusDB recipe lookup failed (%s); stopping with %d" % (e, len(out)))
+            break
+        for rec in r.json().get("data", []):
+            iid = rec.get("resultId")
+            ings = rec.get("ingredientIds") or []
+            qtys = rec.get("quantities") or []
+            # A mismatched pair is a recipe we cannot read rather than an empty
+            # one, and storing half of it would price the item too cheaply.
+            if iid is None or len(ings) != len(qtys) or not ings:
+                continue
+            out[int(iid)] = [(p, int(a), int(q)) for p, (a, q) in enumerate(zip(ings, qtys))]
+    return out
+
+
+def write_recipes(recipes):
+    """Replace each item's recipe wholesale, for the same reason item_effects is
+    replaced: an ingredient dropped between game versions must lose its row."""
+    if not recipes:
+        return
+    rows = [(iid, pos, ing, qty)
+            for iid, rs in sorted(recipes.items()) for pos, ing, qty in rs]
+    psql(
+        "DELETE FROM recipes WHERE item_id IN (%s);\n"
+        % ",".join(str(i) for i in sorted(recipes))
+        + "INSERT INTO recipes (item_id, position, ingredient_id, quantity)\nVALUES\n  "
+        + ",\n  ".join("(%d,%d,%d,%d)" % r for r in rows)
+        + ";\n"
+    )
+    print("  %d ingredient(s) across %d recipe(s)" % (len(rows), len(recipes)))
+
+
+def enrich(refresh, dry_run):
+    ids = observed_item_ids(refresh)
+    print("enrich: %d item id(s) to resolve%s" % (len(ids), "" if ids else " — nothing to do"))
+    if not ids:
+        return
+
+    found, ranges = fetch_items(ids)
+
+    # Recipes come with ingredient ids the database has never seen -- nothing
+    # ever put them in the breaker or on the market -- so they are resolved too.
+    # Without a name the craft estimate can only report a number id, and the
+    # whole point of it is being able to read what is missing a price.
+    recipes = fetch_recipes(ids)
+    ingredient_ids = sorted({ing for rs in recipes.values() for _, ing, _ in rs})
+    unknown = [i for i in ingredient_ids if i not in found]
+    if unknown:
+        known = {int(r[0]) for r in psql(
+            "SELECT item_id FROM items WHERE item_id IN (%s) AND name_fr IS NOT NULL"
+            % ",".join(map(str, unknown)), rows=True) if r[0]}
+        unknown = [i for i in unknown if i not in known]
+    if unknown:
+        extra, _ = fetch_items(unknown)
+        print("  %d ingredient id(s) unseen on the wire, %d named" % (len(unknown), len(extra)))
+        found.update(extra)
 
     missing = [x for x in ids if x not in found]
+    # Counted against the observed ids, not against `found` — that also holds
+    # the ingredients pulled in above, and a count over 100% reads as a bug.
     print("  resolved %d/%d%s" % (
-        len(found), len(ids),
+        sum(1 for x in ids if x in found), len(ids),
         "; unresolved: " + ", ".join(map(str, missing)) if missing else ""))
     if not found or dry_run:
         return
@@ -318,6 +400,8 @@ def enrich(refresh, dry_run):
           "  type_fr = COALESCE(EXCLUDED.type_fr, items.type_fr),\n"
           "  updated_at = now();\n"
     )
+
+    write_recipes(recipes)
 
     rows = [(iid, pos, eid, lo, hi)
             for iid, rs in sorted(ranges.items()) for pos, eid, lo, hi in rs]

@@ -120,6 +120,29 @@ CREATE TABLE IF NOT EXISTS item_effects (
 
 CREATE INDEX IF NOT EXISTS idx_item_effects_effect ON item_effects (effect_id);
 
+-- What an item costs to make, as ingredient ids and counts, from DofusDB via
+-- tools/import_items.py. Filled offline for the same reason as item_effects:
+-- the capture path takes no network dependency.
+--
+-- This is the second answer to "what did this item cost", next to the market
+-- price in `prices`. They disagree often and both are worth having -- a crafted
+-- item's real cost is what its ingredients cost, which can sit far below what a
+-- copy sells for, and the brisage decision is made against whichever one you
+-- actually paid.
+--
+-- Keyed by position, like item_effects: a recipe may list the same ingredient
+-- twice, and a recipe that loses an ingredient between game versions must lose
+-- the row rather than keep a stale one.
+CREATE TABLE IF NOT EXISTS recipes (
+    item_id       BIGINT NOT NULL,
+    position      INT    NOT NULL,   -- order within the recipe
+    ingredient_id BIGINT NOT NULL,
+    quantity      INT    NOT NULL,
+    PRIMARY KEY (item_id, position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_recipes_ingredient ON recipes (ingredient_id);
+
 -- Expected line weight per stat line of an item type, from the middle of its
 -- range. The formula is docs/brisage-model.md's `line_weight`, including the
 -- +1 every line carries -- dropping that term is what broke the focus model
