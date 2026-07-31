@@ -151,8 +151,11 @@ export function Projection({ model }: { model: ProjectionModel }) {
           <thead>
             <tr className="border-phosphor-blue-black text-caption tracking-caption text-deep-fern border-b align-bottom uppercase">
               <th className="py-12 pr-16 pl-20 font-medium">focus</th>
+              {/* Padding is symmetric on the numeric columns. With a left-only
+                  pad, right-aligned figures end flush on the cell edge, which
+                  puts n+1000 hard against the custom column's rule. */}
               {columns.map((c) => (
-                <th key={c.label} className="py-12 pl-16 font-medium">
+                <th key={c.label} className="py-12 pr-16 pl-16 font-medium">
                   <span className="text-moss-70 flex h-24 items-center justify-end">
                     {c.label}
                   </span>
@@ -167,7 +170,7 @@ export function Projection({ model }: { model: ProjectionModel }) {
                   an underline: a bordered box would inset the digits by its own
                   padding and stand them off the column they label, and its
                   height would push the coefficient line below every other one. */}
-              <th className="border-phosphor-blue-black border-l py-12 pr-20 pl-16 font-medium">
+              <th className="border-phosphor-blue-black border-l py-12 pr-20 pl-20 font-medium">
                 <label
                   htmlFor={inputId}
                   className="text-lime-pulse flex h-24 items-center justify-end gap-4"
@@ -183,7 +186,11 @@ export function Projection({ model }: { model: ProjectionModel }) {
                     onChange={(e) => setCustomX(e.target.value)}
                     placeholder="x"
                     aria-label="custom number of runes"
-                    className="border-circuit-border focus:border-lime-pulse text-body-sm text-phosphor-white placeholder:text-deep-fern w-48 border-0 border-b bg-transparent px-0 py-0 text-right normal-case tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                    // text-caption, not text-body-sm: the other column labels
+                    // are 12px with caption tracking, and a 14px negatively
+                    // tracked number beside them is what makes this column read
+                    // as sitting apart from the rest of the header.
+                    className="border-circuit-border focus:border-lime-pulse text-caption tracking-caption text-phosphor-white placeholder:text-deep-fern w-48 border-0 border-b bg-transparent px-0 py-0 text-right tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   />
                 </label>
                 <span className="text-deep-fern mt-4 block text-right normal-case">
@@ -249,17 +256,21 @@ function Cell({
   muted: boolean;
   custom: boolean;
 }) {
-  const edge = custom ? "border-phosphor-blue-black border-l pr-20" : "";
+  // One padding string rather than a base plus an override: two competing
+  // pl-* utilities in the same class list are settled by stylesheet order, not
+  // by the order they are written here, so the override may lose.
+  const box = custom ? "py-12 pr-20 pl-20" : "py-12 pr-16 pl-16";
+  const edge = custom ? "border-phosphor-blue-black border-l" : "";
   const tone = muted ? "text-sage-40" : "text-moss-80";
 
   // No x typed yet: the column exists but has nothing to show.
   if (cell === null) {
-    return <td className={`text-deep-fern py-12 pl-16 text-right ${edge}`}>—</td>;
+    return <td className={`text-deep-fern ${box} text-right ${edge}`}>—</td>;
   }
 
   if (metric === "runes") {
     return (
-      <td className={`py-12 pl-16 text-right tabular-nums ${tone} ${edge}`}>
+      <td className={`${box} text-right tabular-nums ${tone} ${edge}`}>
         {fmt(cell.runes, 1)}
       </td>
     );
@@ -271,7 +282,7 @@ function Cell({
   if (cell.value === null) {
     return (
       <td
-        className={`text-deep-fern text-caption py-12 pl-16 text-right ${edge}`}
+        className={`text-deep-fern text-caption ${box} text-right ${edge}`}
         title="No market price captured for this rune yet"
       >
         no price
@@ -281,7 +292,7 @@ function Cell({
 
   if (metric === "value") {
     return (
-      <td className={`py-12 pl-16 text-right tabular-nums ${tone} ${edge}`}>
+      <td className={`${box} text-right tabular-nums ${tone} ${edge}`}>
         {Math.round(cell.value).toLocaleString("fr-FR")}
       </td>
     );
@@ -291,7 +302,7 @@ function Cell({
   if (profit === null) {
     return (
       <td
-        className={`text-deep-fern text-caption py-12 pl-16 text-right ${edge}`}
+        className={`text-deep-fern text-caption ${box} text-right ${edge}`}
         title="No market price captured for this item, so profit cannot be computed"
       >
         no item price
@@ -300,7 +311,7 @@ function Cell({
   }
   return (
     <td
-      className={`py-12 pl-16 text-right tabular-nums ${edge} ${
+      className={`${box} text-right tabular-nums ${edge} ${
         profit >= 0 ? "text-lime-pulse" : "text-sage-40"
       }`}
     >
