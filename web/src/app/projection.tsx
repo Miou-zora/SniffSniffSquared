@@ -98,10 +98,14 @@ export function Projection({ model }: { model: ProjectionModel }) {
   return (
     <section className="border-circuit-border overflow-hidden rounded-2xl border">
       <div className="border-phosphor-blue-black flex flex-wrap items-center justify-between gap-x-24 gap-y-12 border-b px-20 py-16">
+        {/* A segmented control, so every state has the same box: the weight and
+            padding never change between active and idle, only the colours. A
+            font-weight that only the active button carries reflows the group on
+            every click, which reads as the switch being broken. */}
         <div
           role="group"
           aria-label="metric"
-          className="border-circuit-border flex rounded-xl border p-4"
+          className="border-circuit-border bg-ground-iron flex rounded-xl border p-4"
         >
           {METRICS.map((m) => {
             const disabled =
@@ -111,8 +115,12 @@ export function Projection({ model }: { model: ProjectionModel }) {
               <button
                 key={m.id}
                 type="button"
-                disabled={disabled}
-                onClick={() => setMetric(m.id)}
+                // aria-disabled rather than disabled: a disabled button swallows
+                // pointer events, so the title saying *why* it is off would never
+                // appear — which is the one moment it is worth reading.
+                aria-disabled={disabled || undefined}
+                aria-pressed={active}
+                onClick={() => !disabled && setMetric(m.id)}
                 title={
                   disabled
                     ? m.id === "value"
@@ -120,12 +128,12 @@ export function Projection({ model }: { model: ProjectionModel }) {
                       : "No price captured for this item"
                     : m.hint
                 }
-                className={`text-body-sm tracking-body-sm rounded-lg px-16 py-8 ${
+                className={`text-body-sm tracking-body-sm focus-visible:ring-lime-pulse rounded-lg px-16 py-12 font-medium transition-colors duration-150 outline-none focus-visible:ring-2 ${
                   active
-                    ? "bg-lime-pulse text-void-black font-medium"
+                    ? "bg-lime-pulse text-void-black"
                     : disabled
                       ? "text-deep-fern cursor-not-allowed"
-                      : "text-sage-60 hover:text-phosphor-white cursor-pointer"
+                      : "text-sage-60 hover:bg-carbon-veil hover:text-phosphor-white cursor-pointer"
                 }`}
               >
                 {m.label}
@@ -141,37 +149,44 @@ export function Projection({ model }: { model: ProjectionModel }) {
       <div className="overflow-x-auto">
         <table className="w-full min-w-[680px] border-collapse text-left">
           <thead>
-            <tr className="border-phosphor-blue-black text-caption tracking-caption text-deep-fern border-b uppercase">
-              <th className="py-10 pr-16 pl-20 font-medium">focus</th>
+            <tr className="border-phosphor-blue-black text-caption tracking-caption text-deep-fern border-b align-bottom uppercase">
+              <th className="py-12 pr-16 pl-20 font-medium">focus</th>
               {columns.map((c) => (
-                <th key={c.label} className="py-10 pl-16 font-medium">
-                  <span className="text-moss-70 block text-right">{c.label}</span>
-                  <span className="text-deep-fern block text-right normal-case">
+                <th key={c.label} className="py-12 pl-16 font-medium">
+                  <span className="text-moss-70 flex h-24 items-center justify-end">
+                    {c.label}
+                  </span>
+                  <span className="text-deep-fern mt-4 block text-right normal-case">
                     {fmt(c.coefficient, 2)}%
                   </span>
                 </th>
               ))}
               {/* The custom column is always present, so the table looks the
-                  same before and after a value is typed. */}
-              <th className="border-phosphor-blue-black border-l py-10 pr-20 pl-16 font-medium">
+                  same before and after a value is typed. Its header carries an
+                  input where the others carry text, so the input is stripped to
+                  an underline: a bordered box would inset the digits by its own
+                  padding and stand them off the column they label, and its
+                  height would push the coefficient line below every other one. */}
+              <th className="border-phosphor-blue-black border-l py-12 pr-20 pl-16 font-medium">
                 <label
                   htmlFor={inputId}
-                  className="text-lime-pulse flex items-center justify-end gap-4"
+                  className="text-lime-pulse flex h-24 items-center justify-end gap-4"
                 >
                   n+
                   <input
                     id={inputId}
                     type="number"
+                    inputMode="numeric"
                     min={1}
                     max={100000}
                     value={customX}
                     onChange={(e) => setCustomX(e.target.value)}
                     placeholder="x"
                     aria-label="custom number of runes"
-                    className="border-circuit-border text-body-sm text-phosphor-white w-64 rounded-md border bg-transparent px-8 py-2 text-right normal-case"
+                    className="border-circuit-border focus:border-lime-pulse text-body-sm text-phosphor-white placeholder:text-deep-fern w-48 border-0 border-b bg-transparent px-0 py-0 text-right normal-case tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   />
                 </label>
-                <span className="text-deep-fern block text-right normal-case">
+                <span className="text-deep-fern mt-4 block text-right normal-case">
                   {customCoefficient === null ? "—" : `${fmt(customCoefficient, 2)}%`}
                 </span>
               </th>
@@ -184,7 +199,7 @@ export function Projection({ model }: { model: ProjectionModel }) {
                 className="border-phosphor-blue-black border-b last:border-0"
               >
                 <td
-                  className={`py-10 pr-16 pl-20 ${
+                  className={`py-12 pr-16 pl-20 ${
                     row.key === "no-focus"
                       ? "text-sage-40"
                       : i === 0
@@ -239,12 +254,12 @@ function Cell({
 
   // No x typed yet: the column exists but has nothing to show.
   if (cell === null) {
-    return <td className={`text-deep-fern py-10 pl-16 text-right ${edge}`}>—</td>;
+    return <td className={`text-deep-fern py-12 pl-16 text-right ${edge}`}>—</td>;
   }
 
   if (metric === "runes") {
     return (
-      <td className={`py-10 pl-16 text-right tabular-nums ${tone} ${edge}`}>
+      <td className={`py-12 pl-16 text-right tabular-nums ${tone} ${edge}`}>
         {fmt(cell.runes, 1)}
       </td>
     );
@@ -256,7 +271,7 @@ function Cell({
   if (cell.value === null) {
     return (
       <td
-        className={`text-deep-fern text-caption py-10 pl-16 text-right ${edge}`}
+        className={`text-deep-fern text-caption py-12 pl-16 text-right ${edge}`}
         title="No market price captured for this rune yet"
       >
         no price
@@ -266,7 +281,7 @@ function Cell({
 
   if (metric === "value") {
     return (
-      <td className={`py-10 pl-16 text-right tabular-nums ${tone} ${edge}`}>
+      <td className={`py-12 pl-16 text-right tabular-nums ${tone} ${edge}`}>
         {Math.round(cell.value).toLocaleString("fr-FR")}
       </td>
     );
@@ -276,7 +291,7 @@ function Cell({
   if (profit === null) {
     return (
       <td
-        className={`text-deep-fern text-caption py-10 pl-16 text-right ${edge}`}
+        className={`text-deep-fern text-caption py-12 pl-16 text-right ${edge}`}
         title="No market price captured for this item, so profit cannot be computed"
       >
         no item price
@@ -285,7 +300,7 @@ function Cell({
   }
   return (
     <td
-      className={`py-10 pl-16 text-right tabular-nums ${edge} ${
+      className={`py-12 pl-16 text-right tabular-nums ${edge} ${
         profit >= 0 ? "text-lime-pulse" : "text-sage-40"
       }`}
     >

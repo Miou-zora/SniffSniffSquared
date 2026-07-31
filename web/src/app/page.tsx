@@ -163,9 +163,9 @@ function StatLines({ view }: { view: BreakerView }) {
               const avg = view.averages.get(l.effectId);
               return (
                 <tr key={l.effectId} className="border-phosphor-blue-black border-b">
-                  <td className="text-phosphor-white py-10 pr-16">{l.rune}</td>
-                  <td className="py-10 pr-16 text-right tabular-nums">{l.value}</td>
-                  <td className="py-10 pr-16 text-right tabular-nums">
+                  <td className="text-phosphor-white py-12 pr-16">{l.rune}</td>
+                  <td className="py-12 pr-16 text-right tabular-nums">{l.value}</td>
+                  <td className="py-12 pr-16 text-right tabular-nums">
                     {avg ? (
                       <>
                         <span className="text-sage-60">{n(avg.avg, 1)}</span>
@@ -177,23 +177,23 @@ function StatLines({ view }: { view: BreakerView }) {
                       <span className="text-deep-fern">—</span>
                     )}
                   </td>
-                  <td className="text-moss-80 py-10 pr-16 text-right tabular-nums">
+                  <td className="text-moss-80 py-12 pr-16 text-right tabular-nums">
                     {n(l.weight)}
                   </td>
-                  <td className="text-sage-40 py-10 text-right tabular-nums">
+                  <td className="text-sage-40 py-12 text-right tabular-nums">
                     {n((100 * l.weight) / view.totalWeight, 1)}%
                   </td>
                 </tr>
               );
             })}
             <tr className="text-body-sm tracking-body-sm">
-              <td className="text-deep-fern py-10 pr-16 uppercase">total</td>
-              <td colSpan={2} className="text-deep-fern py-10 pr-16 text-right">
+              <td className="text-deep-fern py-12 pr-16 uppercase">total</td>
+              <td colSpan={2} className="text-deep-fern py-12 pr-16 text-right">
                 {view.averageTotalWeight !== null && (
                   <>avg weight {n(view.averageTotalWeight)}</>
                 )}
               </td>
-              <td className="text-phosphor-white py-10 pr-16 text-right tabular-nums">
+              <td className="text-phosphor-white py-12 pr-16 text-right tabular-nums">
                 {n(view.totalWeight)}
               </td>
               <td />
