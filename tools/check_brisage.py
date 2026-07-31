@@ -23,10 +23,12 @@ import sys
 
 API_ITEM = "https://api.dofusdb.fr/items/"
 
-# Fitted across every focused crush captured so far; see docs/brisage-model.md.
-# What it physically represents is unknown, which is why it is a named constant
-# and not folded into the formula.
-OFFSET = 2.5
+# Every stat line carries a flat +1 on top of its weight. This is in the
+# spreadsheet (Value!H2: `3*G*C/D*level/200 + 1`) and dropping it was the cause
+# of a long detour fitting a bogus constant onto the focus formula -- with n
+# lines it inflates focus_weight by exactly (n+1)/2, which looks like a constant
+# across items that happen to carry a similar number of stats.
+LINE_BONUS = 1.0
 
 
 def psql(sql):
@@ -169,7 +171,7 @@ def main():
             r = weights.get(eff)
             if not r:
                 unmapped.append((eff, val)); continue
-            lines[eff] = 3 * val * r["w"] / r["spr"] * level / 200
+            lines[eff] = 3 * val * r["w"] / r["spr"] * level / 200 + LINE_BONUS
         total = sum(lines.values())
 
         print("=== %s (item %s, level %s) — coefficient %.3f%% — focus %s ===" % (
@@ -214,7 +216,6 @@ def main():
                 ("sheet   own/2 + total/2", own / 2 + total / 2),
                 ("excl    own/2 + others/2", own / 2 + (total - own) / 2),
                 ("full    own + total/2", own + total / 2),
-                ("fitted  own/2 + total/2 + %.2f" % OFFSET, own / 2 + total / 2 + OFFSET),
             ):
                 inside = fw - half <= cand <= fw + half
                 print("      %-30s %8.2f -> %6.2f runes%s" % (

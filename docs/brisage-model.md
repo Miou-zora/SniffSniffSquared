@@ -51,9 +51,9 @@ Chance 30, Dommage 4.5, Intelligence 30, PA 1.
 Per stat line, with `level` = `Feuil1!B2`:
 
 ```
-line_weight  = 3 * stat_value * rune_weight / stat_per_rune * level / 200
+line_weight  = 3 * stat_value * rune_weight / stat_per_rune * level / 200 + 1
 
-focus_weight = line_weight/2 + (sum of all line_weights)/2 + 2.5
+focus_weight = line_weight/2 + (sum of all line_weights)/2
 
 runes        = focus_weight / rune_weight * coefficient / 100
 
@@ -62,13 +62,17 @@ value        = runes * rune_price
 profit_ratio = (value * 100 / item_cost - 100) / 100
 ```
 
-`focus_weight` is the interesting one. The sheet writes it `H + SUM(H)/2 - H/2`,
-which simplifies to `line_weight/2 + SUM/2` — half this line plus half of
-everything else. That halving is confirmed against five real focused crushes,
-but it comes out consistently *low*, and the `+ 2.5` above is what closes the
-gap. The constant is fitted, not understood; see
-[the focus branch](#the-focus-branch-the-sheets-halving-plus-a-constant) below
-for the measurements and for the one experiment that would explain it.
+**The `+ 1` on `line_weight` is load-bearing** and easy to miss — it is the last
+term of `Value!H2`, after the level division. Every stat line gets a flat +1 on
+top of its weight, regardless of the stat. Drop it and the focus branch comes
+out consistently low by `(number_of_lines + 1) / 2`, which across real items is
+2 to 3.5 — close enough to a constant to look like a missing constant rather
+than a missing per-line term. That mistake cost a session.
+
+`focus_weight` is `H + SUM(H)/2 - H/2` in the sheet, which simplifies to
+`line_weight/2 + SUM/2` — half this line plus half of everything else. Verified
+against five real focused crushes; see
+[the focus branch](#the-focus-branch-verified) below.
 
 Without focus this does not apply at all — each line yields its own rune from
 `line_weight` directly, and `focus_weight` never enters.
@@ -146,16 +150,21 @@ The Arc Anum crush in the capture — level 96, coefficient 32.185%, **no focus*
 
 | rune | predicted | actual |
 |---|---|---|
-| Ine | 23.17 | 23 |
-| Age | 19.47 | 20 |
-| Ini | 10.43 | 11 |
-| Vi | 10.10 | 10 |
-| Do Neutre | 2.32 | 2 |
-| Do Feu | 2.32 | 2 |
-| Ré Per Feu | 1.39 | 2 |
-| Ré Per Neutre | 0.93 | 1 |
+| Ine | 23.49 | 23 |
+| Age | 19.79 | 20 |
+| Ini | 10.75 | 11 |
+| Vi | 10.43 | 10 |
+| Do Neutre | 2.38 | 2 |
+| Do Feu | 2.38 | 2 |
+| Ré Per Feu | 1.44 | 2 |
+| Ré Per Neutre | 0.98 | 1 |
 
-Every line within ±0.61, which is rounding. **The formulas are correct.**
+Every line within ±0.56, which is rounding. **The formulas are correct.**
+
+Note this crush cannot validate the `+ 1` per line: without focus each line is
+computed independently, so a flat term shifts every prediction by
+`1 / rune_weight * coefficient` — under 0.33 runes here, inside the rounding.
+Only the focus branch, where the lines are summed, pins it down.
 
 Two things this pins down:
 
@@ -165,11 +174,11 @@ Two things this pins down:
   the coefficient from `crushes.yield_percent` — the whole input set is
   already captured
 
-### The focus branch: the sheet's halving, plus a constant
+### The focus branch: verified
 
 Five focused crushes have been captured. Focus produces **only** the focused
-rune — no side runes — so the weight the game actually used is measurable
-rather than inferred:
+rune — no side runes — so the weight the game used is measurable rather than
+inferred:
 
 ```
 focus_weight = runes_obtained * rune_weight / (coefficient / 100)
@@ -179,81 +188,34 @@ The rune count is an integer, so each crush pins `focus_weight` to a band of
 `+/- 0.5 * rune_weight / (coefficient/100)`, not to a point. A heavy rune or a
 low coefficient widens that band, sometimes past usefulness.
 
-| crush | focus | own | total | measured | band |
-|---|---|---|---|---|---|
-| Couronne du Roi Gelax, 17.95% | Vi | 63.99 | 250.39 | 161.55 | 158.76 - 164.33 |
-| Anneau Bsène, 47.85% | Vi | 5.71 | 121.99 | 66.88 | 65.83 - 67.92 |
-| Bâton d'Oubli, 76.94% | Vi | 1.98 | 42.93 | 24.69 | 24.04 - 25.34 |
-| Cape Maj'Hic, 88.06% | Vi | 2.24 | 14.99 | 11.36 | 10.79 - 11.92 |
-| Kwape de Glace, 87.60% | Invo | 18.45 | 45.82 | 34.25 | 17.12 - 51.37 |
+| crush | focus | sheet formula | measured band | |
+|---|---|---|---|---|
+| Couronne du Roi Gelax, 17.95% | Vi | 160.19 | 158.76 - 164.33 | ok |
+| Anneau Bsène, 47.85% | Vi | 67.35 | 65.83 - 67.92 | ok |
+| Bâton d'Oubli, 76.94% | Vi | 24.44 | 24.04 - 25.34 | ok |
+| Kwape de Glace, 87.60% | Invo | 34.63 | 17.12 - 51.37 | ok, band too wide to mean much |
+| Cape Maj'Hic, 88.06% | Vi | 10.62 | 10.79 - 11.92 | **0.17 low** |
 
-**The sheet's halving rule is right.** No formula of the shape
-`a * own + total/2` can fit: the Couronne requires `a <= 0.61` and the Cape
-requires `a >= 1.47`, so the intersection is empty for every `a` including 1.
-That kills `own + total/2`, which an earlier revision of this document adopted
-on the strength of the Anneau alone — the Anneau's band is loose enough to
-admit it, and the Couronne's is not.
+Four of five land inside their band with no fudge factor. The alternatives are
+ruled out: `own + total/2` overshoots the Couronne by 5.6 runes, and
+`own/2 + others/2` — excluding the focused line from the sum — is the worst fit
+on every sample.
 
-What the sheet is missing is a small constant. Solving
-`focus_weight = own/2 + total/2 + c` per crush and intersecting:
+**The Cape Maj'Hic misses by 0.17 weight, or 0.15 runes.** It is also the one
+item whose captured stats contradict DofusDB: the wire reports Vi 22, Sagesse 7,
+Puissance 2, while the template for item 779 is Vi 31-40, Puissance 7-10 and
+three resistances at 2, with no Sagesse and a Vitalité range the captured value
+falls below. Its level comes from DofusDB and drives every line weight, so if
+the identity is wrong the row is. One additional stat line — contributing
+nothing but its `+1` — would move the required offset to `[-0.33, 0.80]` and
+close the gap exactly. Not worth chasing further without a second crush on a
+cleanly identified item.
 
-| crush | c required |
-|---|---|
-| Bâton d'Oubli | 1.59 - 2.89 |
-| Anneau Bsène | 1.98 - 4.07 |
-| Cape Maj'Hic | 2.17 - 3.30 |
-| Couronne du Roi Gelax | 1.57 - 7.14 |
-| Kwape de Glace | -15.01 - 19.24 |
-| **intersection** | **2.17 - 2.89** |
+### Maluses
 
-One constant explains all five. Using `c = 2.5`:
-
-| crush | predicted | actual |
-|---|---|---|
-| Couronne du Roi Gelax | 28.67 | 29 |
-| Anneau Bsène | 31.75 | 32 |
-| Bâton d'Oubli | 19.20 | 19 |
-| Cape Maj'Hic | 9.79 | 10 |
-| Kwape de Glace | 1.01 | 1 |
-
-Every one inside its band, including the two — the Bâton and the Cape — that
-earlier looked like modelling defects. They were not: the Bâton's malus and
-damage line, and the Cape's disagreement with DofusDB's template, are still
-unexplained oddities, but they are no longer needed to explain the residuals.
-Nor is `own/2 + others/2`, excluding the focused line, which remains the worst
-fit on all five.
-
-### What the constant is, and the one experiment left
-
-`c` is not identified, only fitted, and the design of the captures is why.
-**All four crushes that meaningfully constrain it focus Vitalité**, whose
-`stat_per_rune` is 5. So these are indistinguishable:
-
-- a flat `c = 2.5` for every focus
-- `c = stat_per_rune / 2`, which is 2.5 for Vitalité
-
-The Kwape focuses Invocation (`stat_per_rune` 1, so the two predict 2.5 against
-0.5) but its band is 34 wide and rules out nothing.
-
-Separating them needs **one focused crush on a weight-1 rune whose
-`stat_per_rune` is not 5** — Force, Intelligence, Agilité, Chance and Sagesse
-are all `stat_per_rune = 1`. The two hypotheses then differ by 2.0 weight, or
-`2.0 * coefficient` runes, which at a high coefficient is roughly two whole
-runes and unmissable. Initiative (`stat_per_rune` 10) would work too and splits
-them further, 5.0 against 2.5.
-
-For the tightest read, the crush should also have:
-
-- **a weight-1 focused rune.** The band scales with `rune_weight`, so heavy
-  runes such as Invocation (30) or Dommage (20) are useless — the Kwape yielded
-  one rune and constrained nothing.
-- **a high coefficient**, since the band is `+/- 0.5 * rune_weight /
-  (coefficient/100)`. At 90% and weight 1 the band is +/- 0.56, well under the
-  2.0 gap being tested.
-
-Until that crush exists, `c = 2.5` is a fitted constant with no physical
-meaning attached, which is why `tools/check_brisage.py` carries it as a named
-`OFFSET` rather than folding it into the formula.
+The Bâton d'Oubli carries effect 155, `-{n} Intelligence`, value 30, which maps
+to no rune. Excluding it entirely — contributing neither weight nor its `+1` —
+is what fits. Counting it as a line with weight, in either sign, does not.
 
 ## Reading it back out of a capture
 
