@@ -395,6 +395,27 @@ impl Offer {
     pub fn unit_price(&self) -> u64 {
         self.ladder.first().copied().unwrap_or(0)
     }
+
+    /// Whether any batch beyond a single unit is quoted.
+    fn batched(&self) -> bool {
+        self.ladder.iter().skip(1).any(|&v| v > 0)
+    }
+
+    /// One specific copy of a piece of gear, rather than a quote for a stack.
+    ///
+    /// Stats alone do not settle it: a rune carries one stat line of its own —
+    /// `Rune Vi` quotes `(125, 5)` — while still being a fungible stack sold by
+    /// the thousand. What separates them is the ladder. A stack quotes the
+    /// batch sizes it is available in; a single copy can only ever be sold
+    /// once, so it quotes the x1 slot and nothing else.
+    ///
+    /// Both conditions are needed. Across the whole archive: 534 offers quote
+    /// x1 with stats (gear), 129 quote a full ladder with one stat (runes), 49
+    /// a ladder with none (resources), and 7 quote x1 alone with no stats —
+    /// a resource with only singles on sale, which is a stack too.
+    pub fn is_single_copy(&self) -> bool {
+        !self.batched() && !self.stats.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -780,6 +801,40 @@ mod tests {
         assert_eq!(o.listing_id, 10050);
         assert!(o.stats.is_empty(), "a stack of resources has no rolled stats");
         assert!(is_known_key(messages::keymap().key("price_list").unwrap()));
+    }
+
+    /// A rune quotes a full ladder *and* carries one stat line — its own bonus.
+    ///
+    /// Classifying on "has stats" therefore sent every rune to `offers` and
+    /// stopped its ladder reaching `prices`, which is where rune values and
+    /// craft costs are read from. The ladder is what separates them: a stack is
+    /// sold by the batch, a single copy only ever once.
+    #[test]
+    fn a_rune_is_a_stack_even_though_it_has_a_stat() {
+        let rune = Offer {
+            item_id: 1523,
+            ladder: vec![183, 1830, 17999, 181999],
+            listing_id: 5720,
+            stats: vec![(125, 5)],
+        };
+        assert!(!rune.is_single_copy(), "Rune Vi is sold by the thousand");
+
+        let gear = Offer {
+            item_id: 12502,
+            ladder: vec![9999, 0, 0, 0],
+            listing_id: 36852,
+            stats: vec![(125, 31), (126, 16)],
+        };
+        assert!(gear.is_single_copy(), "gear quotes x1 and nothing else");
+
+        // A resource with only singles left on sale: x1 alone, but no stats.
+        let singles = Offer {
+            item_id: 15378,
+            ladder: vec![68800, 0, 0, 0],
+            listing_id: 1,
+            stats: Vec::new(),
+        };
+        assert!(!singles.is_single_copy(), "still a stack, just a short one");
     }
 
     /// Equipment browsing, packet #11319: two copies of item 12502 on sale.

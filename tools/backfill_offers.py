@@ -137,14 +137,111 @@ def parse_offers(body):
                     ladder = packed(p2)
                 elif f2 == 7 and wt2 == 0:
                     listing = p2
-            if stats and ladder:
+            # A single copy quotes x1 and nothing else. Stats do not settle it:
+            # a rune carries its own bonus as one stat line and is still a
+            # fungible stack sold by the thousand -- classifying on stats alone
+            # diverts every rune away from `prices`, which is where rune values
+            # and craft costs are read from. Mirrors Offer::is_single_copy.
+            batched = any(v > 0 for v in ladder[1:])
+            if stats and ladder and not batched:
                 offers.append((listing, item or outer_item, ladder[0], stats))
     return category, offers
+
+
+def parse_stacks(body):
+    """[(listing_id, item_id, ladder, category)] for the stack quotes in a message."""
+    category = 0
+    outer_item = 0
+    stacks = []
+    for f, wt, payload in fields(body):
+        if f == 1 and wt == 0:
+            category = payload
+        elif f == 3 and wt == 0:
+            outer_item = payload
+        elif f == 2 and wt == 2:
+            item = listing = 0
+            ladder, stats = [], []
+            for f2, wt2, p2 in fields(payload):
+                if f2 == 1 and wt2 == 0:
+                    item = p2
+                elif f2 == 4 and wt2 == 2:
+                    stats.append(p2)
+                elif f2 == 5 and wt2 == 2:
+                    ladder = packed(p2)
+                elif f2 == 7 and wt2 == 0:
+                    listing = p2
+            if not ladder:
+                continue
+            batched = any(v > 0 for v in ladder[1:])
+            if batched or not stats:
+                stacks.append((listing, item or outer_item, ladder, category))
+    return stacks
+
+
+def repair(rows, dry_run):
+    """Undo the misclassification: runes and resources are stacks, not listings.
+
+    Two halves. The rows wrongly written to `offers` are dropped, and the
+    ladders they should have been -- which never reached `prices` at all -- are
+    restored from the archive. A missing rune ladder is not cosmetic: it is what
+    every rune value and craft cost on the page is read from.
+    """
+    keep = set()
+    stack_rows = []
+    for _pid, hexed, seen_at in rows:
+        if not hexed:
+            continue
+        body = bytes.fromhex(hexed)
+        for listing, _item, _price, _lines in parse_offers(body)[1]:
+            keep.add(listing)
+        for listing, item, ladder, category in parse_stacks(body):
+            stack_rows.append((listing, item, ladder, category, seen_at))
+
+    [(stale,)] = [tuple(r) for r in psql(
+        "SELECT count(*) FROM offers WHERE listing_id NOT IN (%s)"
+        % (",".join(str(i) for i in keep) or "0"), rows=True)]
+    print("  %s offer row(s) are stacks and do not belong in `offers`" % stale)
+    print("  %d stack quote(s) in the archive to check against `prices`" % len(stack_rows))
+    if dry_run:
+        return
+
+    ids = ",".join(str(i) for i in keep) or "0"
+    psql(
+        "DELETE FROM offer_stats WHERE listing_id NOT IN (%s);\n"
+        "DELETE FROM offers WHERE listing_id NOT IN (%s);\n" % (ids, ids)
+    )
+
+    # Only the observations `prices` never got. Matched on the second rather
+    # than the exact instant: the sniffer's now() and the packet's captured_at
+    # are taken microseconds apart and will not compare equal.
+    values = ",\n  ".join(
+        "(%d,%d,%d,%s,%s,%s,%s,'%s')" % (
+            item, category, listing,
+            *[str(ladder[i]) if i < len(ladder) else "NULL" for i in range(4)],
+            seen_at,
+        )
+        for listing, item, ladder, category, seen_at in stack_rows
+    )
+    psql(
+        "CREATE TEMP TABLE stack_obs (item_id BIGINT, category BIGINT, listing_id BIGINT,"
+        " b1 BIGINT, b10 BIGINT, b100 BIGINT, b1000 BIGINT, seen_at TIMESTAMPTZ);\n"
+        "INSERT INTO stack_obs VALUES\n  " + values + ";\n"
+        "INSERT INTO prices (item_id, category, listing_id, b1, b10, b100, b1000, seen_at)\n"
+        "SELECT s.item_id, s.category, s.listing_id, s.b1, s.b10, s.b100, s.b1000, s.seen_at\n"
+        "  FROM stack_obs s WHERE NOT EXISTS (\n"
+        "    SELECT 1 FROM prices p WHERE p.item_id = s.item_id\n"
+        "      AND date_trunc('second', p.seen_at) = date_trunc('second', s.seen_at));\n"
+    )
+    [(restored,)] = [tuple(r) for r in psql(
+        "SELECT count(*) FROM prices WHERE seen_at > now() - interval '1 day'", rows=True)]
+    print("  pruned, and `prices` now holds %s row(s) from the last day" % restored)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="report without writing")
+    ap.add_argument("--repair", action="store_true",
+                    help="drop stacks wrongly stored as offers, restore their ladders")
     args = ap.parse_args()
 
     key = price_key()
@@ -154,6 +251,9 @@ def main():
         rows=True,
     )
     print("backfill: %d archived %s messages" % (len(rows), key))
+
+    if args.repair:
+        repair(rows, args.dry_run)
 
     # Keyed, not appended: the same listing is re-described every time the panel
     # is opened, and Postgres rejects an INSERT hitting one ON CONFLICT key twice

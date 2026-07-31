@@ -475,12 +475,15 @@ fn insert_crush(
 
 /// One row per observed price, so history is preserved.
 ///
-/// Which table depends on what the offer is, and the wire says so plainly: an
-/// offer carrying rolled stats is one specific copy of a piece of gear and goes
-/// to `offers`, while a bare quote is a fungible stack and goes to `prices` as
-/// a ladder. Sending gear to `prices` would claim x10 and x100 quotes that do
-/// not exist, and sending a resource stack to `offers` would invent a listing
-/// for something that has no individual identity.
+/// Which table depends on what the offer is: a single copy of gear goes to
+/// `offers`, a stack quote goes to `prices` as a ladder. `Offer::is_single_copy`
+/// decides, and it reads the ladder rather than the stats — a rune carries a
+/// stat line of its own and is still a stack.
+///
+/// Sending gear to `prices` claims x10 and x100 quotes that do not exist;
+/// sending a stack to `offers` invents a listing for something with no
+/// individual identity, and quietly stops its ladder reaching the table every
+/// rune price and craft cost is read from.
 fn insert_price(
     client: &mut postgres::Client,
     e: &dispatch::Event,
@@ -490,7 +493,7 @@ fn insert_price(
         None => return Ok(()), // not a price message after all
     };
     for offer in &p.offers {
-        if offer.stats.is_empty() {
+        if !offer.is_single_copy() {
             let at = |i: usize| offer.ladder.get(i).map(|&v| v as i64);
             client.execute(
                 PRICES_INSERT,
