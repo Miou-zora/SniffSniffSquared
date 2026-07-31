@@ -172,6 +172,13 @@ docker exec dofus_db psql -U dofus -d dofus -c '\dt'
 | `systematic-debugging` | obra/superpowers | protocol work is debugging with no source; this repo's dead ends came from guessing instead of bisecting |
 | `test-driven-development` | obra/superpowers | fixtures here are real captured bytes and were twice invented by hand instead |
 | `verification-before-completion` | obra/superpowers | "it builds" has been claimed here when it did not |
+| `ui-ux-pro-max` | nextlevelbuilder/ui-ux-pro-max-skill | searchable local design database; pairs with `frontend-design` |
+| `writing-plans` / `brainstorming` | obra/superpowers | for multi-step work before touching code |
+
+`ui-ux-pro-max` is 1.8 MB, nearly all CSV reference data, and is the only skill
+here from outside anthropics/obra. Audited before committing: standard library
+only, no network, no `subprocess`/`eval`; its two file writes generate design
+docs. Re-check after `npx skills update`.
 
 Deliberately not installed: the marketing, SEO and video generation skills
 (`ad-creative`, `hyperframes*`, `paywalls`, `pricing`, `seo-audit`, `video`,
