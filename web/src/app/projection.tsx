@@ -21,7 +21,11 @@ const METRICS: { id: Metric; label: string; hint: string }[] = [
  * the first.
  */
 const BASES: { id: Basis; label: string; hint: string }[] = [
-  { id: "copy", label: "This copy", hint: "the stats this instance actually rolled" },
+  {
+    id: "copy",
+    label: "Current item",
+    hint: "the stats the item in the breaker actually rolled",
+  },
   { id: "average", label: "Average", hint: "what an average copy of this item rolls" },
 ];
 
@@ -141,7 +145,12 @@ export function Projection({ model }: { model: ProjectionModel }) {
           value={metric}
           onChange={setMetric}
         />
-        <p className="text-body-sm tracking-body-sm text-sage-40 basis-full xl:basis-auto">
+        {/* Always its own row. It used to sit beside the switches above xl and
+            wrap under them below it, so a sentence that grows — Kamas or % vs
+            item under Average — jumped from one place to the other, which reads
+            as the switch having moved the caption. Same line every time, and it
+            gets the width to stay one line. */}
+        <p className="text-body-sm tracking-body-sm text-sage-40 basis-full">
           {METRICS.find((m) => m.id === metric)?.hint}, as the coefficient decays
           {basis === "average" && model.average !== null && ", for an average copy"}.
         </p>
