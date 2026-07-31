@@ -4,8 +4,10 @@ Read out of `Book 3.xlsx` (kept at the repo root). This is the maths for
 deciding whether crushing an item into runes makes or loses kamas, and which
 rune to focus.
 
-Nothing implements it yet. The point of this document is that the spreadsheet
-does not have to be reverse-engineered twice.
+Nothing implements it yet, but the formulas are **verified against a real
+crush** (see below) and the reference data is loadable into Postgres with
+`tools/import_runes.py`. The point of this document is that the spreadsheet does
+not have to be reverse-engineered twice.
 
 ## The idea
 
@@ -86,13 +88,15 @@ long session can be projected. Column A is a "Custom" override, set to 100.
 50 runes, exported to [`brisage-runes.json`](brisage-runes.json):
 
 ```json
-{ "stat_fr": "Vitalité", "rune": "Vi", "rune_weight": 1, "stat_per_rune": 5, "observed_price": 183 }
+{ "stat_fr": "Vitalité", "rune": "Vi", "rune_weight": 1, "stat_per_rune": 5 }
 ```
 
-- **`rune_weight`** and **`stat_per_rune`** are game constants — safe to keep.
-- **`observed_price`** is a market snapshot from whenever the sheet was filled
-  in. It goes stale, and it is exactly what the sniffer's `prices` table exists
-  to replace.
+`rune_weight` and `stat_per_rune` are game constants, so they belong in a file.
+**Prices are deliberately not here**: the sheet carried a market snapshot that
+goes stale, and current prices are what the sniffer's `prices` table is for.
+
+`tools/import_runes.py` loads this into Postgres and adds the DofusDB ids — see
+below.
 
 Weights range 1 (Vitalité) to 100; most stats give 1 point per rune, while
 Vitalité gives 5.
@@ -107,7 +111,7 @@ The sniffer already supplies most of it:
 | item's stat values | **already captured** — `item_detail` carries them |
 | coefficient | **already captured** — `crushes.yield_percent` |
 | rune prices | **already captured** — the `prices` table |
-| rune weights | this file's `brisage-runes.json` |
+| rune weights | the `runes` table, loaded by `tools/import_runes.py` |
 | item cost | the `prices` table, or `ItemWorth` by hand |
 
 `item_detail` decodes to `{effect_id, value}` pairs — the Anneau Bsène in the
