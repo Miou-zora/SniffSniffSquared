@@ -117,6 +117,7 @@ The sniffer already supplies most of it:
 
 | the model needs | where it comes from |
 |---|---|
+| an *unseen* copy's expected stats | the `item_effects` template ranges, averaged by the `item_break_weight` view |
 | item level | the `items` table, filled by `tools/import_items.py` |
 | item's stat values | the `item_stats` table, written live from `item_detail` |
 | coefficient | **already captured** — `crushes.yield_percent` |

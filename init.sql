@@ -97,6 +97,62 @@ CREATE TABLE IF NOT EXISTS items (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- The stat ranges an item *type* can roll, from DofusDB. Filled by
+-- tools/import_items.py alongside `items`.
+--
+-- Distinct from `item_stats`, which is what one instance actually rolled. This
+-- is the template: what a copy of the item could have. Averaging these ranges
+-- gives the expected line weight of an unseen copy, which is what a "what is
+-- this item worth broken" estimate needs before you own one.
+--
+-- Keyed by position rather than effect id, so a template that lists the same
+-- effect twice survives. `to` comes back as 0 from DofusDB for fixed-value
+-- lines, so a stored max is always >= min.
+CREATE TABLE IF NOT EXISTS item_effects (
+    item_id   BIGINT NOT NULL,
+    position  INT    NOT NULL,      -- order within the template
+    effect_id BIGINT NOT NULL,
+    min_value BIGINT NOT NULL,
+    max_value BIGINT NOT NULL,
+    PRIMARY KEY (item_id, position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_item_effects_effect ON item_effects (effect_id);
+
+-- Expected line weight per stat line of an item type, from the middle of its
+-- range. The formula is docs/brisage-model.md's `line_weight`, including the
+-- +1 every line carries -- dropping that term is what broke the focus model
+-- once already.
+--
+-- Lines whose effect maps to no rune are dropped by the join: weapon damage
+-- lines and maluses yield nothing and are excluded from the weight the model
+-- sums. `item_break_weight` counts them so their absence is visible rather
+-- than silent.
+CREATE OR REPLACE VIEW item_effect_weights AS
+SELECT e.item_id,
+       e.position,
+       e.effect_id,
+       r.rune,
+       r.rune_weight,
+       (e.min_value + e.max_value) / 2.0                       AS avg_value,
+       3 * ((e.min_value + e.max_value) / 2.0) * r.rune_weight
+         / r.stat_per_rune * i.level / 200 + 1                 AS avg_line_weight
+FROM item_effects e
+JOIN items i USING (item_id)
+JOIN runes r ON r.effect_id = e.effect_id;
+
+CREATE OR REPLACE VIEW item_break_weight AS
+SELECT i.item_id,
+       i.name_fr,
+       i.level,
+       count(w.position)                                    AS rune_lines,
+       (SELECT count(*) FROM item_effects e2
+         WHERE e2.item_id = i.item_id)                      AS template_lines,
+       COALESCE(sum(w.avg_line_weight), 0)                  AS avg_total_weight
+FROM items i
+LEFT JOIN item_effect_weights w USING (item_id)
+GROUP BY i.item_id, i.name_fr, i.level;
+
 -- Rune reference: game constants from docs/brisage-runes.json, plus the DofusDB
 -- ids that join them to captured data. Loaded by tools/import_runes.py, which
 -- also creates this table; declared here so the schema is readable in one place.

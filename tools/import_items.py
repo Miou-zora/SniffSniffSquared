@@ -60,6 +60,35 @@ CREATE TABLE IF NOT EXISTS items (
     type_fr    TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS item_effects (
+    item_id   BIGINT NOT NULL,
+    position  INT    NOT NULL,
+    effect_id BIGINT NOT NULL,
+    min_value BIGINT NOT NULL,
+    max_value BIGINT NOT NULL,
+    PRIMARY KEY (item_id, position)
+);
+CREATE INDEX IF NOT EXISTS idx_item_effects_effect ON item_effects (effect_id);
+
+-- Mirrors init.sql. Declared here too because init.sql only runs on a fresh
+-- database, and these views are what make item_effects useful.
+CREATE OR REPLACE VIEW item_effect_weights AS
+SELECT e.item_id, e.position, e.effect_id, r.rune, r.rune_weight,
+       (e.min_value + e.max_value) / 2.0 AS avg_value,
+       3 * ((e.min_value + e.max_value) / 2.0) * r.rune_weight
+         / r.stat_per_rune * i.level / 200 + 1 AS avg_line_weight
+FROM item_effects e
+JOIN items i USING (item_id)
+JOIN runes r ON r.effect_id = e.effect_id;
+
+CREATE OR REPLACE VIEW item_break_weight AS
+SELECT i.item_id, i.name_fr, i.level,
+       count(w.position) AS rune_lines,
+       (SELECT count(*) FROM item_effects e2 WHERE e2.item_id = i.item_id) AS template_lines,
+       COALESCE(sum(w.avg_line_weight), 0) AS avg_total_weight
+FROM items i
+LEFT JOIN item_effect_weights w USING (item_id)
+GROUP BY i.item_id, i.name_fr, i.level;
 """
 
 
@@ -220,6 +249,25 @@ def observed_item_ids(refresh):
     return [int(r[0]) for r in psql(sql, rows=True) if r[0]]
 
 
+def effect_ranges(item):
+    """[(position, effect_id, min, max)] from a DofusDB item's template.
+
+    DofusDB reports a fixed-value line as `from=N, to=0`, so `to` below `from`
+    means "always N" rather than an inverted range. Getting that backwards would
+    silently halve those lines."""
+    out = []
+    for pos, e in enumerate(item.get("effects") or []):
+        eid = e.get("effectId")
+        lo = e.get("from")
+        if eid is None or lo is None:
+            continue
+        hi = e.get("to")
+        if hi is None or hi < lo:
+            hi = lo
+        out.append((pos, eid, lo, hi))
+    return out
+
+
 def enrich(refresh, dry_run):
     import requests
 
@@ -228,7 +276,7 @@ def enrich(refresh, dry_run):
     if not ids:
         return
 
-    found = {}
+    found, ranges = {}, {}
     for i in range(0, len(ids), 50):
         chunk = ids[i:i + 50]
         params = [("$limit", "100")] + [("id[$in][]", str(x)) for x in chunk]
@@ -240,12 +288,14 @@ def enrich(refresh, dry_run):
             break
         for it in r.json().get("data", []):
             t = it.get("type") or {}
-            found[it.get("id")] = (
+            iid = it.get("id")
+            found[iid] = (
                 (it.get("name") or {}).get("fr"),
                 it.get("level"),
                 t.get("id"),
                 (t.get("name") or {}).get("fr"),
             )
+            ranges[iid] = effect_ranges(it)
 
     missing = [x for x in ids if x not in found]
     print("  resolved %d/%d%s" % (
@@ -268,6 +318,22 @@ def enrich(refresh, dry_run):
           "  type_fr = COALESCE(EXCLUDED.type_fr, items.type_fr),\n"
           "  updated_at = now();\n"
     )
+
+    rows = [(iid, pos, eid, lo, hi)
+            for iid, rs in sorted(ranges.items()) for pos, eid, lo, hi in rs]
+    if not rows:
+        return
+    # Replaced wholesale per item rather than upserted: a template that loses a
+    # line between game versions must lose the row too, and an upsert would keep
+    # the stale one forever.
+    psql(
+        "DELETE FROM item_effects WHERE item_id IN (%s);\n"
+        % ",".join(str(i) for i in sorted(ranges))
+        + "INSERT INTO item_effects (item_id, position, effect_id, min_value, max_value)\nVALUES\n  "
+        + ",\n  ".join("(%d,%d,%d,%d,%d)" % r for r in rows)
+        + ";\n"
+    )
+    print("  %d stat range(s) across %d template(s)" % (len(rows), len(ranges)))
 
 
 def main():

@@ -40,7 +40,8 @@ run from `sniffer/`** (it resolves `keymap.json` and `proto/` relative to cwd).
 ```
 docker-compose.yml  postgres + pgadmin + web; `sniffer` service is Linux-only
 init.sql            schema both apps depend on (packets, prices, crushes,
-                    crush_placements, item_stats, items, runes)
+                    crush_placements, item_stats, items, item_effects, runes)
+                    + views item_effect_weights, item_break_weight
 docs/               observations.md — annotated real captures
                     brisage-model.md + brisage-runes.json — the kamas maths,
                     transcribed from Book 3.xlsx (kept at the repo root)
@@ -73,12 +74,19 @@ capture path takes no network dependency, so a DofusDB outage can never cost
 packets. Enrichment is either read-side in `web/` or an offline step
 (`tools/import_items.py`, which fills the `items` table).
 
-**For an item's stat values the wire wins, not DofusDB.** `item_stats` records
-what the server actually said a specific instance carried, keyed by instance
-uid — two copies of an item roll different values. DofusDB's `effects` are the
-*template range* for the item type, and for at least one captured item (779)
-that range does not contain the observed value. The instance is destroyed by
-the crush, so the wire is the only record it ever existed.
+**Two different things, do not confuse them:**
+
+- `item_stats` — what one *instance* actually rolled, off the wire, keyed by
+  instance uid. The instance is destroyed by the crush, so this is the only
+  record it ever existed. The wire wins here.
+- `item_effects` — what the item *type* can roll, from DofusDB, as min/max per
+  line. Averaging it estimates an unseen copy, which is what "is this item
+  worth breaking" needs before you own one. `item_break_weight` does that sum.
+
+Observed copies land 89–107% of their template average, which is the expected
+spread. **Item 779 sits at 50%** and its captured stats fall outside the
+template range entirely, so that id is not what the wire says it is — treat any
+conclusion resting on it as unsound.
 
 Compose services: `db`, `pgadmin`, `web` start by default; `web-dev` needs
 `--profile dev` (hot reload on 3001, via `docker compose watch`); `sniffer`
