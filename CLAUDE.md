@@ -161,6 +161,22 @@ docker exec dofus_db psql -U dofus -d dofus -c '\dt'
   `pgrep -f` matches the shell wrapper, so it reports "running" for a process
   that already died — check CPU time, not just existence.
 
+## Installed skills
+
+`.agents/skills/`, symlinked into `.claude/skills/`, pinned by
+`skills-lock.json`. Update with `npx skills update`.
+
+| skill | source | why it is here |
+|---|---|---|
+| `frontend-design` | anthropics/skills | `web/` is a real UI now, with a design system to hold to |
+| `systematic-debugging` | obra/superpowers | protocol work is debugging with no source; this repo's dead ends came from guessing instead of bisecting |
+| `test-driven-development` | obra/superpowers | fixtures here are real captured bytes and were twice invented by hand instead |
+| `verification-before-completion` | obra/superpowers | "it builds" has been claimed here when it did not |
+
+Deliberately not installed: the marketing, SEO and video generation skills
+(`ad-creative`, `hyperframes*`, `paywalls`, `pricing`, `seo-audit`, `video`,
+`social`, ...). Nothing in this repo ships to an audience.
+
 ## Conventions
 
 - Rust: no `unwrap()` on wire data — everything from the network is
