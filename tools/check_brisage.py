@@ -23,6 +23,11 @@ import sys
 
 API_ITEM = "https://api.dofusdb.fr/items/"
 
+# Fitted across every focused crush captured so far; see docs/brisage-model.md.
+# What it physically represents is unknown, which is why it is a named constant
+# and not folded into the formula.
+OFFSET = 2.5
+
 
 def psql(sql):
     out = subprocess.run(
@@ -146,6 +151,8 @@ def main():
     if not crushes:
         sys.exit("no crushes found in that range")
 
+    offsets = []
+
     ids = {details[c["uid"]]["item"] for c in crushes if c["uid"] in details}
     lv = levels(ids)
 
@@ -190,22 +197,54 @@ def main():
                 print("    focus effect %s not in the runes table\n" % eff); continue
             own = lines.get(eff, 0.0)
             act = actual.get(r["item"])
-            cands = {
-                "sheet   own/2 + total/2": own / 2 + total / 2,
-                "excl    own/2 + others/2": own / 2 + (total - own) / 2,
-                "full    own + total/2": own + total / 2,
-                "others  own + others/2": own + (total - own) / 2,
-            }
-            print("    focused on %s (weight %g), own line %.2f of total %.2f" % (
-                r["rune"], r["w"], own, total))
-            print("    actual: %s runes" % act)
-            for label, fw in cands.items():
-                pred = fw / r["w"] * (c["coeff"] / 100)
-                mark = ""
-                if act is not None:
-                    mark = "  <-- fits" if abs(pred - act) < 0.75 else ""
-                print("      %-26s %8.2f%s" % (label, pred, mark))
+            print("    focused on %s (weight %g, stat/rune %g), own line %.2f of total %.2f" % (
+                r["rune"], r["w"], r["spr"], own, total))
+            if act is None:
+                print("    no %s in the result — cannot measure\n" % r["rune"]); continue
+
+            # Focus yields only the focused rune, so the weight the game used is
+            # measurable. The count is an integer, so it pins a band not a point.
+            scale = r["w"] / (c["coeff"] / 100)
+            fw, half = act * scale, 0.5 * scale
+            print("    actual %s runes -> focus_weight %.2f, band [%.2f, %.2f]" % (
+                act, fw, fw - half, fw + half))
+            offsets.append((name, own, total, fw - half, fw + half, r))
+
+            for label, cand in (
+                ("sheet   own/2 + total/2", own / 2 + total / 2),
+                ("excl    own/2 + others/2", own / 2 + (total - own) / 2),
+                ("full    own + total/2", own + total / 2),
+                ("fitted  own/2 + total/2 + %.2f" % OFFSET, own / 2 + total / 2 + OFFSET),
+            ):
+                inside = fw - half <= cand <= fw + half
+                print("      %-30s %8.2f -> %6.2f runes%s" % (
+                    label, cand, cand / scale, "  <-- in band" if inside else ""))
         print()
+
+    if offsets:
+        report_offset(offsets)
+
+
+def report_offset(rows):
+    """Intersect the constant `c` in `own/2 + total/2 + c` across every focused
+    crush. A non-empty intersection means one constant explains them all."""
+    lo, hi = -1e9, 1e9
+    print("=== constant offset required by  focus_weight = own/2 + total/2 + c ===")
+    for name, own, total, b0, b1, r in rows:
+        base = own / 2 + total / 2
+        c0, c1 = b0 - base, b1 - base
+        lo, hi = max(lo, c0), min(hi, c1)
+        print("    %-24s focus %-12s c in [%8.2f, %8.2f]" % (name[:24], r["rune"], c0, c1))
+    if lo <= hi:
+        print("    %-24s %-18s c in [%8.2f, %8.2f]  consistent" % ("INTERSECTION", "", lo, hi))
+        spr = {r["spr"] for *_, r in rows}
+        if len(spr) == 1:
+            s = spr.pop()
+            print("    every sample focuses a stat/rune of %g, so a flat c and c = spr/2"
+                  " (%.2f) are indistinguishable — focus a different rune to separate them"
+                  % (s, s / 2))
+    else:
+        print("    %-24s %-18s EMPTY — no single constant fits" % ("INTERSECTION", ""))
 
 
 if __name__ == "__main__":
