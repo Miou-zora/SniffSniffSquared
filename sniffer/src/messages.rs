@@ -31,6 +31,10 @@ pub const DEFAULTS: &[(&str, &str)] = &[
     ("price_list", "kea"),
     // chat / trade-channel messages: author, timestamp, free text
     ("chat_message", "ksv"),
+    // breaking an item into runes ("brisage") — see interpret::crush_result
+    ("crush_result", "kfy"),
+    // item instance detail; supplies the uid -> type id the crush result lacks
+    ("item_detail", "kev"),
 ];
 
 /// Where an override file is looked for, relative to the working directory.

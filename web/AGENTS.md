@@ -37,6 +37,12 @@ Two tables, both defined in `../init.sql`:
   time series, not current state: `item_id`, `b1`, `b10`, `b100`, `b1000`
   (price for x1 / x10 / x100 / x1000), `seen_at`. A `0` means that batch size
   was not on sale.
+- **`crushes`** + **`crush_runes`** — item crushing ("brisage"). One row per
+  crush with `item_id`, `yield_percent` (0-100) and `seen_at`; the runes it
+  produced are rows in `crush_runes` (`rune_id`, `quantity`). Rune ids are
+  DofusDB item ids too, so they resolve the same way. `focus_rune_id` exists
+  but is always NULL — focus has not been located on the wire yet. `item_id`
+  is nullable when the uid could not be mapped.
 - **`packets`** — every captured message, decoded or not. Large, append-only,
   and mostly of interest for protocol work rather than the UI.
 

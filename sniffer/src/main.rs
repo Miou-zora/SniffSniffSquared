@@ -29,7 +29,10 @@ use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::ipv6::Ipv6Packet;
 use pnet::packet::tcp::TcpPacket;
 use pnet::packet::Packet;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::net::IpAddr;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
@@ -115,6 +118,36 @@ CREATE INDEX IF NOT EXISTS idx_prices_item ON prices (item_id, seen_at DESC)";
 const PRICES_INSERT: &str = "INSERT INTO prices
     (item_id, category, listing_id, b1, b10, b100, b1000) VALUES ($1,$2,$3,$4,$5,$6,$7)";
 
+/// Crushes ("brisage") and the runes each produced. Two tables because one
+/// crush yields many rune types — up to 8 observed.
+///
+/// `item_id` is nullable: the crush result carries only the item's instance
+/// uid, and the type id comes from an `item_detail` message seen earlier. If
+/// capture started mid-session that mapping may be missing.
+///
+/// `focus_rune_id` is nullable and currently always NULL — focus is not sent
+/// per-crush and has not been located on the wire. See RUNBOOK part 3.
+const CRUSH_DDL: &str = "CREATE TABLE IF NOT EXISTS crushes (
+    id            BIGSERIAL PRIMARY KEY,
+    seen_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    item_uid      BIGINT NOT NULL,
+    item_id       BIGINT,
+    yield_percent REAL NOT NULL,
+    focus_rune_id BIGINT
+);
+CREATE TABLE IF NOT EXISTS crush_runes (
+    crush_id BIGINT NOT NULL REFERENCES crushes(id) ON DELETE CASCADE,
+    rune_id  BIGINT NOT NULL,
+    quantity BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_crushes_item ON crushes (item_id, seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_crush_runes ON crush_runes (crush_id)";
+
+const CRUSH_INSERT: &str =
+    "INSERT INTO crushes (item_uid, item_id, yield_percent) VALUES ($1,$2,$3) RETURNING id";
+const CRUSH_RUNE_INSERT: &str =
+    "INSERT INTO crush_runes (crush_id, rune_id, quantity) VALUES ($1,$2,$3)";
+
 /// Matches the `packets` table in init.sql. Re-declared here so the sniffer
 /// works against a database that was created before that table existed.
 const PACKETS_DDL: &str = "CREATE TABLE IF NOT EXISTS packets (
@@ -162,6 +195,46 @@ fn build_dispatch() -> Dispatcher {
             });
         }
     }
+    // Crushes. `item_detail` arrives first carrying uid -> item type id; the
+    // crush result that follows has only the uid, so the mapping is cached to
+    // join them. Bounded so a long session cannot grow it without limit.
+    let uid_to_item: Rc<RefCell<HashMap<u64, u64>>> = Rc::new(RefCell::new(HashMap::new()));
+    if let Some(detail_key) = messages::keymap().key("item_detail") {
+        let cache = uid_to_item.clone();
+        d.on(detail_key, move |e| {
+            if let Some((uid, item)) = interpret::item_detail(e.body) {
+                let mut m = cache.borrow_mut();
+                if m.len() > 4096 {
+                    m.clear();
+                }
+                m.insert(uid, item);
+            }
+        });
+    }
+    if let Some(crush_key) = messages::keymap().key("crush_result") {
+        let cache = uid_to_item.clone();
+        match db_client_with(CRUSH_DDL) {
+            Some(mut client) => {
+                println!("[db] connected; crush_result ({crush_key}) -> tables crushes/crush_runes");
+                d.on(crush_key, move |e| {
+                    if let Some(c) = interpret::crush_result(e.body) {
+                        let item = cache.borrow().get(&c.item_uid).copied();
+                        if let Err(err) = insert_crush(&mut client, &c, item) {
+                            eprintln!("[db] crush insert failed: {err}");
+                        }
+                    }
+                });
+            }
+            None => {
+                d.on(crush_key, |e| {
+                    if let Some(c) = interpret::crush_result(e.body) {
+                        eprintln!("[cb crush] {c}");
+                    }
+                });
+            }
+        }
+    }
+
     // Archive every message, interpreted or not. A second connection because
     // postgres::Client is not shareable, and this is the write we least want
     // to lose: it is what makes offline re-analysis possible without the game.
@@ -224,6 +297,29 @@ fn insert_packet(
         &[&e.src, &e.dst, &e.key, &e.body, &vars, &packs],
     )?;
     Ok(())
+}
+
+/// One crush plus its rune rows, in a transaction so a partial crush cannot
+/// land if the rune inserts fail.
+fn insert_crush(
+    client: &mut postgres::Client,
+    c: &interpret::CrushResult,
+    item_id: Option<u64>,
+) -> Result<(), postgres::Error> {
+    let mut tx = client.transaction()?;
+    let row = tx.query_one(
+        CRUSH_INSERT,
+        &[
+            &(c.item_uid as i64),
+            &item_id.map(|v| v as i64),
+            &(c.yield_fraction * 100.0),
+        ],
+    )?;
+    let crush_id: i64 = row.get(0);
+    for (rune, qty) in &c.runes {
+        tx.execute(CRUSH_RUNE_INSERT, &[&crush_id, &(*rune as i64), &(*qty as i64)])?;
+    }
+    tx.commit()
 }
 
 /// One row per observed price ladder, so history is preserved.

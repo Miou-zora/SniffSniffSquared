@@ -30,3 +30,23 @@ CREATE TABLE IF NOT EXISTS prices (
 );
 
 CREATE INDEX IF NOT EXISTS idx_prices_item ON prices (item_id, seen_at DESC);
+
+-- Crushing an item into runes ("brisage"), decoded from `crush_result`.
+-- Two tables because one crush yields many rune types (8 observed).
+CREATE TABLE IF NOT EXISTS crushes (
+    id            BIGSERIAL PRIMARY KEY,
+    seen_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    item_uid      BIGINT NOT NULL,      -- instance id of the destroyed item
+    item_id       BIGINT,               -- type id; NULL if the uid was never mapped
+    yield_percent REAL NOT NULL,        -- 0-100, from a float32 fraction on the wire
+    focus_rune_id BIGINT                -- always NULL for now; focus not yet located
+);
+
+CREATE TABLE IF NOT EXISTS crush_runes (
+    crush_id BIGINT NOT NULL REFERENCES crushes(id) ON DELETE CASCADE,
+    rune_id  BIGINT NOT NULL,           -- DofusDB item id of the rune
+    quantity BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_crushes_item ON crushes (item_id, seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_crush_runes ON crush_runes (crush_id);

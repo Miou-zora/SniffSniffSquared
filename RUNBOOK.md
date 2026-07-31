@@ -77,6 +77,8 @@ never uses.
 |---|---|---|
 | `price_list` | `kea` | marketplace price ladder: x1 / x10 / x100 / x1000 |
 | `chat_message` | `ksv` | chat / trade channel: author, timestamp, free text |
+| `crush_result` | `kfy` | crushing an item into runes: rune types + counts, yield % |
+| `item_detail` | `kev` | item instance uid -> type id; joins the above to an item |
 
 106 distinct keys observed in one session; `idd` is the most frequent and is
 still unidentified. Code refers to messages by the left-hand column only — see
@@ -701,6 +703,30 @@ This closes the "item names" question: the sniffer stores ids only, and the web
 app enriches at read time. Keeping the network dependency out of the capture
 path means a DofusDB outage degrades the UI rather than interrupting
 collection.
+
+### Open: where is the crush "focus" (focalisation)?
+
+`crush_result` gives the runes, quantities and yield. It does **not** carry the
+focus, and neither does the client request.
+
+Ruled out across three real crushes (two focused on Vi, one unfocused):
+
+- the result messages are structurally identical whether focused or not
+- all three client requests are byte-identical in shape: `{1: 1, 2: <uid>}`
+- no client message between the unfocused and the focused crush mentions the
+  focused rune id (1523), and for two of the three crushes there were **no**
+  client messages at all in the 40 packets preceding the request
+
+So focus is not sent per-crush. It is presumably persisted server-side from an
+earlier UI action, outside the capture window.
+
+Next experiment, and it is cheap: run the sniffer and **toggle the focus in the
+UI several times without crushing anything**. That action alone should produce a
+client message; `tools/identify.py` will name the key. Then check whether the
+value is the rune id (1523) or a characteristic id — Vitality is `char11` in
+DofusDB terms, and the ids seen in `item_detail` effects were 23, 22, 16, 2, 30.
+
+`crushes.focus_rune_id` exists and stays NULL until then.
 
 ### Dead ends — do not repeat these
 
