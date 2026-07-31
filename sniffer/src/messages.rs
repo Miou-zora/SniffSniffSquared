@@ -37,6 +37,9 @@ pub const DEFAULTS: &[(&str, &str)] = &[
     ("item_detail", "kev"),
     // the client's "crush it" command — carries the focus, which the result does not
     ("crush_request", "ker"),
+    // putting an item into the breaker's slot; carries only the instance uid,
+    // the type arrives in the item_detail that answers it
+    ("crush_slot_put", "kch"),
 ];
 
 /// Where an override file is looked for, relative to the working directory.

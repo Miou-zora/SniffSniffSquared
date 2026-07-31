@@ -37,6 +37,9 @@ Two tables, both defined in `../init.sql`:
   time series, not current state: `item_id`, `b1`, `b10`, `b100`, `b1000`
   (price for x1 / x10 / x100 / x1000), `seen_at`. A `0` means that batch size
   was not on sale.
+- **`crush_placements`** — an item put into the breaker: `item_id`,
+  `placed_at`. A placement does not imply a crush; the item may sit there and
+  never be broken. Pair it with `crushes` by time if you need the outcome.
 - **`crushes`** — item crushing ("brisage"). One row per crush: `item_id`,
   `yield_percent` (0-100), `seen_at`. That is the whole table, and it is
   deliberate: the runes follow from the item's stats and the coefficient, and

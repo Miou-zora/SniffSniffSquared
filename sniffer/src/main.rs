@@ -121,7 +121,12 @@ const PRICES_INSERT: &str = "INSERT INTO prices
 /// Crushes ("brisage") and the runes each produced. Two tables because one
 /// crush yields many rune types — up to 8 observed.
 ///
-/// The yield varies per crush and is the whole point of the table. Focus is
+/// `crush_placements` records an item being put into the breaker. Placement and
+/// crush are separate events — an item can sit in the slot and never be broken,
+/// which is exactly what happens while choosing a focus — so it gets its own
+/// table rather than a column on `crushes`.
+///
+/// The yield varies per crush and is the whole point of that table. Focus is
 /// deliberately not recorded: it does not affect the yield, so the same item
 /// crushed with any focus, or none, produces the same percentage.
 ///
@@ -138,9 +143,16 @@ ALTER TABLE crushes DROP COLUMN IF EXISTS item_uid;
 ALTER TABLE crushes DROP COLUMN IF EXISTS focus_rune_id;
 ALTER TABLE crushes DROP COLUMN IF EXISTS focus_effect_id;
 DROP TABLE IF EXISTS crush_runes;
+CREATE TABLE IF NOT EXISTS crush_placements (
+    id       BIGSERIAL PRIMARY KEY,
+    placed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    item_id  BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_placements_item ON crush_placements (item_id, placed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_crushes_item ON crushes (item_id, seen_at DESC)";
 
 const CRUSH_INSERT: &str = "INSERT INTO crushes (item_id, yield_percent) VALUES ($1,$2)";
+const PLACEMENT_INSERT: &str = "INSERT INTO crush_placements (item_id) VALUES ($1)";
 
 /// Matches the `packets` table in init.sql. Re-declared here so the sniffer
 /// works against a database that was created before that table existed.
@@ -193,15 +205,42 @@ fn build_dispatch() -> Dispatcher {
     // crush result that follows has only the uid, so the mapping is cached to
     // join them. Bounded so a long session cannot grow it without limit.
     let uid_to_item: Rc<RefCell<HashMap<u64, u64>>> = Rc::new(RefCell::new(HashMap::new()));
+
+    // A placement names only the uid; the type arrives in the item_detail that
+    // answers it. So remember the uid here and write the row when that reply
+    // resolves it.
+    let awaiting_placement: Rc<RefCell<Option<u64>>> = Rc::new(RefCell::new(None));
+    if let Some(put_key) = messages::keymap().key("crush_slot_put") {
+        let pending = awaiting_placement.clone();
+        d.on(put_key, move |e| {
+            *pending.borrow_mut() = interpret::crush_slot_put(e.body);
+        });
+    }
+
+    let mut placement_db = db_client_with(CRUSH_DDL);
+    if placement_db.is_some() {
+        println!("[db] connected; crush_slot_put -> table crush_placements");
+    }
     if let Some(detail_key) = messages::keymap().key("item_detail") {
         let cache = uid_to_item.clone();
+        let pending = awaiting_placement.clone();
         d.on(detail_key, move |e| {
             if let Some((uid, item)) = interpret::item_detail(e.body) {
-                let mut m = cache.borrow_mut();
-                if m.len() > 4096 {
-                    m.clear();
+                {
+                    let mut m = cache.borrow_mut();
+                    if m.len() > 4096 {
+                        m.clear();
+                    }
+                    m.insert(uid, item);
                 }
-                m.insert(uid, item);
+                // taken, so one placement can only ever produce one row
+                if pending.borrow_mut().take_if(|p| *p == uid).is_some() {
+                    if let Some(client) = placement_db.as_mut() {
+                        if let Err(err) = client.execute(PLACEMENT_INSERT, &[&(item as i64)]) {
+                            eprintln!("[db] placement insert failed: {err}");
+                        }
+                    }
+                }
             }
         });
     }

@@ -50,3 +50,14 @@ CREATE TABLE IF NOT EXISTS crushes (
 
 
 CREATE INDEX IF NOT EXISTS idx_crushes_item ON crushes (item_id, seen_at DESC);
+
+-- An item being put into the breaker's slot. Separate from `crushes` because
+-- the two are separate events: an item can sit in the slot and never be broken,
+-- which is what happens while a focus is being chosen.
+CREATE TABLE IF NOT EXISTS crush_placements (
+    id        BIGSERIAL PRIMARY KEY,
+    placed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    item_id   BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_placements_item ON crush_placements (item_id, placed_at DESC);

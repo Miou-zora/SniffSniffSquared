@@ -171,6 +171,7 @@ name it in `messages::DEFAULTS`, parse it in `interpret.rs` matching on the
 | `crush_result` | `kfy` | brisage yield -> `crushes` (item_id + yield only). Runes and focus parsed for display but NOT stored: runes derive from stats+coefficient, and focus does not change the coefficient |
 | `item_detail` | `kev` | uid -> item type id; cached to fill `crushes.item_id` |
 | `crush_request` | `ker` | the crush command; field 1 = focus effect id, absent if none. Display only |
+| `crush_slot_put` | `kch` | item put into the breaker -> `crush_placements`. Carries only the uid; the type comes from the `item_detail` that answers it |
 | `price_list_legacy` | `kdh` | the 2026-07-10 price list; gone from the wire, kept for tests |
 
 Next up (RUNBOOK part 3 items 5-6): identify `iuz` — 3 seen, 68-80 KB each,

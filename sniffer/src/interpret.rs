@@ -23,6 +23,7 @@ pub fn interpret(key: &str, body: &[u8]) -> Option<String> {
         "crush_result" => crush_result(body).map(|c| c.to_string()),
         // Shown in --all output but deliberately not stored: the focus does
         // not change the yield, so it says nothing the crush row needs.
+        "crush_slot_put" => crush_slot_put(body).map(|uid| format!("placed in breaker {{ uid={uid} }}")),
         "crush_request" => Some(match crush_focus(body) {
             Some(effect) => format!("crush requested {{ focus effect {effect} }}"),
             None => "crush requested { no focus }".to_string(),
@@ -35,7 +36,10 @@ pub fn interpret(key: &str, body: &[u8]) -> Option<String> {
 pub fn is_known_key(key: &str) -> bool {
     matches!(
         messages::keymap().name(key),
-        Some("price_list") | Some("crush_result") | Some("crush_request")
+        Some("price_list")
+            | Some("crush_result")
+            | Some("crush_request")
+            | Some("crush_slot_put")
     )
 }
 
@@ -149,6 +153,33 @@ pub fn crush_result(body: &[u8]) -> Option<CrushResult> {
         return None;
     }
     Some(out)
+}
+
+// ---- crush_slot_put: item placed into the breaker --------------------------
+//
+// Sent when an item is dropped into the breaker's slot, and answered by an
+// `item_detail` for the same uid. Confirmed by a placement with no crush after
+// it: the item sat in the slot while the focus was changed and was never broken.
+//
+//   field 1  varint   always 1 in every sample
+//   field 2  varint   instance uid of the item placed
+
+/// The instance uid of an item just put into the breaker.
+pub fn crush_slot_put(body: &[u8]) -> Option<u64> {
+    let mut r = Reader::new(body);
+    let mut uid = None;
+    while !r.eof() {
+        let (field, wt) = r.tag()?;
+        match (field, wt) {
+            (2, WireType::Varint) => uid = Some(r.varint()?),
+            (_, wt) => {
+                if !r.skip(wt) {
+                    return None;
+                }
+            }
+        }
+    }
+    uid
 }
 
 // ---- crush_request: the client's "crush it" command ------------------------
@@ -487,6 +518,16 @@ mod tests {
     const REQ_FOCUS_VI: &[u8] = &[0x08, 0x7d, 0x20, 0x01, 0x28, 0x01]; // Baton d'Oubli
     const REQ_NO_FOCUS: &[u8] = &[0x20, 0x01, 0x28, 0x01]; // Arc Anum
     const REQ_FOCUS_VI2: &[u8] = &[0x08, 0x7d, 0x20, 0x01, 0x28, 0x02]; // Anneau Bsene
+
+    // real placement: the item that was loaded into the breaker and never broken
+    const SLOT_PUT: &[u8] = &[0x08, 0x01, 0x10, 0x95, 0xa9, 0xc3, 0x3c];
+
+    #[test]
+    fn slot_put_reads_the_uid() {
+        assert_eq!(crush_slot_put(SLOT_PUT), Some(126932117));
+        // a crush request is not a placement
+        assert_eq!(crush_slot_put(REQ_NO_FOCUS), None);
+    }
 
     #[test]
     fn crush_focus_is_read_when_set() {

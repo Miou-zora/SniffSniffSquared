@@ -726,8 +726,11 @@ coefficient. Only the yield varies per crush, so `crushes` records only
 
 Two corrections this produced, both worth knowing:
 
-- **`kch` is "select item", not "crush it".** A `kch` with no crush following
-  produced only an `item_detail` and no result. The actual trigger is `ker`.
+- **`kch` puts an item into the breaker; it does not crush it.** A `kch` with no
+  crush following produced only an `item_detail` and no result — the item sat in
+  the slot while the focus was changed. The actual trigger is `ker`. The full
+  sequence is: `kch` (place) -> `kev` (details) -> ... -> `ker` (crush) ->
+  `ivf` (removed) -> `kfy` (result).
 - **Toggling focus in the UI sends nothing.** A capture across four deliberate
   focus changes contained only heartbeats; the focus is transmitted with the
   crush command, not when it is chosen. An experiment designed to watch the
