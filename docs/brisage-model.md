@@ -159,9 +159,32 @@ Two things this pins down:
   the coefficient from `crushes.yield_percent` — the whole input set is
   already captured
 
-The same check on the focused Anneau Bsène predicts 33.5 Rune Vi against 32
-actual. Larger than the rounding seen above, so the focus branch is close but
-not confirmed to the same standard; one more focused crush would settle it.
+### The focus branch is NOT confirmed
+
+The no-focus case above is solid. The focused case is not, and the sheet's
+formula undershoots on both focused crushes in the capture:
+
+| crush | actual | `own/2 + total/2` (the sheet) | `own/2 + others/2` | `own + total/2` |
+|---|---|---|---|---|
+| Anneau Bsène, 47.85% | 32 | 30.55 | 29.19 | **31.92** |
+| Bâton d'Oubli, 76.94% | 19 | 17.28 | 16.52 | **18.04** |
+
+`own + total/2` — the focused line counted in full, plus half of everything
+including itself — fits best, and is near-exact on the Anneau. Excluding the
+focused line from the sum (middle column) moves *away* from the observed
+values, so that is not the correction.
+
+Unresolved, and enough to explain the remaining gap on the Bâton:
+
+- **Negative stats.** The Bâton carries effect 155, `-{n} Intelligence`, value
+  30. Excluding it gives 18.04 against 19 actual; counting it negatively gives
+  12.8; counting its absolute value gives 23.2. Excluding is closest, none is
+  right. How the game treats maluses is not known.
+- Two samples is not enough to choose a formula. More focused crushes,
+  ideally on items with no negative stats, would settle it.
+
+Until then: use the no-focus path with confidence, and treat any focused
+prediction as approximate.
 
 ## Caveats
 
