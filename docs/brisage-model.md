@@ -117,16 +117,17 @@ The sniffer already supplies most of it:
 
 | the model needs | where it comes from |
 |---|---|
-| item level | DofusDB, via `item_id` |
-| item's stat values | **already captured** — `item_detail` carries them |
+| item level | the `items` table, filled by `tools/import_items.py` |
+| item's stat values | the `item_stats` table, written live from `item_detail` |
 | coefficient | **already captured** — `crushes.yield_percent` |
 | rune prices | **already captured** — the `prices` table |
 | rune weights | the `runes` table, loaded by `tools/import_runes.py` |
 | item cost | the `prices` table, or `ItemWorth` by hand |
 
 `item_detail` decodes to `{effect_id, value}` pairs — the Anneau Bsène in the
-capture carries effect 125 (Vitalité) at 28, plus four more. Only the uid and
-type id are currently extracted; the effects are parsed and discarded.
+capture carries effect 125 (Vitalité) at 28, plus five more. These are stored in
+`item_stats`, keyed by instance uid, because they are per-instance rolls and the
+instance does not survive the crush.
 
 **The effect id to rune mapping is built by `tools/import_runes.py`**, which
 loads this table into Postgres and resolves each rune against DofusDB:

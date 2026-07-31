@@ -87,9 +87,26 @@ def item_stats(body):
 
 
 def levels(item_ids):
-    import requests
+    """item id -> (level, name), from the `items` table, falling back to DofusDB.
+
+    Prefers the database so a run needs no network and stays reproducible;
+    tools/import_items.py is what fills it."""
     out = {}
-    for i in item_ids:
+    if item_ids:
+        for iid, lvl, name in psql(
+            "SELECT item_id, level, COALESCE(name_fr,'?') FROM items "
+            "WHERE item_id IN (%s) AND level IS NOT NULL"
+            % ",".join(str(int(i)) for i in item_ids)
+        ):
+            out[int(iid)] = (int(lvl), name)
+
+    missing = [i for i in item_ids if i not in out]
+    if not missing:
+        return out
+    print("  (%d item(s) not in the `items` table; asking DofusDB. "
+          "Run tools/import_items.py to cache them.)" % len(missing))
+    import requests
+    for i in missing:
         try:
             r = requests.get(API_ITEM + str(i), timeout=20)
             r.raise_for_status()
@@ -238,14 +255,18 @@ def report_offset(rows):
         print("    %-24s focus %-12s c in [%8.2f, %8.2f]" % (name[:24], r["rune"], c0, c1))
     if lo <= hi:
         print("    %-24s %-18s c in [%8.2f, %8.2f]  consistent" % ("INTERSECTION", "", lo, hi))
-        spr = {r["spr"] for *_, r in rows}
-        if len(spr) == 1:
-            s = spr.pop()
-            print("    every sample focuses a stat/rune of %g, so a flat c and c = spr/2"
-                  " (%.2f) are indistinguishable — focus a different rune to separate them"
-                  % (s, s / 2))
     else:
         print("    %-24s %-18s EMPTY — no single constant fits" % ("INTERSECTION", ""))
+    # c should be 0: the sheet's formula is complete once every line carries its
+    # +1. A non-zero c means something is missing from `total` -- an unmapped
+    # stat, or a wrong item level -- not that the formula needs a constant. That
+    # mistake has been made here before; see docs/brisage-model.md.
+    if lo <= 0 <= hi:
+        print("    c = 0 is inside the intersection: the model needs no offset.")
+    else:
+        print("    c = 0 is OUTSIDE [%.2f, %.2f]. Something is missing from `total` for at"
+              " least one crush — suspect an unmapped stat or a wrong item level, not the"
+              " formula." % (lo, hi))
 
 
 if __name__ == "__main__":

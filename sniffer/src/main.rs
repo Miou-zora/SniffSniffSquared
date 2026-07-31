@@ -154,6 +154,33 @@ CREATE INDEX IF NOT EXISTS idx_crushes_item ON crushes (item_id, seen_at DESC)";
 const CRUSH_INSERT: &str = "INSERT INTO crushes (item_id, yield_percent) VALUES ($1,$2)";
 const PLACEMENT_INSERT: &str = "INSERT INTO crush_placements (item_id) VALUES ($1)";
 
+/// Mirrors `item_stats` and `items` in init.sql, for databases created before
+/// they existed. `items` is created but never written here — the sniffer takes
+/// no network dependency, so names are filled offline by tools/import_items.py.
+const ITEM_STATS_DDL: &str = "CREATE TABLE IF NOT EXISTS item_stats (
+    uid       BIGINT NOT NULL,
+    effect_id BIGINT NOT NULL,
+    item_id   BIGINT NOT NULL,
+    value     BIGINT NOT NULL,
+    seen_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (uid, effect_id)
+);
+CREATE INDEX IF NOT EXISTS idx_item_stats_item ON item_stats (item_id);
+CREATE TABLE IF NOT EXISTS items (
+    item_id    BIGINT PRIMARY KEY,
+    name_fr    TEXT,
+    level      INT,
+    type_id    BIGINT,
+    type_fr    TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)";
+
+// The same instance is described again every time it is handled, so a repeat is
+// expected and is not new information. Overwrite rather than accumulate.
+const ITEM_STAT_INSERT: &str = "INSERT INTO item_stats (uid, effect_id, item_id, value)
+    VALUES ($1,$2,$3,$4)
+    ON CONFLICT (uid, effect_id) DO UPDATE SET value = EXCLUDED.value, seen_at = now()";
+
 /// Matches the `packets` table in init.sql. Re-declared here so the sniffer
 /// works against a database that was created before that table existed.
 const PACKETS_DDL: &str = "CREATE TABLE IF NOT EXISTS packets (
@@ -221,11 +248,26 @@ fn build_dispatch() -> Dispatcher {
     if placement_db.is_some() {
         println!("[db] connected; crush_slot_put -> table crush_placements");
     }
+    let mut stats_db = db_client_with(ITEM_STATS_DDL);
+    if stats_db.is_some() {
+        println!("[db] connected; item_detail stat lines -> table item_stats");
+    }
     if let Some(detail_key) = messages::keymap().key("item_detail") {
         let cache = uid_to_item.clone();
         let pending = awaiting_placement.clone();
         d.on(detail_key, move |e| {
-            if let Some((uid, item)) = interpret::item_detail(e.body) {
+            if let Some(detail) = interpret::item_detail_full(e.body) {
+                let (uid, item) = (detail.uid, detail.item_id);
+                if let Some(client) = stats_db.as_mut() {
+                    for (effect, value) in &detail.stats {
+                        let row: [&(dyn postgres::types::ToSql + Sync); 4] =
+                            [&(uid as i64), &(*effect as i64), &(item as i64), value];
+                        if let Err(err) = client.execute(ITEM_STAT_INSERT, &row) {
+                            eprintln!("[db] item_stats insert failed: {err}");
+                            break;
+                        }
+                    }
+                }
                 {
                     let mut m = cache.borrow_mut();
                     if m.len() > 4096 {

@@ -246,17 +246,42 @@ pub fn crush_focus(body: &[u8]) -> Option<u64> {
 
 // ---- item_detail: instance uid -> item type id -----------------------------
 //
-// Sent just before a crush result, describing the item about to be destroyed.
-// Only the uid -> type id mapping is extracted; the rest is the item's stat
-// list, which nothing consumes yet.
+// Sent just before a crush result, describing the item about to be destroyed,
+// and also whenever an item is put into the breaker's slot.
 //
 //   field 2  message
 //       field 4  message
 //           field 1  varint   instance uid
 //           field 4  varint   item type id  (joins to DofusDB, and to prices)
+//           field 5  message  REPEATED, one per stat line
+//               field 8  varint  the rolled value
+//               field 9  varint  effect id  (joins to runes.effect_id)
+//
+// The stat lines are the item's *rolled* values, which is the reason to keep
+// them: DofusDB's template for an item gives the possible range, and for at
+// least one captured item (779) the range does not even contain what the wire
+// reported. The wire is the ground truth for what a specific item actually
+// carried, and it is the only source for it — the instance is destroyed by the
+// crush that follows.
+//
+// Note the field order inside a stat line is value *then* effect id, which
+// reads backwards.
+
+/// One item instance as the server described it.
+pub struct ItemDetail {
+    pub uid: u64,
+    pub item_id: u64,
+    /// `(effect id, rolled value)`, in wire order.
+    pub stats: Vec<(u64, i64)>,
+}
 
 /// Extract `(instance uid, item type id)` if this message carries both.
 pub fn item_detail(body: &[u8]) -> Option<(u64, u64)> {
+    item_detail_full(body).map(|d| (d.uid, d.item_id))
+}
+
+/// The full description, stat lines included.
+pub fn item_detail_full(body: &[u8]) -> Option<ItemDetail> {
     let mut r = Reader::new(body);
     while !r.eof() {
         let (field, wt) = r.tag()?;
@@ -269,11 +294,20 @@ pub fn item_detail(body: &[u8]) -> Option<(u64, u64)> {
                     let lvl3 = r2.len_field()?;
                     let mut r3 = Reader::new(lvl3);
                     let (mut uid, mut item) = (0u64, 0u64);
+                    let mut stats = Vec::new();
                     while !r3.eof() {
                         let (f3, w3) = r3.tag()?;
                         match (f3, w3) {
                             (1, WireType::Varint) => uid = r3.varint()?,
                             (4, WireType::Varint) => item = r3.varint()?,
+                            (5, WireType::Len) => {
+                                // A malformed stat line should not discard the
+                                // uid and type, which are what the crush needs.
+                                match r3.len_field().and_then(stat_line) {
+                                    Some(line) => stats.push(line),
+                                    None => break,
+                                }
+                            }
                             (_, w3) => {
                                 if !r3.skip(w3) {
                                     break;
@@ -282,7 +316,7 @@ pub fn item_detail(body: &[u8]) -> Option<(u64, u64)> {
                         }
                     }
                     if uid != 0 && item != 0 {
-                        return Some((uid, item));
+                        return Some(ItemDetail { uid, item_id: item, stats });
                     }
                 } else if !r2.skip(w2) {
                     return None;
@@ -293,6 +327,25 @@ pub fn item_detail(body: &[u8]) -> Option<(u64, u64)> {
         }
     }
     None
+}
+
+/// `(effect id, value)` from one repeated field-5 stat line.
+fn stat_line(body: &[u8]) -> Option<(u64, i64)> {
+    let mut r = Reader::new(body);
+    let (mut value, mut effect) = (None, None);
+    while !r.eof() {
+        let (field, wt) = r.tag()?;
+        match (field, wt) {
+            (8, WireType::Varint) => value = Some(r.varint()? as i64),
+            (9, WireType::Varint) => effect = Some(r.varint()?),
+            (_, wt) => {
+                if !r.skip(wt) {
+                    return None;
+                }
+            }
+        }
+    }
+    Some((effect?, value?))
 }
 
 // ---- price_list: marketplace price ladder ---------------------------------
@@ -608,6 +661,30 @@ mod tests {
     fn item_detail_maps_uid_to_type() {
         // the same uid the ring crush reports, resolving to Anneau Bsene
         assert_eq!(item_detail(ITEM_DETAIL_RING), Some((126416770, 7123)));
+    }
+
+    #[test]
+    fn item_detail_reads_every_stat_line() {
+        let d = item_detail_full(ITEM_DETAIL_RING).expect("ring decodes");
+        assert_eq!((d.uid, d.item_id), (126416770, 7123));
+        // Anneau Bsene as the wire described it: Vitalite 28, Dommage 2,
+        // Soin 2, Re Per Feu 2, Re Per Eau 2, Invocation 1.
+        assert_eq!(
+            d.stats,
+            vec![(125, 28), (112, 2), (178, 2), (213, 2), (211, 2), (182, 1)]
+        );
+    }
+
+    #[test]
+    fn item_detail_without_stats_still_resolves() {
+        // truncating to the uid and type must not lose them: the crush that
+        // follows needs the type and does not care about the stats
+        let head: &[u8] = &[
+            0x12, 0x0c, 0x08, 0x3f, 0x22, 0x08, 0x08, 0x82, 0xef, 0xa3, 0x3c, 0x20, 0xd3, 0x37,
+        ];
+        let d = item_detail_full(head).expect("head decodes");
+        assert_eq!((d.uid, d.item_id), (126416770, 7123));
+        assert!(d.stats.is_empty());
     }
 
     #[test]

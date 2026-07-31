@@ -39,10 +39,16 @@ run from `sniffer/`** (it resolves `keymap.json` and `proto/` relative to cwd).
 
 ```
 docker-compose.yml  postgres + pgadmin + web; `sniffer` service is Linux-only
-init.sql            schema both apps depend on (packets, prices)
+init.sql            schema both apps depend on (packets, prices, crushes,
+                    crush_placements, item_stats, items, runes)
 docs/               observations.md — annotated real captures
                     brisage-model.md + brisage-runes.json — the kamas maths,
                     transcribed from Book 3.xlsx (kept at the repo root)
+tools/              import_runes.py   seeds `runes` from brisage-runes.json
+                    import_items.py   backfills `item_stats` from `packets`
+                                      and names ids into `items` via DofusDB
+                    check_brisage.py  runs the brisage model over every
+                                      captured crush, predicted vs actual
 RUNBOOK.md          the guide. Start here for anything protocol-related.
 
 sniffer/            the Rust capture app — RUN IT FROM THIS DIRECTORY
@@ -62,8 +68,17 @@ web/                Next.js 16 front end (scaffolded, no features yet)
 
 Item ids are **DofusDB ids** (verified: 2609 = Carapace Verte, typeId 107 =
 our decoded category), so `https://api.dofusdb.fr/items/<id>` resolves names,
-icons and types with no mapping table. Enrichment happens read-side in `web/`;
-the sniffer stays free of network dependencies.
+icons and types with no mapping table. **The sniffer never calls it** — the
+capture path takes no network dependency, so a DofusDB outage can never cost
+packets. Enrichment is either read-side in `web/` or an offline step
+(`tools/import_items.py`, which fills the `items` table).
+
+**For an item's stat values the wire wins, not DofusDB.** `item_stats` records
+what the server actually said a specific instance carried, keyed by instance
+uid — two copies of an item roll different values. DofusDB's `effects` are the
+*template range* for the item type, and for at least one captured item (779)
+that range does not contain the observed value. The instance is destroyed by
+the crush, so the wire is the only record it ever existed.
 
 Compose services: `db`, `pgadmin`, `web` start by default; `web-dev` needs
 `--profile dev` (hot reload on 3001, via `docker compose watch`); `sniffer`

@@ -62,6 +62,41 @@ CREATE TABLE IF NOT EXISTS crush_placements (
 
 CREATE INDEX IF NOT EXISTS idx_placements_item ON crush_placements (item_id, placed_at DESC);
 
+-- The stat lines an item instance actually carried, straight off the wire.
+--
+-- This is the ground truth for an item's rolled values, and the only source for
+-- them: the instance is usually destroyed by the crush that follows, and
+-- DofusDB gives only the possible range for the item *type* -- a range that for
+-- at least one captured item does not contain what the wire reported.
+--
+-- Keyed by instance uid, not item type: two copies of the same item roll
+-- different values, and that difference is the whole point. `item_id` is
+-- carried alongside so stats can be grouped by type without a join.
+CREATE TABLE IF NOT EXISTS item_stats (
+    uid       BIGINT NOT NULL,        -- instance uid, unique to one copy
+    effect_id BIGINT NOT NULL,        -- joins to runes.effect_id
+    item_id   BIGINT NOT NULL,        -- type id, joins to items.item_id
+    value     BIGINT NOT NULL,        -- the rolled value
+    seen_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (uid, effect_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_item_stats_item ON item_stats (item_id);
+
+-- Item name/level/type, resolved from DofusDB by tools/import_items.py.
+--
+-- Deliberately not filled by the sniffer: the capture path stays free of
+-- network dependencies, so enrichment is a separate offline step. Rows appear
+-- only for item ids that were actually observed.
+CREATE TABLE IF NOT EXISTS items (
+    item_id    BIGINT PRIMARY KEY,
+    name_fr    TEXT,
+    level      INT,
+    type_id    BIGINT,
+    type_fr    TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Rune reference: game constants from docs/brisage-runes.json, plus the DofusDB
 -- ids that join them to captured data. Loaded by tools/import_runes.py, which
 -- also creates this table; declared here so the schema is readable in one place.
