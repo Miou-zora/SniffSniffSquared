@@ -42,3 +42,6 @@ sniffer/target/
 sniffer/reference/il2cpp-dump-20260710/dump.cs
 sniffer/reference/il2cpp-dump-20260710/il2cpp.h
 sniffer/reference/il2cpp-dump-20260710/script.json
+
+# Python bytecode (the ui-ux-pro-max skill writes it beside its scripts)
+__pycache__/
