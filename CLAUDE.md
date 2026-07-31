@@ -45,9 +45,10 @@ run from `sniffer/`** (it resolves `keymap.json` and `proto/` relative to cwd).
 
 ```
 docker-compose.yml  postgres + pgadmin + web; `sniffer` service is Linux-only
-init.sql            schema both apps depend on (packets, prices, crushes,
-                    crush_placements, item_stats, items, item_effects, recipes,
-                    runes) + views item_effect_weights, item_break_weight
+init.sql            schema both apps depend on (packets, prices, offers,
+                    offer_stats, crushes, crush_placements, item_stats, items,
+                    item_effects, recipes, runes)
+                    + views item_effect_weights, item_break_weight
 docs/               observations.md — annotated real captures
                     brisage-model.md + brisage-runes.json — the kamas maths,
                     transcribed from Book 3.xlsx (kept at the repo root)
@@ -58,6 +59,8 @@ tools/              import_runes.py   seeds `runes` from brisage-runes.json
                                       which the wire has usually never seen)
                     check_brisage.py  runs the brisage model over every
                                       captured crush, predicted vs actual
+                    backfill_offers.py parses marketplace listings out of
+                                      archived packets into offers/offer_stats
 RUNBOOK.md          the guide. Start here for anything protocol-related.
 
 sniffer/            the Rust capture app — RUN IT FROM THIS DIRECTORY
