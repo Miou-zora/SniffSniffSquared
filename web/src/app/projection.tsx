@@ -172,6 +172,48 @@ export function Projection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, columns, customCoefficient]);
 
+  /**
+   * Whether focusing is worth it at all, at the coefficient in force.
+   *
+   * Focusing concentrates the whole item into one rune, which is not
+   * automatically better: crushing with no focus yields every rune the item
+   * carries, and their sum can beat the single pile. The table has always shown
+   * both and left the arithmetic to the reader.
+   *
+   * Judged on kamas, because that is the only comparison that means anything —
+   * 30 of one rune against 12 of six different ones is not a comparison at all.
+   * Column 1 is the current coefficient; column 0 is the 100% ceiling.
+   */
+  const verdict = useMemo(() => {
+    const at = (r: (typeof rows)[number]) => r.cells[1];
+    const focuses = rows.filter((r) => r.key !== "no-focus");
+    const none = rows.find((r) => r.key === "no-focus");
+    if (!none || focuses.length === 0) return null;
+
+    const noneCell = at(none);
+    if (!noneCell) return null;
+    const priced = noneCell.value !== null && focuses.every((r) => at(r)?.value != null);
+
+    const score = (c: { runes: number; value: number | null } | null) =>
+      c === null ? -1 : priced ? (c.value ?? -1) : c.runes;
+    const best = focuses.reduce((a, b) => (score(at(b)) > score(at(a)) ? b : a));
+    const bestScore = score(at(best));
+    const noneScore = score(noneCell);
+    if (bestScore <= 0 && noneScore <= 0) return null;
+
+    const focusWins = bestScore >= noneScore;
+    const high = Math.max(bestScore, noneScore);
+    const low = Math.min(bestScore, noneScore);
+    return {
+      focusWins,
+      priced,
+      rune: best.label,
+      edge: low > 0 ? (high / low - 1) * 100 : null,
+      bestScore,
+      noneScore,
+    };
+  }, [rows]);
+
   return (
     <section className="border-circuit-border overflow-hidden rounded-2xl border">
       <div className="border-phosphor-blue-black flex flex-wrap items-center gap-x-16 gap-y-12 border-b px-20 py-16">
@@ -281,6 +323,37 @@ export function Projection({
           {basis === "average" && model.average !== null && ", for an average copy"}.
         </p>
       </div>
+
+      {verdict !== null && (
+        <p className="border-phosphor-blue-black text-body-sm tracking-body-sm text-sage-40 border-b px-20 py-12">
+          {verdict.focusWins ? (
+            <>
+              <span className="text-lime-pulse font-medium">Focus {verdict.rune}</span>
+              {verdict.edge !== null && (
+                <> — worth {fmt(verdict.edge, 0)}% more than crushing it with no focus</>
+              )}
+            </>
+          ) : (
+            <>
+              <span className="text-lime-pulse font-medium">Do not focus</span> — the
+              whole item is worth {verdict.edge !== null && `${fmt(verdict.edge, 0)}% `}
+              more than focusing {verdict.rune}, the best single rune
+            </>
+          )}
+          {verdict.priced ? (
+            <span className="text-deep-fern">
+              {" "}
+              · in kamas, at {fmt(columns[1]?.coefficient ?? 0, 2)}%
+            </span>
+          ) : (
+            <span className="text-deep-fern">
+              {" "}
+              · by rune count, which compares different runes — browse their prices to
+              judge it in kamas
+            </span>
+          )}
+        </p>
+      )}
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[680px] border-collapse text-left">
