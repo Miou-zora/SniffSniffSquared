@@ -3,6 +3,7 @@
 import { useMemo, useState, useId } from "react";
 import { COEFFICIENT_STEPS, decay, profitPercent, runeCount } from "@/lib/brisage";
 import { describePlan } from "@/lib/craft";
+import { LocalTime } from "@/app/local-time";
 import type { ProjectionModel } from "@/lib/breaker";
 
 type Metric = "runes" | "value" | "profit";
@@ -487,7 +488,12 @@ function CoefficientNote({
   return (
     <p className={`${base} text-sage-40`}>
       from the last crush of {itemName}
-      {seen !== null && ` at ${new Date(seen).toLocaleTimeString("fr-FR")}`}
+      {seen !== null && (
+        <>
+          {" at "}
+          <LocalTime iso={seen} />
+        </>
+      )}
     </p>
   );
 }

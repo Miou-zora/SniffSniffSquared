@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Live } from "@/app/live";
 import { Projection } from "@/app/projection";
 import { ItemSearch } from "@/app/search";
+import { LocalTime } from "@/app/local-time";
 import { VerdictBadge } from "@/app/verdict-badge";
 import { loadBreaker, type BreakerView } from "@/lib/breaker";
 import { verdictFor, type Verdict } from "@/lib/verdict";
@@ -90,8 +91,12 @@ function Header({ view, verdict }: { view: BreakerView; verdict: Verdict }) {
       </div>
       <p className="text-body tracking-body text-sage-40 mt-12">
         {view.item.type ?? "—"} · level {view.item.level}
-        {view.placedAt !== null &&
-          ` · placed ${view.placedAt.toLocaleTimeString("fr-FR")}`}
+        {view.placedAt !== null && (
+          <>
+            {" · placed "}
+            <LocalTime iso={view.placedAt.toISOString()} />
+          </>
+        )}
         {view.uid !== null && (
           <span className="text-deep-fern">
             {" "}
