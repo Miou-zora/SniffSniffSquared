@@ -27,6 +27,8 @@ export interface Verdict {
   missing: "value" | "cost" | null;
   /** Whether the cost used was the market price or the craft. */
   against: "market" | "craft" | null;
+  /** True when no crush of this item fixed its coefficient. */
+  assumed: boolean;
 }
 
 const THRESHOLD_KEY = "break_threshold_percent";
@@ -161,8 +163,13 @@ export async function verdictFor(view: BreakerView): Promise<Verdict> {
   // The profit is computed either way — under manual it is what the badge
   // reports next to your mark, so the number stays visible even when it is not
   // the thing deciding.
+  // No crush of this item means no coefficient, and every rune figure scales
+  // with it — a verdict resting on an assumed 100% is a guess wearing the
+  // clothes of arithmetic. The profit is still shown, labelled, because seeing
+  // it is what tells you whether finding out is worth a crush.
+  const assumed = view.projection.coefficientAssumed;
   const automatic: Status | null =
-    current === "manual" || profit === null
+    current === "manual" || profit === null || assumed
       ? null
       : profit >= thresholdPercent
         ? "worth"
@@ -177,5 +184,6 @@ export async function verdictFor(view: BreakerView): Promise<Verdict> {
     mode: current,
     missing: value === null ? "value" : cost === null ? "cost" : null,
     against: cheapest?.[1] ?? null,
+    assumed,
   };
 }

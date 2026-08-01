@@ -162,10 +162,14 @@ export async function worthList(): Promise<{
   for (const r of rows) {
     const itemId = Number(r.item_id);
     const marked = marks.get(itemId) ?? null;
-    // A zero means no line of this item could be priced — the template is not
-    // imported, or a rune it yields has never been on the market. That is
-    // unknown, not worthless, and "0 k" beside "-100%" reads as the latter.
-    const value = r.value === null || Number(r.value) === 0 ? null : Number(r.value);
+    // Without a crush of this item there is no coefficient, and every rune
+    // figure is a multiple of it. The SQL computes those at 100% so the columns
+    // line up; ranking by them would be ranking by a placeholder, and a real
+    // coefficient is anywhere from 16% to 150% in this capture. No reading, no
+    // figure.
+    const observed = r.observed;
+    const raw = r.value === null || Number(r.value) === 0 ? null : Number(r.value);
+    const value = observed ? raw : null;
     const cost = r.cost === null || Number(r.cost) === 0 ? null : Number(r.cost);
     out.push({
       itemId,
@@ -177,8 +181,8 @@ export async function worthList(): Promise<{
       profit: null,
       against: null,
       craft: null,
-      focus: r.focus_rune,
-      observed: r.observed,
+      focus: observed ? r.focus_rune : null,
+      observed,
       coefficient: Number(r.coefficient),
       status: marked ?? "skip",
       manual: marked !== null,
@@ -343,12 +347,16 @@ async function fillFromInstances(rows: WorthRow[]): Promise<void> {
       const best = Math.max(focus ?? 0, none ?? 0);
       if (best <= 0) return;
 
-      row.value = best;
-      row.focus = (focus ?? 0) >= (none ?? 0) ? (view.outcomes[0]?.rune ?? null) : null;
       row.cost = row.cost ?? view.projection.itemCost;
       row.craft = row.craft ?? view.projection.craft?.cost ?? null;
       row.coefficient = view.coefficient;
       row.observed = !view.projection.coefficientAssumed;
+      // Same rule as the bulk path: a yield computed at an assumed coefficient
+      // is not a yield. The cost columns stand on their own and stay.
+      if (row.observed) {
+        row.value = best;
+        row.focus = (focus ?? 0) >= (none ?? 0) ? (view.outcomes[0]?.rune ?? null) : null;
+      }
       price(row);
     }),
   );

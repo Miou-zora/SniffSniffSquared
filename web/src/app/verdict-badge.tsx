@@ -54,6 +54,15 @@ export function VerdictBadge({ itemId, verdict }: { itemId: number; verdict: Ver
       </button>
 
       <Drawer open={open} onClose={() => setOpen(false)} title="Worth breaking?">
+        {verdict.assumed && (
+          <p className="text-body-sm tracking-body-sm text-sage-40 mt-16">
+            <span className="text-phosphor-white">No crush of this item captured</span>,
+            so its coefficient is unknown — and every rune figure scales with it. Real
+            ones in this capture run from 16% to 150%, so there is no verdict to give
+            until one is observed. Crush one with the sniffer running, or read the figures
+            below as the 100% case.
+          </p>
+        )}
         <p className="text-body-sm tracking-body-sm text-sage-40 mt-16">
           {verdict.profit !== null ? (
             <>
@@ -62,7 +71,8 @@ export function VerdictBadge({ itemId, verdict }: { itemId: number; verdict: Ver
                 {verdict.profit >= 0 ? "+" : ""}
                 {fmt(verdict.profit, 1)}%
               </span>{" "}
-              against what a copy costs, taking the better of focusing and not.
+              against the cheaper of buying and crafting, taking the better of focusing
+              and not{verdict.assumed && ", at an assumed 100% coefficient"}.
             </>
           ) : verdict.missing === "cost" ? (
             "No price for a copy, so there is nothing to measure the runes against."
