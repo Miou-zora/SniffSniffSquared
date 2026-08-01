@@ -83,9 +83,17 @@ export async function worthList(): Promise<{
   }>(
     `WITH candidates AS (
        -- Everything judgeable under Automatic, your marks alone otherwise.
+       --
+       -- Every table that has ever named an item, not just the items table:
+       -- that one is filled offline, so an item crushed an hour ago is missing
+       -- and was silently unjudgeable — Anneau Solo had a captured coefficient,
+       -- captured stats, and no row here.
        SELECT item_id FROM unnest($1::bigint[]) AS t(item_id)
-       UNION
-       SELECT item_id FROM items WHERE $2
+       UNION SELECT item_id FROM items WHERE $2
+       UNION SELECT item_id FROM crushes WHERE $2 AND item_id IS NOT NULL
+       UNION SELECT item_id FROM item_stats WHERE $2
+       UNION SELECT item_id FROM crush_placements WHERE $2
+       UNION SELECT item_id FROM offers WHERE $2
      ),
      coef AS (
        SELECT DISTINCT ON (item_id) item_id, yield_percent
@@ -198,20 +206,6 @@ export async function worthList(): Promise<{
 
   for (const row of out) price(row);
 
-  // Names for ids the importer has never reached — they are on the list
-  // because you marked them, and "Item 9412" is not a list entry anyone can read.
-  const unnamed = out.filter((r) => r.name.startsWith("Item ")).map((r) => r.itemId);
-  if (unnamed.length > 0) {
-    const meta = await fetchItems(unnamed);
-    for (const row of out) {
-      const m = meta.get(row.itemId);
-      if (!m) continue;
-      row.name = m.name ?? row.name;
-      row.level = row.level ?? m.level;
-      row.type = row.type ?? m.type;
-    }
-  }
-
   await fillFromInstances(out);
 
   // The verdict, once every figure is in: a mark if you set one, else the
@@ -224,6 +218,21 @@ export async function worthList(): Promise<{
     row.status = row.profit >= thresholdPercent ? "worth" : "skip";
     return row.status === "worth";
   });
+
+  // Names last, for the rows that survived: under Automatic the candidate set
+  // is every item the database has ever seen, and asking DofusDB to name all of
+  // them is a request nobody needs answered.
+  const unnamed = judged.filter((r) => r.name.startsWith("Item ")).map((r) => r.itemId);
+  if (unnamed.length > 0) {
+    const meta = await fetchItems(unnamed);
+    for (const row of judged) {
+      const m = meta.get(row.itemId);
+      if (!m) continue;
+      row.name = m.name ?? row.name;
+      row.level = row.level ?? m.level;
+      row.type = row.type ?? m.type;
+    }
+  }
 
   judged.sort((a, b) => (b.profit ?? -Infinity) - (a.profit ?? -Infinity));
   return { rows: judged, automatic, thresholdPercent };
@@ -333,7 +342,9 @@ async function craftCosts(itemIds: number[]): Promise<Map<number, number>> {
  * than by taking a second to load.
  */
 async function fillFromInstances(rows: WorthRow[]): Promise<void> {
-  const needing = rows.filter((r) => r.value === null).slice(0, 25);
+  // Only rows with a real coefficient: without one the value is withheld
+  // anyway, so loading them would be a round trip to produce a dash.
+  const needing = rows.filter((r) => r.value === null && r.observed).slice(0, 25);
   await Promise.all(
     needing.map(async (row) => {
       const view = await loadItem(row.itemId);
