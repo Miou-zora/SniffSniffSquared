@@ -77,7 +77,11 @@ export function Projection({
   itemName: string;
 }) {
   const [metric, setMetric] = useState<Metric>("runes");
-  const [basis, setBasis] = useState<Basis>("copy");
+  // Average by default: most of the time the question is whether this *item* is
+  // worth breaking, not what one particular copy happened to roll. Falls back to
+  // the copy when no template covers every line, since the switch is disabled
+  // there and a default nobody can change is a broken one.
+  const [basis, setBasis] = useState<Basis>(model.average !== null ? "average" : "copy");
   const [customX, setCustomX] = useState("");
   const [source, setSource] = useState<Source>("market");
   const [manualCost, setManualCost] = useState("");
