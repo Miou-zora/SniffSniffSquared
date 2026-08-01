@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { Status, Verdict } from "@/lib/verdict";
+import type { Mode, Status, Verdict } from "@/lib/verdict";
 
 const fmt = (v: number, digits: number) =>
   v.toLocaleString("fr-FR", {
@@ -10,16 +10,22 @@ const fmt = (v: number, digits: number) =>
     maximumFractionDigits: digits,
   });
 
+const LABEL: Record<Status, string> = {
+  worth: "worth breaking",
+  skip: "not worth breaking",
+};
+
 /**
- * Whether this item is worth breaking, and the controls to disagree.
+ * Whether this item is worth breaking, and the settings behind that answer.
  *
- * The verdict is arithmetic — what the runes fetch against what a copy costs,
- * over a threshold you set — so it is shown with the number behind it. A badge
- * that says "worth breaking" without saying by how much cannot be checked, and
- * one that cannot be checked gets trusted in cases where it should not be.
+ * The verdict is one line, so it lives inline beside the item's name rather
+ * than in a panel of its own — it competes with the projection table for
+ * attention, and it should lose. Everything you might change about it is a
+ * click away in a drawer instead of occupying the page permanently.
  */
 export function VerdictBadge({ itemId, verdict }: { itemId: number; verdict: Verdict }) {
   const router = useRouter();
+  const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [threshold, setThresholdInput] = useState(String(verdict.thresholdPercent));
 
@@ -33,7 +39,11 @@ export function VerdictBadge({ itemId, verdict }: { itemId: number; verdict: Ver
       router.refresh();
     });
 
-  const mark = (status: Status | null) => post({ itemId, status });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   const tone =
     verdict.status === "worth"
@@ -43,102 +53,169 @@ export function VerdictBadge({ itemId, verdict }: { itemId: number; verdict: Ver
         : "border-circuit-border text-deep-fern";
 
   return (
-    <section className="border-circuit-border bg-ground-iron mt-24 rounded-2xl border p-24">
-      <div className="flex flex-wrap items-center gap-x-16 gap-y-12">
-        <span
-          className={`text-caption tracking-caption rounded-lg border px-12 py-8 font-medium uppercase ${tone}`}
-        >
-          {verdict.status === "worth"
-            ? "worth breaking"
-            : verdict.status === "skip"
-              ? "not worth breaking"
-              : "no verdict"}
-        </span>
-
-        {verdict.profit !== null ? (
-          <p className="text-body-sm tracking-body-sm text-sage-40">
-            Runes fetch{" "}
-            <span className="text-phosphor-white tabular-nums">
-              {verdict.profit >= 0 ? "+" : ""}
-              {fmt(verdict.profit, 1)}%
-            </span>{" "}
-            against what a copy costs, threshold {fmt(verdict.thresholdPercent, 0)}%
-            {verdict.manual && (
-              <span className="text-deep-fern">
-                {" "}
-                · set by you, overriding{" "}
-                {verdict.automatic === "worth"
-                  ? "worth breaking"
-                  : verdict.automatic === "skip"
-                    ? "not worth breaking"
-                    : "no verdict"}
-              </span>
-            )}
-          </p>
-        ) : (
-          <p className="text-body-sm tracking-body-sm text-sage-40">
-            {verdict.missing === "cost"
-              ? "No price for a copy, so there is nothing to measure the runes against."
-              : "No rune prices captured, so the runes cannot be valued yet."}
-            {verdict.manual && <span className="text-deep-fern"> · marked by you</span>}
-          </p>
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title="How this verdict is decided"
+        aria-expanded={open}
+        className={`text-caption tracking-caption hover:bg-carbon-veil cursor-pointer rounded-lg border px-12 py-8 font-medium uppercase transition-colors duration-150 ${tone}`}
+      >
+        {verdict.status === null ? "no verdict" : LABEL[verdict.status]}
+        {verdict.profit !== null && (
+          <span className="tabular-nums normal-case">
+            {" "}
+            {verdict.profit >= 0 ? "+" : ""}
+            {fmt(verdict.profit, 0)}%
+          </span>
         )}
-      </div>
+      </button>
 
-      <div className="mt-16 flex flex-wrap items-center gap-x-16 gap-y-12">
-        <div className="border-circuit-border bg-void-black flex rounded-xl border p-4">
-          {(
-            [
-              ["worth", "Worth it"],
-              ["skip", "Skip"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              disabled={pending}
-              aria-pressed={verdict.manual && verdict.status === value}
-              onClick={() => mark(value)}
-              className={`text-body-sm tracking-body-sm rounded-lg px-16 py-8 font-medium transition-colors duration-150 ${
-                verdict.manual && verdict.status === value
-                  ? "bg-lime-pulse text-void-black"
-                  : "text-sage-60 hover:bg-carbon-veil hover:text-phosphor-white cursor-pointer"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {verdict.manual && (
+      {open && (
+        <div
+          className="fixed inset-0 z-20 bg-black/50"
+          onClick={() => setOpen(false)}
+          aria-hidden
+        />
+      )}
+      <aside
+        // Rendered always, translated off-screen when shut, so it slides rather
+        // than appearing. inert while hidden keeps it out of the tab order.
+        inert={!open}
+        aria-label="verdict settings"
+        className={`border-circuit-border bg-ground-iron fixed top-0 right-0 z-30 h-full w-full max-w-[24rem] overflow-y-auto border-l p-24 transition-transform duration-200 ${
+          open ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-16">
+          <h2 className="text-subheading tracking-subheading">Worth breaking?</h2>
           <button
             type="button"
-            disabled={pending}
-            onClick={() => mark(null)}
-            className="text-body-sm tracking-body-sm text-fern-link hover:text-phosphor-white cursor-pointer underline"
+            onClick={() => setOpen(false)}
+            className="text-body-sm text-fern-link hover:text-phosphor-white cursor-pointer"
           >
-            back to automatic
+            close
           </button>
+        </div>
+
+        <p className="text-body-sm tracking-body-sm text-sage-40 mt-16">
+          {verdict.profit !== null ? (
+            <>
+              These runes fetch{" "}
+              <span className="text-phosphor-white tabular-nums">
+                {verdict.profit >= 0 ? "+" : ""}
+                {fmt(verdict.profit, 1)}%
+              </span>{" "}
+              against what a copy costs, taking the better of focusing and not.
+            </>
+          ) : verdict.missing === "cost" ? (
+            "No price for a copy, so there is nothing to measure the runes against."
+          ) : (
+            "No rune prices captured, so the runes cannot be valued yet."
+          )}
+        </p>
+
+        <Field label="verdict">
+          <Segmented<Mode>
+            value={verdict.mode}
+            options={[
+              ["automatic", "Automatic"],
+              ["manual", "Manual"],
+            ]}
+            disabled={pending}
+            onChange={(next) => post({ mode: next })}
+          />
+        </Field>
+        <p className="text-body-sm tracking-body-sm text-deep-fern mt-8">
+          {verdict.mode === "automatic"
+            ? "Every item is judged by the threshold below. Anything you mark yourself still wins."
+            : "Nothing is judged for you — only the items you mark carry a verdict."}
+        </p>
+
+        {verdict.mode === "automatic" && (
+          <Field label="mark as worth over">
+            <span className="text-body-sm tracking-body-sm text-sage-40 flex items-center gap-8">
+              <input
+                type="number"
+                inputMode="decimal"
+                value={threshold}
+                onChange={(e) => setThresholdInput(e.target.value)}
+                onBlur={() => {
+                  const v = Number.parseFloat(threshold.replace(",", "."));
+                  if (Number.isFinite(v) && v !== verdict.thresholdPercent) {
+                    post({ thresholdPercent: v });
+                  }
+                }}
+                aria-label="worth-breaking threshold, percent"
+                className="border-circuit-border focus:border-lime-pulse text-body-sm text-phosphor-white w-64 border-0 border-b bg-transparent px-0 py-4 text-right tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+              % profit
+            </span>
+          </Field>
         )}
 
-        <label className="text-body-sm tracking-body-sm text-sage-40 ml-auto flex items-center gap-8">
-          mark as worth over
-          <input
-            type="number"
-            inputMode="decimal"
-            value={threshold}
-            onChange={(e) => setThresholdInput(e.target.value)}
-            onBlur={() => {
-              const v = Number.parseFloat(threshold.replace(",", "."));
-              if (Number.isFinite(v) && v !== verdict.thresholdPercent) {
-                post({ thresholdPercent: v });
-              }
-            }}
-            aria-label="worth-breaking threshold, percent"
-            className="border-circuit-border focus:border-lime-pulse text-body-sm text-phosphor-white w-48 border-0 border-b bg-transparent px-0 py-4 text-right tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        <Field label="this item">
+          <Segmented<Status | "auto">
+            value={verdict.manual ? (verdict.status ?? "auto") : "auto"}
+            options={[
+              ["auto", verdict.mode === "automatic" ? "Automatic" : "None"],
+              ["worth", "Worth it"],
+              ["skip", "Skip"],
+            ]}
+            disabled={pending}
+            onChange={(next) => post({ itemId, status: next === "auto" ? null : next })}
           />
-          % profit
-        </label>
-      </div>
-    </section>
+        </Field>
+        {verdict.manual && verdict.automatic !== null && (
+          <p className="text-body-sm tracking-body-sm text-deep-fern mt-8">
+            Overriding {LABEL[verdict.automatic]}, which is what the threshold says.
+          </p>
+        )}
+      </aside>
+    </>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="mt-24">
+      <p className="text-caption tracking-caption text-deep-fern mb-8 uppercase">
+        {label}
+      </p>
+      {children}
+    </div>
+  );
+}
+
+function Segmented<T extends string>({
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  value: T;
+  options: [T, string][];
+  disabled: boolean;
+  onChange: (next: T) => void;
+}) {
+  return (
+    <div className="border-circuit-border bg-void-black flex rounded-xl border p-4">
+      {options.map(([id, label]) => (
+        <button
+          key={id}
+          type="button"
+          disabled={disabled}
+          aria-pressed={value === id}
+          onClick={() => onChange(id)}
+          className={`text-body-sm tracking-body-sm flex-1 rounded-lg px-12 py-8 font-medium transition-colors duration-150 ${
+            value === id
+              ? "bg-lime-pulse text-void-black"
+              : "text-sage-60 hover:bg-carbon-veil hover:text-phosphor-white cursor-pointer"
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
   );
 }

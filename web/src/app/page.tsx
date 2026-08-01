@@ -37,8 +37,7 @@ export function ItemView({ view, verdict }: { view: BreakerView; verdict: Verdic
 
   return (
     <main className="mx-auto w-full max-w-[1400px] px-24 py-64">
-      <Header view={view} />
-      <VerdictBadge itemId={view.item.itemId} verdict={verdict} />
+      <Header view={view} verdict={verdict} />
       {view.weighted.length === 0 ? (
         <NoStats view={view} />
       ) : (
@@ -72,7 +71,7 @@ function Empty() {
   );
 }
 
-function Header({ view }: { view: BreakerView }) {
+function Header({ view, verdict }: { view: BreakerView; verdict: Verdict }) {
   const browsing = view.placedAt === null;
   return (
     <header>
@@ -85,7 +84,10 @@ function Header({ view }: { view: BreakerView }) {
           {!browsing && <Live />}
         </div>
       </div>
-      <h1 className="text-heading-lg tracking-heading-lg mt-12">{view.item.name}</h1>
+      <div className="mt-12 flex flex-wrap items-center gap-x-16 gap-y-8">
+        <h1 className="text-heading-lg tracking-heading-lg">{view.item.name}</h1>
+        <VerdictBadge itemId={view.item.itemId} verdict={verdict} />
+      </div>
       <p className="text-body tracking-body text-sage-40 mt-12">
         {view.item.type ?? "—"} · level {view.item.level}
         {view.placedAt !== null &&

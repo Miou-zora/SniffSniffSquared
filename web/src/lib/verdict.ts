@@ -22,12 +22,37 @@ export interface Verdict {
   /** What the automatic verdict would have been, when a manual one hides it. */
   automatic: Status | null;
   thresholdPercent: number;
+  mode: Mode;
   /** Which side is missing, for a UI that has to explain itself. */
   missing: "value" | "cost" | null;
 }
 
 const THRESHOLD_KEY = "break_threshold_percent";
+const MODE_KEY = "verdict_mode";
 const DEFAULT_THRESHOLD = 15;
+
+/**
+ * `automatic` derives a verdict from the profit; `manual` shows one only where
+ * you have set it. Manual marks win under both — the mode decides whether an
+ * unmarked item gets an opinion at all.
+ */
+export type Mode = "automatic" | "manual";
+
+export async function mode(): Promise<Mode> {
+  const [row] = await query<{ value: string }>(
+    `SELECT value FROM app_settings WHERE key = $1`,
+    [MODE_KEY],
+  );
+  return row?.value === "manual" ? "manual" : "automatic";
+}
+
+export async function setMode(next: Mode): Promise<void> {
+  await query(
+    `INSERT INTO app_settings (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [MODE_KEY, next],
+  );
+}
 
 export async function threshold(): Promise<number> {
   const [row] = await query<{ value: string }>(
@@ -103,16 +128,24 @@ function bestYield(view: BreakerView): number | null {
  * into this one.
  */
 export async function verdictFor(view: BreakerView): Promise<Verdict> {
-  const [thresholdPercent, manual] = await Promise.all([
+  const [thresholdPercent, current, manual] = await Promise.all([
     threshold(),
+    mode(),
     markOf(view.item.itemId),
   ]);
 
   const value = bestYield(view);
   const cost = view.projection.itemCost;
   const profit = value === null || cost === null ? null : profitPercent(value, cost);
+  // The profit is computed either way — under manual it is what the badge
+  // reports next to your mark, so the number stays visible even when it is not
+  // the thing deciding.
   const automatic: Status | null =
-    profit === null ? null : profit >= thresholdPercent ? "worth" : "skip";
+    current === "manual" || profit === null
+      ? null
+      : profit >= thresholdPercent
+        ? "worth"
+        : "skip";
 
   return {
     status: manual ?? automatic,
@@ -120,6 +153,7 @@ export async function verdictFor(view: BreakerView): Promise<Verdict> {
     manual: manual !== null,
     automatic,
     thresholdPercent,
+    mode: current,
     missing: value === null ? "value" : cost === null ? "cost" : null,
   };
 }

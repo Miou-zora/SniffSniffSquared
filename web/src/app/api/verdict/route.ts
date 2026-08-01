@@ -1,5 +1,5 @@
 import { revalidatePath } from "next/cache";
-import { setMark, setThreshold, type Status } from "@/lib/verdict";
+import { setMark, setMode, setThreshold, type Status } from "@/lib/verdict";
 
 /**
  * The two writes the UI can make: your verdict on one item, and the threshold
@@ -15,11 +15,19 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "expected JSON" }, { status: 400 });
   }
-  const { itemId, status, thresholdPercent } = (body ?? {}) as {
+  const { itemId, status, thresholdPercent, mode } = (body ?? {}) as {
     itemId?: unknown;
     status?: unknown;
     thresholdPercent?: unknown;
+    mode?: unknown;
   };
+
+  if (mode !== undefined) {
+    if (mode !== "automatic" && mode !== "manual") {
+      return Response.json({ error: "bad mode" }, { status: 400 });
+    }
+    await setMode(mode);
+  }
 
   if (thresholdPercent !== undefined) {
     const v = Number(thresholdPercent);
