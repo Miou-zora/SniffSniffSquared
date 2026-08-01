@@ -43,12 +43,11 @@ export interface WorthRow {
  * round trips and a DofusDB call, which is right for one item and hopeless for
  * two hundred.
  *
- * **Estimated for an average copy.** Weights come from `item_effect_weights` —
- * the middle of each template range — not from an instance you happen to have
- * held. That is the correct basis for "which items are worth buying to break",
- * and it means a listed figure can differ from the same item's page when that
- * page is describing a specific copy. The page is authoritative for the copy;
- * this is authoritative for the item type.
+ * Valued from the last copy you held, and from the item type's template where
+ * you have never held one. Judging an item you broke as though it were an
+ * average one is how the list came to disagree with that item's own page:
+ * Médaille Holy rolled +17.6% for the copy in hand and +12.5% as a template,
+ * and only the first is a thing that happened.
  *
  * The coefficient is per item and mostly unobserved, so items without a crush
  * are computed at 100% and flagged. That is a placeholder, not a ceiling: real
@@ -119,7 +118,29 @@ export async function worthList(): Promise<{
          FROM prices WHERE b1 > 0
         ORDER BY item_id, seen_at DESC
      ),
-     lines AS (
+     -- What the copy you last held actually rolled. Preferred over the
+     -- template wherever it exists: an item you broke is not a hypothetical
+     -- average one, and judging it as though it were disagrees with its own
+     -- page over the same item. line_weight is docs/brisage-model.md's, the
+     -- trailing +1 included.
+     latest_instance AS (
+       SELECT DISTINCT ON (item_id) item_id, uid
+         FROM item_stats ORDER BY item_id, seen_at DESC
+     ),
+     instance_lines AS (
+       SELECT s.item_id, r.rune, r.rune_weight,
+              3 * s.value * r.rune_weight / r.stat_per_rune * i.level / 200.0 + 1
+                AS weight,
+              rp.b1 AS unit_price, COALESCE(c.yield_percent, 100) AS coefficient,
+              c.yield_percent IS NOT NULL AS observed
+         FROM item_stats s
+         JOIN latest_instance li ON li.uid = s.uid
+         JOIN runes r ON r.effect_id = s.effect_id
+         JOIN items i ON i.item_id = s.item_id
+         LEFT JOIN rune_price rp ON rp.item_id = r.item_id
+         LEFT JOIN coef c ON c.item_id = s.item_id
+     ),
+     template_lines AS (
        SELECT w.item_id, w.rune, w.rune_weight, w.avg_line_weight AS weight,
               rp.b1 AS unit_price, COALESCE(c.yield_percent, 100) AS coefficient,
               c.yield_percent IS NOT NULL AS observed
@@ -127,6 +148,12 @@ export async function worthList(): Promise<{
          JOIN runes r ON r.effect_id = w.effect_id
          LEFT JOIN rune_price rp ON rp.item_id = r.item_id
          LEFT JOIN coef c ON c.item_id = w.item_id
+     ),
+     lines AS (
+       SELECT * FROM instance_lines
+       UNION ALL
+       SELECT * FROM template_lines t
+        WHERE NOT EXISTS (SELECT 1 FROM instance_lines i WHERE i.item_id = t.item_id)
      ),
      totals AS (SELECT item_id, sum(weight) AS total FROM lines GROUP BY 1),
      -- Crushing plain: every line yields its own rune. Only counted when every
@@ -342,9 +369,19 @@ async function craftCosts(itemIds: number[]): Promise<Map<number, number>> {
  * than by taking a second to load.
  */
 async function fillFromInstances(rows: WorthRow[]): Promise<void> {
-  // Only rows with a real coefficient: without one the value is withheld
-  // anyway, so loading them would be a round trip to produce a dash.
-  const needing = rows.filter((r) => r.value === null && r.observed).slice(0, 25);
+  // Only rows with a real coefficient — without one the value is withheld
+  // anyway — and the ones that can produce a profit first: a row with neither a
+  // market price nor a recipe cannot be judged however well it is valued, so it
+  // should not be what uses up the budget. Médaille Holy sat past a cap of 25
+  // and was simply missing from the list while its own page judged it fine.
+  const needing = rows
+    .filter((r) => r.value === null && r.observed)
+    .sort(
+      (a, b) =>
+        Number(b.cost !== null || b.craft !== null) -
+        Number(a.cost !== null || a.craft !== null),
+    )
+    .slice(0, 80);
   await Promise.all(
     needing.map(async (row) => {
       const view = await loadItem(row.itemId);

@@ -564,7 +564,49 @@ export async function fetchItems(itemIds: number[]): Promise<Map<number, ItemMet
   } catch {
     // Enrichment is a nicety; every caller has a fallback.
   }
+  await remember(out);
   return out;
+}
+
+/**
+ * Keep what DofusDB just told us, so the next reader does not have to ask.
+ *
+ * This is the same data `tools/import_items.py` writes, from the same source,
+ * and writing it here turns that importer from a prerequisite into an
+ * optimisation: an item you meet today is enriched by looking at it, rather
+ * than staying invisible to every query that joins `items` or `item_effects`
+ * until the next offline run.
+ *
+ * Still not capture. Nothing here comes off the wire, and losing the lot costs
+ * one DofusDB round trip per item.
+ */
+async function remember(meta: Map<number, ItemMeta>): Promise<void> {
+  for (const [itemId, m] of meta) {
+    try {
+      await query(
+        `INSERT INTO items (item_id, name_fr, level, type_fr) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (item_id) DO UPDATE SET
+           name_fr = COALESCE(EXCLUDED.name_fr, items.name_fr),
+           level = COALESCE(EXCLUDED.level, items.level),
+           type_fr = COALESCE(EXCLUDED.type_fr, items.type_fr),
+           updated_at = now()`,
+        [itemId, m.name, m.level, m.type],
+      );
+      if (m.ranges.length === 0) continue;
+      // Replaced wholesale, like the importer does: a template that loses a
+      // line between game versions has to lose the row rather than keep it.
+      await query(`DELETE FROM item_effects WHERE item_id = $1`, [itemId]);
+      for (const [position, r] of m.ranges.entries()) {
+        await query(
+          `INSERT INTO item_effects (item_id, position, effect_id, min_value, max_value)
+           VALUES ($1,$2,$3,$4,$5) ON CONFLICT (item_id, position) DO NOTHING`,
+          [itemId, position, r.effectId, r.min, r.max],
+        );
+      }
+    } catch {
+      // A cache that cannot write is still a cache that answered.
+    }
+  }
 }
 
 async function fetchItemNames(itemIds: number[]): Promise<Map<number, string>> {
