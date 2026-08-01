@@ -1,6 +1,7 @@
 import { query } from "@/lib/db";
 import { allMarks, type Status } from "@/lib/verdict";
-import { fetchItems } from "@/lib/breaker";
+import { fetchItems, fetchRecipe, latestLadders } from "@/lib/breaker";
+import { planBuy } from "@/lib/craft";
 
 export interface WorthRow {
   itemId: number;
@@ -13,6 +14,8 @@ export interface WorthRow {
   cost: number | null;
   /** Null whenever either side of the sum is missing. */
   profit: number | null;
+  /** What the ingredients cost, or null with no recipe or an unpriced one. */
+  craft: number | null;
   /** The rune worth focusing, or null when crushing plain wins. */
   focus: string | null;
   /** True when a crush of this item fixed the coefficient; false when assumed. */
@@ -152,6 +155,7 @@ export async function worthList(): Promise<{ rows: WorthRow[] }> {
       value,
       cost,
       profit,
+      craft: null,
       focus: r.focus_rune,
       observed: r.observed,
       coefficient: Number(r.coefficient),
@@ -162,6 +166,11 @@ export async function worthList(): Promise<{ rows: WorthRow[] }> {
 
   // Unpriced last: they are on the list because you put them there, but they
   // cannot be ranked against the ones the market has an opinion about.
+  for (const [itemId, craft] of await craftCosts(out.map((r) => r.itemId))) {
+    const row = out.find((r) => r.itemId === itemId);
+    if (row) row.craft = craft;
+  }
+
   // Names for ids the importer has never reached — they are on the list
   // because you marked them, and "Item 9412" is not a list entry anyone can read.
   const unnamed = out.filter((r) => r.name.startsWith("Item ")).map((r) => r.itemId);
@@ -178,4 +187,69 @@ export async function worthList(): Promise<{ rows: WorthRow[] }> {
 
   out.sort((a, b) => (b.profit ?? -Infinity) - (a.profit ?? -Infinity));
   return { rows: out };
+}
+
+/**
+ * What each item costs to craft, by the same batch maths the item page uses.
+ *
+ * Computed in TypeScript rather than SQL so it reuses `planBuy` verbatim: the
+ * mixed-fill rule and its 30% tolerance are the kind of thing that drifts the
+ * moment there are two copies of it, and the list is only ever as long as your
+ * marks.
+ *
+ * Null for an item with no recipe, and for one whose ingredients are not all
+ * priced — a sum over the ingredients that happen to be on the market is not a
+ * cheaper craft, it is a wrong one.
+ */
+async function craftCosts(itemIds: number[]): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  if (itemIds.length === 0) return out;
+
+  const rows = await query<{ item_id: string; ingredient_id: string; quantity: number }>(
+    `SELECT item_id, ingredient_id, quantity FROM recipes
+      WHERE item_id = ANY($1::bigint[]) ORDER BY item_id, position`,
+    [itemIds],
+  );
+
+  const byItem = new Map<number, { ingredientId: number; quantity: number }[]>();
+  for (const r of rows) {
+    const itemId = Number(r.item_id);
+    const list = byItem.get(itemId) ?? [];
+    list.push({ ingredientId: Number(r.ingredient_id), quantity: r.quantity });
+    byItem.set(itemId, list);
+  }
+
+  // The same DofusDB fallback the item page uses, or a marked item the importer
+  // has not reached shows "no recipe" here while its own page prices the craft
+  // happily — two screens disagreeing about the same item.
+  const missing = itemIds.filter((id) => !byItem.has(id));
+  for (const id of missing) {
+    const recipe = await fetchRecipe(id);
+    if (recipe === null) continue;
+    byItem.set(
+      id,
+      recipe.map((r) => ({ ingredientId: r.itemId, quantity: r.quantity })),
+    );
+  }
+  if (byItem.size === 0) return out;
+
+  const ladders = await latestLadders(
+    [...byItem.values()].flat().map((i) => i.ingredientId),
+  );
+
+  for (const [itemId, ingredients] of byItem) {
+    let total = 0;
+    let priced = true;
+    for (const ing of ingredients) {
+      const ladder = ladders.get(ing.ingredientId);
+      const plan = ladder ? planBuy(ing.quantity, ladder) : null;
+      if (!plan) {
+        priced = false;
+        break;
+      }
+      total += plan.cost;
+    }
+    if (priced) out.set(itemId, total);
+  }
+  return out;
 }

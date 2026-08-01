@@ -80,6 +80,7 @@ function Table({ rows }: { rows: WorthRow[] }) {
             <th className="py-12 pr-16 font-medium">focus</th>
             <th className="py-12 pr-16 text-right font-medium">runes worth</th>
             <th className="py-12 pr-16 text-right font-medium">a copy costs</th>
+            <th className="py-12 pr-16 text-right font-medium">to craft</th>
             <th className="py-12 pr-16 text-right font-medium">profit</th>
             <th className="py-12 pr-20 text-right font-medium">coefficient</th>
           </tr>
@@ -112,6 +113,22 @@ function Table({ rows }: { rows: WorthRow[] }) {
               </td>
               <td
                 className={`py-12 pr-16 text-right tabular-nums ${
+                  r.craft !== null && r.cost !== null && r.craft < r.cost
+                    ? "text-moss-80"
+                    : "text-sage-40"
+                }`}
+                title={
+                  r.craft === null
+                    ? "No recipe, or an ingredient with no captured price"
+                    : r.cost !== null && r.craft < r.cost
+                      ? "Cheaper to make than to buy"
+                      : undefined
+                }
+              >
+                {r.craft === null ? "—" : `${kamas.format(Math.round(r.craft))} k`}
+              </td>
+              <td
+                className={`py-12 pr-16 text-right tabular-nums ${
                   r.profit === null
                     ? "text-deep-fern"
                     : r.profit >= 0
@@ -126,12 +143,19 @@ function Table({ rows }: { rows: WorthRow[] }) {
               >
                 {r.profit === null ? "no price" : pct(r.profit)}
               </td>
-              <td className="text-deep-fern py-12 pr-20 text-right tabular-nums">
-                {r.coefficient.toLocaleString("fr-FR", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
-                %{!r.observed && <span title="No crush observed — assumed"> ?</span>}
+              <td
+                className="text-deep-fern py-12 pr-20 text-right tabular-nums"
+                title={r.observed ? undefined : "No crush of this item captured"}
+              >
+                {/* Nothing rather than an assumed 100%: the rate is per item and
+                    goes above 100, so a placeholder printed like a reading is a
+                    number people would plan around. */}
+                {r.observed
+                  ? `${r.coefficient.toLocaleString("fr-FR", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}%`
+                  : "—"}
               </td>
             </tr>
           ))}

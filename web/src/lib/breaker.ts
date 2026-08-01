@@ -585,7 +585,7 @@ async function fetchItemNames(itemIds: number[]): Promise<Map<number, string>> {
  * outage, a timeout or a shape we cannot read must all degrade to "no recipe"
  * rather than take the breaker view down with them.
  */
-async function fetchRecipe(
+export async function fetchRecipe(
   itemId: number,
 ): Promise<{ itemId: number; quantity: number; name: string | null }[] | null> {
   try {
@@ -655,7 +655,7 @@ async function marketPrice(
  * mask an earlier real ladder would turn a priced ingredient into an unpriced
  * one for no reason.
  */
-async function latestLadders(itemIds: number[]): Promise<Map<number, Ladder>> {
+export async function latestLadders(itemIds: number[]): Promise<Map<number, Ladder>> {
   if (itemIds.length === 0) return new Map();
   const rows = await query<{
     item_id: string;
