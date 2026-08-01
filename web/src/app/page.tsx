@@ -88,7 +88,7 @@ function Header({ view, verdict }: { view: BreakerView; verdict: Verdict }) {
             worth breaking
           </Link>
           <ItemSearch />
-          {!browsing && <Live />}
+          <Live />
         </div>
       </div>
       <div className="mt-12 flex flex-wrap items-center gap-x-16 gap-y-8">

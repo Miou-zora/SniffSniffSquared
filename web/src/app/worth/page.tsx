@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ItemSearch } from "@/app/search";
+import { Live } from "@/app/live";
 import { worthList, type WorthRow } from "@/lib/worth";
 
 // Prices move while you play; nothing here may be prerendered.
@@ -32,7 +33,10 @@ export default async function WorthPage() {
         <p className="text-caption tracking-caption text-moss-70 uppercase">
           worth breaking
         </p>
-        <ItemSearch />
+        <div className="flex items-center gap-16">
+          <ItemSearch />
+          <Live />
+        </div>
       </div>
       <h1 className="text-heading-lg tracking-heading-lg mt-12">
         {worth.length} item{worth.length === 1 ? "" : "s"} marked worth breaking
