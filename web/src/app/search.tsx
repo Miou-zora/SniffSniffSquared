@@ -93,6 +93,10 @@ export function ItemSearch() {
                   {hit.level !== null && `lvl ${hit.level}`}
                   {hit.type !== null && ` · ${hit.type}`}
                   {hit.known && <span className="text-moss-70"> · captured</span>}
+                  {hit.mark === "worth" && (
+                    <span className="text-lime-pulse"> · worth breaking</span>
+                  )}
+                  {hit.mark === "skip" && <span className="text-sage-40"> · skip</span>}
                 </span>
               </button>
             </li>

@@ -86,6 +86,10 @@ item_id`. `effect_id` is the join from a stat line to the rune it yields;
   so it is the only thing worth recording. Derive the rest. `item_id` is
   nullable when the uid could not be mapped. There is no focus column: the focus
   travels in a separate message and does not change the yield.
+- **`item_marks`** / **`app_settings`** — **the only two tables this app writes
+  to.** Your verdict on an item, and the threshold the automatic one uses. They
+  are annotations, not capture: losing them costs an opinion, never an
+  observation, which is why writing them does not break the reader rule above.
 - **`packets`** — every captured message, decoded or not. Large, append-only,
   and mostly of interest for protocol work rather than the UI.
 

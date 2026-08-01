@@ -3,7 +3,9 @@ import Link from "next/link";
 import { Live } from "@/app/live";
 import { Projection } from "@/app/projection";
 import { ItemSearch } from "@/app/search";
+import { VerdictBadge } from "@/app/verdict-badge";
 import { loadBreaker, type BreakerView } from "@/lib/breaker";
+import { verdictFor, type Verdict } from "@/lib/verdict";
 
 // The breaker's contents change while you play; nothing here may be prerendered.
 export const dynamic = "force-dynamic";
@@ -20,7 +22,7 @@ function n(v: number, digits = 2) {
 export default async function Home() {
   const view = await loadBreaker();
   if (!view) return <Empty />;
-  return <ItemView view={view} />;
+  return <ItemView view={view} verdict={await verdictFor(view)} />;
 }
 
 /**
@@ -29,13 +31,14 @@ export default async function Home() {
  * They differ only in how the item was chosen — what is worth knowing about it
  * is the same either way, and duplicating this is how the two would drift.
  */
-export function ItemView({ view }: { view: BreakerView }) {
+export function ItemView({ view, verdict }: { view: BreakerView; verdict: Verdict }) {
   const best = view.outcomes[0];
   const priced = best !== undefined && best.unitPrice !== null;
 
   return (
     <main className="mx-auto w-full max-w-[1400px] px-24 py-64">
       <Header view={view} />
+      <VerdictBadge itemId={view.item.itemId} verdict={verdict} />
       {view.weighted.length === 0 ? (
         <NoStats view={view} />
       ) : (

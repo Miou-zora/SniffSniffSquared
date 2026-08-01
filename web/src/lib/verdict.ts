@@ -1,0 +1,125 @@
+import { query } from "@/lib/db";
+import type { BreakerView } from "@/lib/breaker";
+import { profitPercent } from "@/lib/brisage";
+
+/**
+ * Is this item worth breaking?
+ *
+ * Computed from what its runes fetch against what a copy costs, and compared to
+ * a threshold you set. A manual mark overrides it: the arithmetic knows the
+ * runes and the market, it does not know that an item completes a set you are
+ * keeping, or that the one listing left was a typo.
+ */
+export type Status = "worth" | "skip";
+
+export interface Verdict {
+  /** What to show. Null when neither side of the sum is known. */
+  status: Status | null;
+  /** Profit percent behind it, null when it could not be computed. */
+  profit: number | null;
+  /** True when a human said so and the arithmetic was overruled. */
+  manual: boolean;
+  /** What the automatic verdict would have been, when a manual one hides it. */
+  automatic: Status | null;
+  thresholdPercent: number;
+  /** Which side is missing, for a UI that has to explain itself. */
+  missing: "value" | "cost" | null;
+}
+
+const THRESHOLD_KEY = "break_threshold_percent";
+const DEFAULT_THRESHOLD = 15;
+
+export async function threshold(): Promise<number> {
+  const [row] = await query<{ value: string }>(
+    `SELECT value FROM app_settings WHERE key = $1`,
+    [THRESHOLD_KEY],
+  );
+  const v = Number.parseFloat(row?.value ?? "");
+  return Number.isFinite(v) ? v : DEFAULT_THRESHOLD;
+}
+
+export async function setThreshold(percent: number): Promise<void> {
+  await query(
+    `INSERT INTO app_settings (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [THRESHOLD_KEY, String(percent)],
+  );
+}
+
+export async function markOf(itemId: number): Promise<Status | null> {
+  const [row] = await query<{ status: string }>(
+    `SELECT status FROM item_marks WHERE item_id = $1`,
+    [itemId],
+  );
+  return row?.status === "worth" || row?.status === "skip" ? row.status : null;
+}
+
+export async function setMark(itemId: number, status: Status | null): Promise<void> {
+  if (status === null) {
+    await query(`DELETE FROM item_marks WHERE item_id = $1`, [itemId]);
+    return;
+  }
+  await query(
+    `INSERT INTO item_marks (item_id, status) VALUES ($1, $2)
+     ON CONFLICT (item_id) DO UPDATE SET status = EXCLUDED.status, updated_at = now()`,
+    [itemId, status],
+  );
+}
+
+/** Marks for many ids at once, for lists. */
+export async function marksOf(itemIds: number[]): Promise<Map<number, Status>> {
+  if (itemIds.length === 0) return new Map();
+  const rows = await query<{ item_id: string; status: string }>(
+    `SELECT item_id, status FROM item_marks WHERE item_id = ANY($1::bigint[])`,
+    [itemIds],
+  );
+  const out = new Map<number, Status>();
+  for (const r of rows) {
+    if (r.status === "worth" || r.status === "skip") out.set(Number(r.item_id), r.status);
+  }
+  return out;
+}
+
+/**
+ * The best kamas one crush yields at the coefficient in force.
+ *
+ * The better of focusing and not focusing, because that is what you would
+ * actually do — judging the item by a focus you would not choose understates
+ * it. Column 1 is the current coefficient; column 0 is the 100% ceiling.
+ */
+function bestYield(view: BreakerView): number | null {
+  const focus = view.outcomes[0]?.value[1] ?? null;
+  const none = view.noFocus.value[1] ?? null;
+  if (focus === null && none === null) return null;
+  return Math.max(focus ?? 0, none ?? 0);
+}
+
+/**
+ * The verdict for an item, given everything already loaded for its page.
+ *
+ * Measured against the market price rather than the craft cost: it is what you
+ * would pay for a copy today, and the craft cost answers a different question —
+ * whether to make one — which is worth its own verdict rather than being folded
+ * into this one.
+ */
+export async function verdictFor(view: BreakerView): Promise<Verdict> {
+  const [thresholdPercent, manual] = await Promise.all([
+    threshold(),
+    markOf(view.item.itemId),
+  ]);
+
+  const value = bestYield(view);
+  const cost = view.projection.itemCost;
+  const profit = value === null || cost === null ? null : profitPercent(value, cost);
+  const automatic: Status | null =
+    profit === null ? null : profit >= thresholdPercent ? "worth" : "skip";
+
+  return {
+    status: manual ?? automatic,
+    profit,
+    manual: manual !== null,
+    automatic,
+    thresholdPercent,
+    missing: value === null ? "value" : cost === null ? "cost" : null,
+  };
+}

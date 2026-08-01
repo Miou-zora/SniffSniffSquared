@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { ItemView } from "@/app/page";
 import { loadItem } from "@/lib/breaker";
+import { verdictFor } from "@/lib/verdict";
 
 // Prices and crushes land while you play, so this is never prerendered — the
 // same reason the breaker page is not.
@@ -18,5 +19,5 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
   const itemId = Number.parseInt(id, 10);
   const view = await loadItem(itemId);
   if (!view) notFound();
-  return <ItemView view={view} />;
+  return <ItemView view={view} verdict={await verdictFor(view)} />;
 }

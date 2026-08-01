@@ -41,6 +41,29 @@ CREATE INDEX IF NOT EXISTS idx_prices_item ON prices (item_id, seen_at DESC);
 --     what it was
 -- The raw messages stay in `packets`, so runes, focus and instance ids all
 -- remain recoverable if a derivation ever needs checking.
+-- Your own verdict on an item, and the settings behind the automatic one.
+--
+-- The only two tables the web app writes to. Everything else here is capture,
+-- and the sniffer owns it; these are annotations, so they carry no game data
+-- and losing them costs an opinion rather than an observation.
+--
+-- A manual mark beats the computed verdict deliberately. The automatic one
+-- knows the runes and the market; it does not know that an item is part of a
+-- set you are keeping, or that the only listing was a fat-fingered price.
+CREATE TABLE IF NOT EXISTS item_marks (
+    item_id    BIGINT PRIMARY KEY,
+    -- 'worth' or 'skip'. Free text rather than an enum so a new verdict does
+    -- not need a migration in a schema that is otherwise append-only.
+    status     TEXT        NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT        NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Individual marketplace offers, and the stats the copy on sale rolled.
 --
 -- `prices` and this table are both "what the market says" and they are not the

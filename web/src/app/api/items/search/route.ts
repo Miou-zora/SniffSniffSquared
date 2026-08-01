@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { marksOf, type Status } from "@/lib/verdict";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,8 @@ export interface ItemHit {
   type: string | null;
   /** True when the wire has seen this id — those are the ones with real data. */
   known: boolean;
+  /** Your verdict, when you have recorded one. */
+  mark: Status | null;
 }
 
 /**
@@ -47,6 +50,7 @@ export async function GET(request: Request) {
     level: r.level,
     type: r.type_fr,
     known: true,
+    mark: null,
   }));
 
   if (items.length < 8) {
@@ -55,6 +59,10 @@ export async function GET(request: Request) {
       if (!seen.has(hit.itemId)) items.push(hit);
     }
   }
+
+  // A verdict you recorded is worth seeing before you click, not after.
+  const marks = await marksOf(items.map((i) => i.itemId));
+  for (const item of items) item.mark = marks.get(item.itemId) ?? null;
 
   return Response.json({ items });
 }
@@ -98,6 +106,7 @@ async function searchDofusDb(q: string, limit: number): Promise<ItemHit[]> {
         level: Number.isFinite(Number(it.level)) ? Number(it.level) : null,
         type: typeof it.type?.name?.fr === "string" ? it.type.name.fr : null,
         known: false,
+        mark: null,
       });
     }
     return out;
