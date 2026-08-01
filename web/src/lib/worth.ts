@@ -1,6 +1,6 @@
 import { query } from "@/lib/db";
 import { allMarks, type Status } from "@/lib/verdict";
-import { fetchItems, fetchRecipe, latestLadders } from "@/lib/breaker";
+import { fetchItems, fetchRecipe, latestLadders, loadItem } from "@/lib/breaker";
 import { planBuy } from "@/lib/craft";
 
 export interface WorthRow {
@@ -185,6 +185,8 @@ export async function worthList(): Promise<{ rows: WorthRow[] }> {
     }
   }
 
+  await fillFromInstances(out);
+
   out.sort((a, b) => (b.profit ?? -Infinity) - (a.profit ?? -Infinity));
   return { rows: out };
 }
@@ -252,4 +254,46 @@ async function craftCosts(itemIds: number[]): Promise<Map<number, number>> {
     if (priced) out.set(itemId, total);
   }
   return out;
+}
+
+/**
+ * Value the rows the template could not.
+ *
+ * The bulk query reads `item_effect_weights`, which exists only for items
+ * `tools/import_items.py` has enriched. An item you broke yesterday may have no
+ * template at all — and yet the wire gave its real stat lines, its level came
+ * back from DofusDB, and a crush of it fixed the coefficient. Everything needed
+ * is there; only the offline table is missing.
+ *
+ * So those rows go through `loadItem`, the same loader the item page uses. It
+ * costs a handful of round trips each, which the marked list can afford, and it
+ * guarantees the two screens agree rather than merely intending to.
+ *
+ * Capped, because "a handful each" stops being affordable somewhere, and a
+ * marked list that grows to hundreds should degrade by showing dashes rather
+ * than by taking a second to load.
+ */
+async function fillFromInstances(rows: WorthRow[]): Promise<void> {
+  const needing = rows.filter((r) => r.value === null).slice(0, 25);
+  await Promise.all(
+    needing.map(async (row) => {
+      const view = await loadItem(row.itemId);
+      if (!view) return;
+
+      // Column 1 is the coefficient in force; column 0 is the 100% reference.
+      const focus = view.outcomes[0]?.value[1] ?? null;
+      const none = view.noFocus.value[1] ?? null;
+      if (focus === null && none === null) return;
+
+      const best = Math.max(focus ?? 0, none ?? 0);
+      if (best <= 0) return;
+
+      row.value = best;
+      row.focus = (focus ?? 0) >= (none ?? 0) ? (view.outcomes[0]?.rune ?? null) : null;
+      row.cost = row.cost ?? view.projection.itemCost;
+      row.profit = row.cost === null ? null : (best * 100) / row.cost - 100;
+      row.coefficient = view.coefficient;
+      row.observed = !view.projection.coefficientAssumed;
+    }),
+  );
 }
