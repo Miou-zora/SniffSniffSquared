@@ -25,6 +25,8 @@ export interface Verdict {
   mode: Mode;
   /** Which side is missing, for a UI that has to explain itself. */
   missing: "value" | "cost" | null;
+  /** Whether the cost used was the market price or the craft. */
+  against: "market" | "craft" | null;
 }
 
 const THRESHOLD_KEY = "break_threshold_percent";
@@ -134,10 +136,10 @@ function bestYield(view: BreakerView): number | null {
 /**
  * The verdict for an item, given everything already loaded for its page.
  *
- * Measured against the market price rather than the craft cost: it is what you
- * would pay for a copy today, and the craft cost answers a different question —
- * whether to make one — which is worth its own verdict rather than being folded
- * into this one.
+ * Measured against the cheaper of buying a copy and making one, because those
+ * are the two ways to get the item and you would take the cheaper. Judging
+ * against the market alone overstates the case for breaking anything cheaper to
+ * craft, which is most crafted gear.
  */
 export async function verdictFor(view: BreakerView): Promise<Verdict> {
   const [thresholdPercent, current, manual] = await Promise.all([
@@ -147,7 +149,14 @@ export async function verdictFor(view: BreakerView): Promise<Verdict> {
   ]);
 
   const value = bestYield(view);
-  const cost = view.projection.itemCost;
+  const options: [number, "market" | "craft"][] = [];
+  if (view.projection.itemCost !== null)
+    options.push([view.projection.itemCost, "market"]);
+  if (view.projection.craft?.cost != null)
+    options.push([view.projection.craft.cost, "craft"]);
+  const cheapest =
+    options.length === 0 ? null : options.reduce((a, b) => (b[0] < a[0] ? b : a));
+  const cost = cheapest?.[0] ?? null;
   const profit = value === null || cost === null ? null : profitPercent(value, cost);
   // The profit is computed either way — under manual it is what the badge
   // reports next to your mark, so the number stays visible even when it is not
@@ -167,5 +176,6 @@ export async function verdictFor(view: BreakerView): Promise<Verdict> {
     thresholdPercent,
     mode: current,
     missing: value === null ? "value" : cost === null ? "cost" : null,
+    against: cheapest?.[1] ?? null,
   };
 }

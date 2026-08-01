@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { allMarks, type Status } from "@/lib/verdict";
+import { allMarks, mode, threshold, type Status } from "@/lib/verdict";
 import { fetchItems, fetchRecipe, latestLadders, loadItem } from "@/lib/breaker";
 import { planBuy } from "@/lib/craft";
 
@@ -30,10 +30,14 @@ export interface WorthRow {
 /**
  * The items you have marked, ranked by profit.
  *
- * Membership is your marks and nothing else. The automatic verdict decides what
- * the badge on an item's page says; it does not put items in this list, because
- * a list you curate and a list a threshold generates are different tools and
- * mixing them means neither can be trusted at a glance.
+ * Under Automatic, anything clearing the threshold is here, and your marks
+ * override it either way — a Skip you set hides an item the arithmetic likes,
+ * and a Worth it keeps one it does not. Under Manual nothing is judged and the
+ * list is your marks alone, which is what that mode is for.
+ *
+ * Rejections are only ever listed when *you* made them. Under Automatic
+ * everything below the bar is "not worth breaking", and a list of every item
+ * the threshold declined is not a list anybody reads.
  *
  * One query rather than a page-load each: the per-item page assembles a dozen
  * round trips and a DofusDB call, which is right for one item and hopeless for
@@ -51,9 +55,20 @@ export interface WorthRow {
  * crushes have come back at 126% and 143%, so an assumed row can understate as
  * easily as overstate.
  */
-export async function worthList(): Promise<{ rows: WorthRow[] }> {
-  const marks = await allMarks();
-  if (marks.size === 0) return { rows: [] };
+export async function worthList(): Promise<{
+  rows: WorthRow[];
+  automatic: boolean;
+  thresholdPercent: number;
+}> {
+  const [marks, current, thresholdPercent] = await Promise.all([
+    allMarks(),
+    mode(),
+    threshold(),
+  ]);
+  const automatic = current === "automatic";
+  if (marks.size === 0 && !automatic) {
+    return { rows: [], automatic, thresholdPercent };
+  }
 
   const rows = await query<{
     item_id: string;
@@ -66,7 +81,13 @@ export async function worthList(): Promise<{ rows: WorthRow[] }> {
     coefficient: string;
     observed: boolean;
   }>(
-    `WITH coef AS (
+    `WITH candidates AS (
+       -- Everything judgeable under Automatic, your marks alone otherwise.
+       SELECT item_id FROM unnest($1::bigint[]) AS t(item_id)
+       UNION
+       SELECT item_id FROM items WHERE $2
+     ),
+     coef AS (
        SELECT DISTINCT ON (item_id) item_id, yield_percent
          FROM crushes WHERE item_id IS NOT NULL
         ORDER BY item_id, seen_at DESC
@@ -127,21 +148,20 @@ export async function worthList(): Promise<{ rows: WorthRow[] }> {
                  THEN bf.rune END AS focus_rune,
             COALESCE(cf.yield_percent, 100) AS coefficient,
             cf.yield_percent IS NOT NULL AS observed
-       FROM unnest($1::bigint[]) AS m(item_id)
+       FROM candidates AS m(item_id)
        LEFT JOIN items i ON i.item_id = m.item_id
        LEFT JOIN no_focus nf ON nf.item_id = m.item_id AND nf.priced
        LEFT JOIN best_focus bf ON bf.item_id = m.item_id
        LEFT JOIN offer_cost oc ON oc.item_id = m.item_id
        LEFT JOIN stack_cost sc ON sc.item_id = m.item_id
        LEFT JOIN coef cf ON cf.item_id = m.item_id`,
-    [[...marks.keys()]],
+    [[...marks.keys()], automatic],
   );
 
   const out: WorthRow[] = [];
   for (const r of rows) {
     const itemId = Number(r.item_id);
-    const status = marks.get(itemId) ?? null;
-    if (status === null) continue;
+    const marked = marks.get(itemId) ?? null;
     // A zero means no line of this item could be priced — the template is not
     // imported, or a rune it yields has never been on the market. That is
     // unknown, not worthless, and "0 k" beside "-100%" reads as the latter.
@@ -160,8 +180,8 @@ export async function worthList(): Promise<{ rows: WorthRow[] }> {
       focus: r.focus_rune,
       observed: r.observed,
       coefficient: Number(r.coefficient),
-      status,
-      manual: true,
+      status: marked ?? "skip",
+      manual: marked !== null,
     });
   }
 
@@ -190,8 +210,19 @@ export async function worthList(): Promise<{ rows: WorthRow[] }> {
 
   await fillFromInstances(out);
 
-  out.sort((a, b) => (b.profit ?? -Infinity) - (a.profit ?? -Infinity));
-  return { rows: out };
+  // The verdict, once every figure is in: a mark if you set one, else the
+  // threshold under Automatic. Rows that end up an unmarked "skip" are dropped
+  // rather than listed — that is every item below the bar.
+  const judged = out.filter((row) => {
+    if (row.manual) return true;
+    if (!automatic) return false;
+    if (row.profit === null) return false;
+    row.status = row.profit >= thresholdPercent ? "worth" : "skip";
+    return row.status === "worth";
+  });
+
+  judged.sort((a, b) => (b.profit ?? -Infinity) - (a.profit ?? -Infinity));
+  return { rows: judged, automatic, thresholdPercent };
 }
 
 /**
