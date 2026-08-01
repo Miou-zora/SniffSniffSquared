@@ -43,11 +43,14 @@ export interface WorthRow {
  * round trips and a DofusDB call, which is right for one item and hopeless for
  * two hundred.
  *
- * Valued from the last copy you held, and from the item type's template where
- * you have never held one. Judging an item you broke as though it were an
- * average one is how the list came to disagree with that item's own page:
- * Médaille Holy rolled +17.6% for the copy in hand and +12.5% as a template,
- * and only the first is a thing that happened.
+ * Valued for an average copy, from the item type's template, and from the last
+ * copy you held only where no template covers it. Same basis as the badge and
+ * the card, deliberately: the question is whether the item is worth buying to
+ * break, and the copy in your hands is one sample of what you would be buying.
+ *
+ * It does mean a good roll reads lower here than it did in your hands —
+ * Médaille Holy was +17.6% as the copy you broke and +12.5% as a template. The
+ * first is what you got; the second is what the next one is worth.
  *
  * The coefficient is per item and mostly unobserved, so items without a crush
  * are computed at 100% and flagged. That is a placeholder, not a ceiling: real
@@ -149,11 +152,16 @@ export async function worthList(): Promise<{
          LEFT JOIN rune_price rp ON rp.item_id = r.item_id
          LEFT JOIN coef c ON c.item_id = w.item_id
      ),
+     -- Template first, instance only where no template covers the item. This
+     -- is the basis the card and the badge speak in, and the one the projection
+     -- table opens on: whether the *item* is worth breaking, not what one copy
+     -- rolled. Three screens agreeing beats any of them being individually
+     -- defensible — they were disagreeing in both directions within a day.
      lines AS (
-       SELECT * FROM instance_lines
+       SELECT * FROM template_lines
        UNION ALL
-       SELECT * FROM template_lines t
-        WHERE NOT EXISTS (SELECT 1 FROM instance_lines i WHERE i.item_id = t.item_id)
+       SELECT * FROM instance_lines i
+        WHERE NOT EXISTS (SELECT 1 FROM template_lines t WHERE t.item_id = i.item_id)
      ),
      totals AS (SELECT item_id, sum(weight) AS total FROM lines GROUP BY 1),
      -- Crushing plain: every line yields its own rune. Only counted when every

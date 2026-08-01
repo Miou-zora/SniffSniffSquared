@@ -113,8 +113,25 @@ export interface BreakerView {
   /** True when no crush has been seen and the coefficient is a placeholder. */
   coefficientIsAssumed: boolean;
   columns: CoefficientColumn[];
+  /** What this copy yields, per focus. */
   outcomes: FocusOutcome[];
   noFocus: ReturnType<typeof noFocusOutcome>;
+  /**
+   * The basis the card and the verdict speak in: the item type's average when
+   * the template covers every line, and this copy when it does not.
+   *
+   * The projection table opens on Average for the same reason — the question is
+   * usually whether the *item* is worth breaking, and the copy in front of you
+   * is one sample of the distribution you are about to buy more of. Everything
+   * on the page saying the same thing matters more than any of them being
+   * individually defensible.
+   */
+  shown: {
+    outcomes: FocusOutcome[];
+    noFocus: ReturnType<typeof noFocusOutcome>;
+    totalWeight: number;
+    isAverage: boolean;
+  };
   itemCost: number | null;
   /** Runes among `outcomes` with no captured market price. */
   unpricedRunes: string[];
@@ -355,6 +372,7 @@ async function buildView(
     columns,
     outcomes,
     noFocus: noFocusOutcome(weighted, columns, priceByRuneItemId),
+    shown: shownBasis(weighted, outcomes, columns, priceByRuneItemId, averages),
     itemCost: costRow,
     unpricedRunes: outcomes.filter((o) => o.unitPrice === null).map((o) => o.rune),
     averages,
@@ -403,6 +421,57 @@ function basisOf(
  * focus can differ between the two, which is a thing to read rather than a thing
  * to animate.
  */
+/**
+ * The average-copy figures when the template covers every rune-yielding line,
+ * and this copy's otherwise.
+ *
+ * Same weights the Average basis of the table uses, run through the same two
+ * functions, so the card, the badge and the table cannot disagree by
+ * construction rather than by intention.
+ */
+function shownBasis(
+  weighted: WeightedLine[],
+  outcomes: FocusOutcome[],
+  columns: CoefficientColumn[],
+  priceByRuneItemId: Map<number, number>,
+  averages: Map<number, AverageStat>,
+): BreakerView["shown"] {
+  const copy = {
+    outcomes,
+    noFocus: noFocusOutcome(weighted, columns, priceByRuneItemId),
+    totalWeight: weighted.reduce((s, l) => s + l.weight, 0),
+    isAverage: false,
+  };
+  if (weighted.length === 0 || !weighted.every((l) => averages.has(l.effectId))) {
+    return copy;
+  }
+
+  const avgLines = averageLines(weighted, averages);
+  const avgOutcomes = focusOutcomes(avgLines, columns, priceByRuneItemId).sort((a, b) => {
+    const av = a.value[1] ?? -1;
+    const bv = b.value[1] ?? -1;
+    if (av !== bv) return bv - av;
+    return b.runes[1] - a.runes[1];
+  });
+  return {
+    outcomes: avgOutcomes,
+    noFocus: noFocusOutcome(avgLines, columns, priceByRuneItemId),
+    totalWeight: avgLines.reduce((s, l) => s + l.weight, 0),
+    isAverage: true,
+  };
+}
+
+/** This item's lines, reweighted as if every one rolled its template average. */
+function averageLines(
+  weighted: WeightedLine[],
+  averages: Map<number, AverageStat>,
+): WeightedLine[] {
+  return weighted.map((l) => ({
+    ...l,
+    weight: averages.get(l.effectId)?.avgWeight ?? l.weight,
+  }));
+}
+
 function averageBasis(
   weighted: WeightedLine[],
   outcomes: FocusOutcome[],
@@ -413,10 +482,7 @@ function averageBasis(
   if (weighted.length === 0) return null;
   if (!weighted.every((l) => averages.has(l.effectId))) return null;
 
-  const avgLines = weighted.map((l) => ({
-    ...l,
-    weight: averages.get(l.effectId)?.avgWeight ?? l.weight,
-  }));
+  const avgLines = averageLines(weighted, averages);
   const avgOutcomes = focusOutcomes(avgLines, columns, priceByRuneItemId);
   const byEffectId = new Map(avgOutcomes.map((o) => [o.effectId, o]));
   // Ordered by the copy's ranking, dropping nothing: every line that has an

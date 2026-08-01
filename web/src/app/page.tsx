@@ -33,7 +33,7 @@ export default async function Home() {
  * is the same either way, and duplicating this is how the two would drift.
  */
 export function ItemView({ view, verdict }: { view: BreakerView; verdict: Verdict }) {
-  const best = view.outcomes[0];
+  const best = view.shown.outcomes[0];
   const priced = best !== undefined && best.unitPrice !== null;
 
   return (
@@ -147,12 +147,12 @@ function NoStats({ view }: { view: BreakerView }) {
  * multiplied by what that rune sells for.
  */
 function BestRune({ view, priced }: { view: BreakerView; priced: boolean }) {
-  const best = view.outcomes[0];
-  // Column 1 is the current coefficient — column 0 is the 100% ceiling.
+  const best = view.shown.outcomes[0];
+  // Column 1 is the current coefficient — column 0 is the 100% reference.
   const runesNow = best.runes[1];
   const valueNow = best.value[1];
-  const noneRunes = view.noFocus.runes[1];
-  const noneValue = view.noFocus.value[1];
+  const noneRunes = view.shown.noFocus.runes[1];
+  const noneValue = view.shown.noFocus.value[1];
 
   const comparable = valueNow !== null && noneValue !== null;
   const focusWins = comparable ? valueNow >= noneValue : true;
@@ -199,7 +199,10 @@ function BestRune({ view, priced }: { view: BreakerView; priced: boolean }) {
         {priced
           ? "Compared on what the runes sell for at the current coefficient."
           : "Ranked by rune count — no market price has been captured for these runes yet, so focusing and not focusing cannot be compared, and this assumes focusing. Browse runes in the HDV with the sniffer running to settle it."}{" "}
-        Focus weight {n(best.focusWeight)} of {n(view.totalWeight)} total, at{" "}
+        {view.shown.isAverage
+          ? "For an average copy of this item — the table opens on the same basis."
+          : "For the copy in hand; no template covers every line of it."}{" "}
+        Focus weight {n(best.focusWeight)} of {n(view.shown.totalWeight)} total, at{" "}
         {n(view.coefficient, 3)}%
         {view.coefficientIsAssumed && " (assumed — no crush of this item observed yet)"}.
       </p>

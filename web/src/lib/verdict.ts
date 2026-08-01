@@ -126,11 +126,15 @@ export async function marksOf(itemIds: number[]): Promise<Map<number, Status>> {
  *
  * The better of focusing and not focusing, because that is what you would
  * actually do — judging the item by a focus you would not choose understates
- * it. Column 1 is the current coefficient; column 0 is the 100% ceiling.
+ * it. Column 1 is the current coefficient; column 0 is the 100% reference.
+ *
+ * Reads `view.shown`, which is the item type's average where the template
+ * covers it: the verdict answers "is this item worth breaking", and the copy in
+ * your hands is one sample of what you would be buying.
  */
 function bestYield(view: BreakerView): number | null {
-  const focus = view.outcomes[0]?.value[1] ?? null;
-  const none = view.noFocus.value[1] ?? null;
+  const focus = view.shown.outcomes[0]?.value[1] ?? null;
+  const none = view.shown.noFocus.value[1] ?? null;
   if (focus === null && none === null) return null;
   return Math.max(focus ?? 0, none ?? 0);
 }
