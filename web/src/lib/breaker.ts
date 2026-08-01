@@ -501,7 +501,7 @@ async function craftEstimate(itemId: number): Promise<CraftEstimate | null> {
 }
 
 /** Name, level and type for ids the `items` table has never been told about. */
-interface ItemMeta {
+export interface ItemMeta {
   name: string | null;
   level: number | null;
   type: string | null;
@@ -532,7 +532,7 @@ function effectRanges(raw: unknown): ItemMeta["ranges"] {
   return out;
 }
 
-async function fetchItems(itemIds: number[]): Promise<Map<number, ItemMeta>> {
+export async function fetchItems(itemIds: number[]): Promise<Map<number, ItemMeta>> {
   const out = new Map<number, ItemMeta>();
   if (itemIds.length === 0) return out;
   try {

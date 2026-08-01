@@ -91,6 +91,18 @@ export async function setMark(itemId: number, status: Status | null): Promise<vo
   );
 }
 
+/** Every mark you have set, for the curated list. */
+export async function allMarks(): Promise<Map<number, Status>> {
+  const rows = await query<{ item_id: string; status: string }>(
+    `SELECT item_id, status FROM item_marks`,
+  );
+  const out = new Map<number, Status>();
+  for (const r of rows) {
+    if (r.status === "worth" || r.status === "skip") out.set(Number(r.item_id), r.status);
+  }
+  return out;
+}
+
 /** Marks for many ids at once, for lists. */
 export async function marksOf(itemIds: number[]): Promise<Map<number, Status>> {
   if (itemIds.length === 0) return new Map();

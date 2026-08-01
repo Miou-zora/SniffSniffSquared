@@ -1,7 +1,5 @@
 import Link from "next/link";
 import { ItemSearch } from "@/app/search";
-import { SettingsButton } from "@/app/drawer";
-import { mode } from "@/lib/verdict";
 import { worthList, type WorthRow } from "@/lib/worth";
 
 // Prices move while you play; nothing here may be prerendered.
@@ -24,10 +22,7 @@ function pct(v: number) {
  * are holding rather than the type.
  */
 export default async function WorthPage() {
-  const [{ rows, thresholdPercent, automatic }, currentMode] = await Promise.all([
-    worthList(),
-    mode(),
-  ]);
+  const { rows } = await worthList();
   const worth = rows.filter((r) => r.status === "worth");
   const skip = rows.filter((r) => r.status === "skip");
 
@@ -37,20 +32,15 @@ export default async function WorthPage() {
         <p className="text-caption tracking-caption text-moss-70 uppercase">
           worth breaking
         </p>
-        <div className="flex items-center gap-16">
-          <SettingsButton mode={currentMode} thresholdPercent={thresholdPercent} />
-          <ItemSearch />
-        </div>
+        <ItemSearch />
       </div>
       <h1 className="text-heading-lg tracking-heading-lg mt-12">
-        {worth.length} item{worth.length === 1 ? "" : "s"} worth breaking
+        {worth.length} item{worth.length === 1 ? "" : "s"} marked worth breaking
       </h1>
       <p className="text-body tracking-body text-sage-40 mt-12 max-w-[70ch]">
-        {automatic
-          ? `Runes worth more than ${pct(thresholdPercent)} over what a copy costs, taking the better of focusing and not.`
-          : "Verdicts are set by hand — the threshold is off."}{" "}
-        Estimated for an <span className="text-phosphor-white">average copy</span>, so an
-        item&apos;s own page may differ when it is describing the one you hold.{" "}
+        The items you marked <span className="text-phosphor-white">Worth it</span>, with
+        what they are worth today. Figures are estimated for an average copy and are
+        context only — nothing joins or leaves this list except by your mark.{" "}
         <Link href="/" className="text-lime-pulse">
           back to the breaker
         </Link>
@@ -58,22 +48,10 @@ export default async function WorthPage() {
 
       {worth.length === 0 ? (
         <p className="border-circuit-border text-body tracking-body text-sage-40 mt-32 rounded-xl border px-24 py-20">
-          {automatic ? (
-            <>
-              Nothing clears the bar yet. An item needs a price for a copy and a price for
-              every rune it yields — browse a few in the HDV with the sniffer running, or
-              lower the threshold in <span className="text-phosphor-white">settings</span>
-              .
-            </>
-          ) : (
-            <>
-              <span className="text-phosphor-white">Verdicts are set to Manual</span>, so
-              no item is judged for you and this list only ever holds what you mark by
-              hand. Switch to Automatic in{" "}
-              <span className="text-phosphor-white">settings</span> to rank every item the
-              data can price.
-            </>
-          )}
+          Nothing marked yet. Open an item — from the search above, or the breaker — and
+          mark it <span className="text-phosphor-white">Worth it</span> in its verdict
+          panel. The automatic verdict on that panel is a suggestion; this list only holds
+          what you decide.
         </p>
       ) : (
         <Table rows={worth} />
@@ -81,12 +59,9 @@ export default async function WorthPage() {
 
       {skip.length > 0 && (
         <>
-          <h2 className="text-heading-sm tracking-heading-sm mt-48">
-            Not worth breaking
-          </h2>
+          <h2 className="text-heading-sm tracking-heading-sm mt-48">Marked as skip</h2>
           <p className="text-body-sm tracking-body-sm text-sage-40 mt-4">
-            Judged and rejected, best first — the ones nearest the bar are the ones a
-            price move would flip.
+            Items you ruled out. Worth a glance when prices move.
           </p>
           <Table rows={skip} />
         </>
@@ -130,17 +105,26 @@ function Table({ rows }: { rows: WorthRow[] }) {
               </td>
               <td className="text-moss-80 py-12 pr-16">{r.focus ?? "no focus"}</td>
               <td className="text-moss-80 py-12 pr-16 text-right tabular-nums">
-                {kamas.format(Math.round(r.value))} k
+                {r.value === null ? "—" : `${kamas.format(Math.round(r.value))} k`}
               </td>
               <td className="text-sage-40 py-12 pr-16 text-right tabular-nums">
-                {kamas.format(Math.round(r.cost))} k
+                {r.cost === null ? "—" : `${kamas.format(Math.round(r.cost))} k`}
               </td>
               <td
                 className={`py-12 pr-16 text-right tabular-nums ${
-                  r.profit >= 0 ? "text-lime-pulse" : "text-sage-40"
+                  r.profit === null
+                    ? "text-deep-fern"
+                    : r.profit >= 0
+                      ? "text-lime-pulse"
+                      : "text-sage-40"
                 }`}
+                title={
+                  r.profit === null
+                    ? "No price captured for a copy, or for one of its runes"
+                    : undefined
+                }
               >
-                {pct(r.profit)}
+                {r.profit === null ? "no price" : pct(r.profit)}
               </td>
               <td className="text-deep-fern py-12 pr-20 text-right tabular-nums">
                 {r.coefficient.toLocaleString("fr-FR", {

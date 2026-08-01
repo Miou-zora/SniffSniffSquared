@@ -1,16 +1,18 @@
 import { query } from "@/lib/db";
-import { marksOf, mode, threshold, type Status } from "@/lib/verdict";
+import { allMarks, type Status } from "@/lib/verdict";
+import { fetchItems } from "@/lib/breaker";
 
 export interface WorthRow {
   itemId: number;
   name: string;
   level: number | null;
   type: string | null;
-  /** Kamas one crush yields, the better of focusing and not. */
-  value: number;
+  /** Kamas one crush yields, the better of focusing and not. Null when unpriced. */
+  value: number | null;
   /** What a copy costs: cheapest listing, else the last stack quote. */
-  cost: number;
-  profit: number;
+  cost: number | null;
+  /** Null whenever either side of the sum is missing. */
+  profit: number | null;
   /** The rune worth focusing, or null when crushing plain wins. */
   focus: string | null;
   /** True when a crush of this item fixed the coefficient; false when assumed. */
@@ -21,7 +23,12 @@ export interface WorthRow {
 }
 
 /**
- * Every item the data can judge, ranked by profit.
+ * The items you have marked, ranked by profit.
+ *
+ * Membership is your marks and nothing else. The automatic verdict decides what
+ * the badge on an item's page says; it does not put items in this list, because
+ * a list you curate and a list a threshold generates are different tools and
+ * mixing them means neither can be trusted at a glance.
  *
  * One query rather than a page-load each: the per-item page assembles a dozen
  * round trips and a DofusDB call, which is right for one item and hopeless for
@@ -35,14 +42,13 @@ export interface WorthRow {
  * this is authoritative for the item type.
  *
  * The coefficient is per item and mostly unobserved, so items without a crush
- * are computed at 100% and flagged. Their profit is an upper bound.
+ * are computed at 100% and flagged. That is a placeholder, not a ceiling: real
+ * crushes have come back at 126% and 143%, so an assumed row can understate as
+ * easily as overstate.
  */
-export async function worthList(): Promise<{
-  rows: WorthRow[];
-  thresholdPercent: number;
-  automatic: boolean;
-}> {
-  const [thresholdPercent, current] = await Promise.all([threshold(), mode()]);
+export async function worthList(): Promise<{ rows: WorthRow[] }> {
+  const marks = await allMarks();
+  if (marks.size === 0) return { rows: [] };
 
   const rows = await query<{
     item_id: string;
@@ -106,39 +112,37 @@ export async function worthList(): Promise<{
         WHERE l.unit_price IS NOT NULL
         ORDER BY l.item_id, 3 DESC
      )
-     SELECT i.item_id, i.name_fr, i.level, i.type_fr,
+     -- Driven by your marks, LEFT JOINed to everything else: an item you
+     -- marked before the importer ever saw it still belongs on your list, and
+     -- starting from the items table silently dropped exactly those.
+     SELECT m.item_id, i.name_fr, i.level, i.type_fr,
             GREATEST(COALESCE(nf.value, 0), COALESCE(bf.value, 0)) AS value,
             COALESCE(oc.cost, sc.cost) AS cost,
             CASE WHEN COALESCE(bf.value, 0) > COALESCE(nf.value, 0)
                  THEN bf.rune END AS focus_rune,
             COALESCE(cf.yield_percent, 100) AS coefficient,
             cf.yield_percent IS NOT NULL AS observed
-       FROM items i
-       LEFT JOIN no_focus nf ON nf.item_id = i.item_id AND nf.priced
-       LEFT JOIN best_focus bf ON bf.item_id = i.item_id
-       LEFT JOIN offer_cost oc ON oc.item_id = i.item_id
-       LEFT JOIN stack_cost sc ON sc.item_id = i.item_id
-       LEFT JOIN coef cf ON cf.item_id = i.item_id
-      WHERE COALESCE(oc.cost, sc.cost) > 0
-        AND GREATEST(COALESCE(nf.value, 0), COALESCE(bf.value, 0)) > 0
-        -- A rune carries an effect, so the weights view happily prices one as
-        -- if it could be crushed. It cannot: it is what crushing produces.
-        AND COALESCE(i.type_id, 0) <> 78`,
+       FROM unnest($1::bigint[]) AS m(item_id)
+       LEFT JOIN items i ON i.item_id = m.item_id
+       LEFT JOIN no_focus nf ON nf.item_id = m.item_id AND nf.priced
+       LEFT JOIN best_focus bf ON bf.item_id = m.item_id
+       LEFT JOIN offer_cost oc ON oc.item_id = m.item_id
+       LEFT JOIN stack_cost sc ON sc.item_id = m.item_id
+       LEFT JOIN coef cf ON cf.item_id = m.item_id`,
+    [[...marks.keys()]],
   );
-
-  const marks = await marksOf(rows.map((r) => Number(r.item_id)));
 
   const out: WorthRow[] = [];
   for (const r of rows) {
     const itemId = Number(r.item_id);
-    const value = Number(r.value);
-    const cost = Number(r.cost);
-    const profit = (value * 100) / cost - 100;
-    const manual = marks.get(itemId) ?? null;
-    const automatic: Status | null =
-      current === "manual" ? null : profit >= thresholdPercent ? "worth" : "skip";
-    const status = manual ?? automatic;
+    const status = marks.get(itemId) ?? null;
     if (status === null) continue;
+    // A zero means no line of this item could be priced — the template is not
+    // imported, or a rune it yields has never been on the market. That is
+    // unknown, not worthless, and "0 k" beside "-100%" reads as the latter.
+    const value = r.value === null || Number(r.value) === 0 ? null : Number(r.value);
+    const cost = r.cost === null || Number(r.cost) === 0 ? null : Number(r.cost);
+    const profit = value === null || cost === null ? null : (value * 100) / cost - 100;
 
     out.push({
       itemId,
@@ -152,10 +156,26 @@ export async function worthList(): Promise<{
       observed: r.observed,
       coefficient: Number(r.coefficient),
       status,
-      manual: manual !== null,
+      manual: true,
     });
   }
 
-  out.sort((a, b) => b.profit - a.profit);
-  return { rows: out, thresholdPercent, automatic: current === "automatic" };
+  // Unpriced last: they are on the list because you put them there, but they
+  // cannot be ranked against the ones the market has an opinion about.
+  // Names for ids the importer has never reached — they are on the list
+  // because you marked them, and "Item 9412" is not a list entry anyone can read.
+  const unnamed = out.filter((r) => r.name.startsWith("Item ")).map((r) => r.itemId);
+  if (unnamed.length > 0) {
+    const meta = await fetchItems(unnamed);
+    for (const row of out) {
+      const m = meta.get(row.itemId);
+      if (!m) continue;
+      row.name = m.name ?? row.name;
+      row.level = row.level ?? m.level;
+      row.type = row.type ?? m.type;
+    }
+  }
+
+  out.sort((a, b) => (b.profit ?? -Infinity) - (a.profit ?? -Infinity));
+  return { rows: out };
 }
