@@ -81,6 +81,12 @@ function Header({ view, verdict }: { view: BreakerView; verdict: Verdict }) {
           {browsing ? "browsing an item" : "in the breaker"}
         </p>
         <div className="flex items-center gap-16">
+          <Link
+            href="/worth"
+            className="text-caption tracking-caption text-fern-link hover:text-lime-pulse uppercase"
+          >
+            worth breaking
+          </Link>
           <ItemSearch />
           {!browsing && <Live />}
         </div>
