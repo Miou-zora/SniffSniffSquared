@@ -106,6 +106,7 @@ fn read_f32(r: &mut Reader) -> Option<f32> {
 /// Parse a crush (brisage) result straight off the wire.
 pub fn crush_result(body: &[u8]) -> Option<CrushResult> {
     let mut out = CrushResult { item_uid: 0, yield_fraction: 0.0, runes: Vec::new() };
+    let mut saw_yield = false;
     let mut r = Reader::new(body);
     while !r.eof() {
         let (field, wt) = r.tag()?;
@@ -137,7 +138,10 @@ pub fn crush_result(body: &[u8]) -> Option<CrushResult> {
                                 out.runes.push((rune, count));
                             }
                         }
-                        (2, WireType::I32) => out.yield_fraction = read_f32(&mut ir)?,
+                        (2, WireType::I32) => {
+                            out.yield_fraction = read_f32(&mut ir)?;
+                            saw_yield = true;
+                        }
                         (3, WireType::Varint) => out.item_uid = ir.varint()?,
                         (_, w) => {
                             if !ir.skip(w) {
@@ -154,8 +158,14 @@ pub fn crush_result(body: &[u8]) -> Option<CrushResult> {
             }
         }
     }
-    // a crush with no runes and no item is not one
-    if out.item_uid == 0 || out.runes.is_empty() {
+    // A crush that yielded nothing is still a crush, and its yield is the only
+    // thing the table stores. Requiring runes threw away exactly the
+    // observations worth having: a low coefficient on a small item rounds every
+    // line below one rune, so the server sends the yield with an empty list --
+    // 36.2% on an Amulette Verrehor, which is a coefficient reading that
+    // nothing else can supply. What makes it a crush is the instance and the
+    // yield, not the loot.
+    if out.item_uid == 0 || !saw_yield {
         return None;
     }
     Some(out)
@@ -835,6 +845,29 @@ mod tests {
             stats: Vec::new(),
         };
         assert!(!singles.is_single_copy(), "still a stack, just a short one");
+    }
+
+    /// Real capture, packet #60384: an Amulette Verrehor crushed at 36.2%
+    /// yielding no runes at all, because every line rounded below one.
+    ///
+    /// This parsed as "not a crush" until the rune list stopped being required,
+    /// which lost the only reading of that item's coefficient there will ever
+    /// be — the instance is gone.
+    const CRUSH_NO_RUNES: &[u8] = &[
+        0x0a, 0x0f, 0x15, 0x32, 0x58, 0xb9, 0x3e, 0x18, 0xdc, 0xc1, 0x82, 0x5b, 0x25,
+        0x48, 0x58, 0xb9, 0x3e,
+    ];
+
+    #[test]
+    fn a_crush_that_yielded_nothing_is_still_a_crush() {
+        let c = crush_result(CRUSH_NO_RUNES).expect("parses");
+        assert_eq!(c.item_uid, 190882012);
+        assert!(c.runes.is_empty(), "nothing rounded up to a whole rune");
+        assert!(
+            (c.yield_fraction - 0.362).abs() < 0.001,
+            "36.2%, which is what the client showed: {}",
+            c.yield_fraction
+        );
     }
 
     /// Equipment browsing, packet #11319: two copies of item 12502 on sale.

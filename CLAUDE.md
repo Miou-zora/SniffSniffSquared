@@ -62,6 +62,8 @@ tools/              import_runes.py   seeds `runes` from brisage-runes.json
                                       captured crush, predicted vs actual
                     backfill_offers.py parses marketplace listings out of
                                       archived packets into offers/offer_stats
+                    backfill_crushes.py recovers crushes the interpreter once
+                                      rejected for yielding no runes
 RUNBOOK.md          the guide. Start here for anything protocol-related.
 
 sniffer/            the Rust capture app — RUN IT FROM THIS DIRECTORY
