@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ItemSearch } from "@/app/search";
 import { Live } from "@/app/live";
+import { RowLink } from "@/app/worth/row";
 import { worthList, type WorthRow } from "@/lib/worth";
 
 // Prices move while you play; nothing here may be prerendered.
@@ -91,10 +92,7 @@ function Table({ rows }: { rows: WorthRow[] }) {
         </thead>
         <tbody className="text-body-sm tracking-body-sm">
           {rows.map((r) => (
-            <tr
-              key={r.itemId}
-              className="border-phosphor-blue-black border-b last:border-0"
-            >
+            <RowLink key={r.itemId} href={`/item/${r.itemId}`}>
               <td className="py-12 pr-16 pl-20">
                 <Link
                   href={`/item/${r.itemId}`}
@@ -161,7 +159,7 @@ function Table({ rows }: { rows: WorthRow[] }) {
                     })}%`
                   : "—"}
               </td>
-            </tr>
+            </RowLink>
           ))}
         </tbody>
       </table>

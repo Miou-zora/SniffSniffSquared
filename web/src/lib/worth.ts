@@ -12,8 +12,10 @@ export interface WorthRow {
   value: number | null;
   /** What a copy costs: cheapest listing, else the last stack quote. */
   cost: number | null;
-  /** Null whenever either side of the sum is missing. */
+  /** Against the cheaper of buying and crafting. Null when neither is known. */
   profit: number | null;
+  /** Which side that was, so the row can say what it measured against. */
+  against: "market" | "craft" | null;
   /** What the ingredients cost, or null with no recipe or an unpriced one. */
   craft: number | null;
   /** The rune worth focusing, or null when crushing plain wins. */
@@ -145,8 +147,6 @@ export async function worthList(): Promise<{ rows: WorthRow[] }> {
     // unknown, not worthless, and "0 k" beside "-100%" reads as the latter.
     const value = r.value === null || Number(r.value) === 0 ? null : Number(r.value);
     const cost = r.cost === null || Number(r.cost) === 0 ? null : Number(r.cost);
-    const profit = value === null || cost === null ? null : (value * 100) / cost - 100;
-
     out.push({
       itemId,
       name: r.name_fr ?? `Item ${itemId}`,
@@ -154,7 +154,8 @@ export async function worthList(): Promise<{ rows: WorthRow[] }> {
       type: r.type_fr,
       value,
       cost,
-      profit,
+      profit: null,
+      against: null,
       craft: null,
       focus: r.focus_rune,
       observed: r.observed,
@@ -170,6 +171,8 @@ export async function worthList(): Promise<{ rows: WorthRow[] }> {
     const row = out.find((r) => r.itemId === itemId);
     if (row) row.craft = craft;
   }
+
+  for (const row of out) price(row);
 
   // Names for ids the importer has never reached — they are on the list
   // because you marked them, and "Item 9412" is not a list entry anyone can read.
@@ -189,6 +192,27 @@ export async function worthList(): Promise<{ rows: WorthRow[] }> {
 
   out.sort((a, b) => (b.profit ?? -Infinity) - (a.profit ?? -Infinity));
   return { rows: out };
+}
+
+/**
+ * Profit against the cheaper of buying a copy and making one.
+ *
+ * Those are the two ways to get the item, and you would take the cheaper — so
+ * measuring against the market price alone overstates the case for breaking
+ * anything cheaper to craft, which is most crafted gear.
+ */
+function price(row: WorthRow): void {
+  const options: [number, "market" | "craft"][] = [];
+  if (row.cost !== null) options.push([row.cost, "market"]);
+  if (row.craft !== null) options.push([row.craft, "craft"]);
+  if (row.value === null || options.length === 0) {
+    row.profit = null;
+    row.against = null;
+    return;
+  }
+  const [cheapest, against] = options.reduce((a, b) => (b[0] < a[0] ? b : a));
+  row.profit = (row.value * 100) / cheapest - 100;
+  row.against = against;
 }
 
 /**
@@ -291,9 +315,10 @@ async function fillFromInstances(rows: WorthRow[]): Promise<void> {
       row.value = best;
       row.focus = (focus ?? 0) >= (none ?? 0) ? (view.outcomes[0]?.rune ?? null) : null;
       row.cost = row.cost ?? view.projection.itemCost;
-      row.profit = row.cost === null ? null : (best * 100) / row.cost - 100;
+      row.craft = row.craft ?? view.projection.craft?.cost ?? null;
       row.coefficient = view.coefficient;
       row.observed = !view.projection.coefficientAssumed;
+      price(row);
     }),
   );
 }
