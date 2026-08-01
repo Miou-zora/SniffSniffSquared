@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { ItemSearch } from "@/app/search";
+import { SettingsButton } from "@/app/drawer";
+import { mode } from "@/lib/verdict";
 import { worthList, type WorthRow } from "@/lib/worth";
 
 // Prices move while you play; nothing here may be prerendered.
@@ -22,7 +24,10 @@ function pct(v: number) {
  * are holding rather than the type.
  */
 export default async function WorthPage() {
-  const { rows, thresholdPercent, automatic } = await worthList();
+  const [{ rows, thresholdPercent, automatic }, currentMode] = await Promise.all([
+    worthList(),
+    mode(),
+  ]);
   const worth = rows.filter((r) => r.status === "worth");
   const skip = rows.filter((r) => r.status === "skip");
 
@@ -32,7 +37,10 @@ export default async function WorthPage() {
         <p className="text-caption tracking-caption text-moss-70 uppercase">
           worth breaking
         </p>
-        <ItemSearch />
+        <div className="flex items-center gap-16">
+          <SettingsButton mode={currentMode} thresholdPercent={thresholdPercent} />
+          <ItemSearch />
+        </div>
       </div>
       <h1 className="text-heading-lg tracking-heading-lg mt-12">
         {worth.length} item{worth.length === 1 ? "" : "s"} worth breaking
@@ -50,9 +58,22 @@ export default async function WorthPage() {
 
       {worth.length === 0 ? (
         <p className="border-circuit-border text-body tracking-body text-sage-40 mt-32 rounded-xl border px-24 py-20">
-          Nothing clears the bar yet. An item needs a price for a copy and a price for
-          every rune it yields — browse a few in the HDV with the sniffer running, or
-          lower the threshold from any item&apos;s verdict panel.
+          {automatic ? (
+            <>
+              Nothing clears the bar yet. An item needs a price for a copy and a price for
+              every rune it yields — browse a few in the HDV with the sniffer running, or
+              lower the threshold in <span className="text-phosphor-white">settings</span>
+              .
+            </>
+          ) : (
+            <>
+              <span className="text-phosphor-white">Verdicts are set to Manual</span>, so
+              no item is judged for you and this list only ever holds what you mark by
+              hand. Switch to Automatic in{" "}
+              <span className="text-phosphor-white">settings</span> to rank every item the
+              data can price.
+            </>
+          )}
         </p>
       ) : (
         <Table rows={worth} />
