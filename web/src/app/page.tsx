@@ -1,8 +1,7 @@
 import Link from "next/link";
 
-import { Live } from "@/app/live";
+import { PageHeader } from "@/app/header";
 import { Projection } from "@/app/projection";
-import { ItemSearch } from "@/app/search";
 import { LocalTime } from "@/app/local-time";
 import { VerdictBadge } from "@/app/verdict-badge";
 import { loadBreaker, type BreakerView } from "@/lib/breaker";
@@ -57,10 +56,7 @@ export function ItemView({ view, verdict }: { view: BreakerView; verdict: Verdic
 function Empty() {
   return (
     <main className="mx-auto w-full max-w-[1280px] px-24 py-96">
-      <div className="flex items-center justify-between gap-16">
-        <p className="text-caption tracking-caption text-moss-70 uppercase">breaker</p>
-        <Live />
-      </div>
+      <PageHeader label="breaker" current="/" />
       <h1 className="text-heading-lg tracking-heading-lg mt-16">
         Nothing in the breaker
       </h1>
@@ -76,27 +72,7 @@ function Header({ view, verdict }: { view: BreakerView; verdict: Verdict }) {
   const browsing = view.placedAt === null;
   return (
     <header>
-      <div className="flex flex-wrap items-center justify-between gap-16">
-        <p className="text-caption tracking-caption text-moss-70 uppercase">
-          {browsing ? "browsing an item" : "in the breaker"}
-        </p>
-        <div className="flex flex-wrap items-center justify-end gap-16">
-          <Link
-            href="/worth"
-            className="text-caption tracking-caption text-fern-link hover:text-lime-pulse uppercase"
-          >
-            worth breaking
-          </Link>
-          <Link
-            href="/craft"
-            className="text-caption tracking-caption text-fern-link hover:text-lime-pulse uppercase"
-          >
-            craft basket
-          </Link>
-          <ItemSearch />
-          <Live />
-        </div>
-      </div>
+      <PageHeader label={browsing ? "browsing an item" : "in the breaker"} current="/" />
       <div className="mt-12 flex flex-wrap items-center gap-x-16 gap-y-8">
         <h1 className="text-heading-lg tracking-heading-lg">{view.item.name}</h1>
         <VerdictBadge itemId={view.item.itemId} verdict={verdict} />

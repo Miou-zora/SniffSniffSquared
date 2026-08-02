@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { AddToBasket, BulkAdd, ClearBasket, Quantity } from "@/app/craft/controls";
-import { Live } from "@/app/live";
+import { PageHeader } from "@/app/header";
 import {
   craftJobs,
   loadBasket,
@@ -37,27 +37,11 @@ export default async function CraftPage() {
 
   return (
     <main className="mx-auto w-full max-w-[1400px] px-24 py-64">
-      <div className="flex flex-wrap items-center justify-between gap-16">
-        <p className="text-caption tracking-caption text-moss-70 uppercase">
-          craft basket
-        </p>
-        <div className="flex flex-wrap items-center justify-end gap-16">
-          <Link
-            href="/"
-            className="text-caption tracking-caption text-fern-link hover:text-lime-pulse uppercase"
-          >
-            breaker
-          </Link>
-          <Link
-            href="/worth"
-            className="text-caption tracking-caption text-fern-link hover:text-lime-pulse uppercase"
-          >
-            worth breaking
-          </Link>
-          <AddToBasket have={have} />
-          <Live />
-        </div>
-      </div>
+      <PageHeader
+        label="craft basket"
+        current="/craft"
+        search={<AddToBasket have={have} />}
+      />
 
       <h1 className="text-heading-lg tracking-heading-lg mt-12">
         {view.entries.length === 0

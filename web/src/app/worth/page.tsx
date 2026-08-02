@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { ItemSearch } from "@/app/search";
-import { Live } from "@/app/live";
+import { PageHeader } from "@/app/header";
 import { RowLink } from "@/app/worth/row";
 import { worthList, type WorthRow } from "@/lib/worth";
 
@@ -30,21 +29,7 @@ export default async function WorthPage() {
 
   return (
     <main className="mx-auto w-full max-w-[1400px] px-24 py-64">
-      <div className="flex flex-wrap items-center justify-between gap-16">
-        <p className="text-caption tracking-caption text-moss-70 uppercase">
-          worth breaking
-        </p>
-        <div className="flex flex-wrap items-center justify-end gap-16">
-          <Link
-            href="/craft"
-            className="text-caption tracking-caption text-fern-link hover:text-lime-pulse uppercase"
-          >
-            craft basket
-          </Link>
-          <ItemSearch />
-          <Live />
-        </div>
-      </div>
+      <PageHeader label="worth breaking" current="/worth" />
       <h1 className="text-heading-lg tracking-heading-lg mt-12">
         {worth.length} item{worth.length === 1 ? "" : "s"}{" "}
         {automatic ? "worth breaking" : "marked worth breaking"}
