@@ -57,8 +57,8 @@ export function ItemView({ view, verdict }: { view: BreakerView; verdict: Verdic
 function Empty() {
   return (
     <main className="mx-auto w-full max-w-[1280px] px-24 py-96">
-      <PageHeader label="breaker" current="/" />
-      <h1 className="text-heading-lg tracking-heading-lg mt-16">
+      <PageHeader current="/" />
+      <h1 className="text-heading-lg tracking-heading-lg mt-24">
         Nothing in the breaker
       </h1>
       <p className="text-body tracking-body text-sage-40 mt-20 max-w-[56ch]">
@@ -73,13 +73,16 @@ function Header({ view, verdict }: { view: BreakerView; verdict: Verdict }) {
   const browsing = view.placedAt === null;
   return (
     <header>
-      <PageHeader label={browsing ? "browsing an item" : "in the breaker"} current="/" />
-      <div className="mt-12 flex flex-wrap items-center gap-x-16 gap-y-8">
+      <PageHeader current="/" />
+      <div className="mt-24 flex flex-wrap items-center gap-x-16 gap-y-8">
         <h1 className="text-heading-lg tracking-heading-lg">{view.item.name}</h1>
         <VerdictBadge itemId={view.item.itemId} verdict={verdict} />
       </div>
       <p className="text-body tracking-body text-sage-40 mt-12">
-        {view.item.type ?? "—"} · level {view.item.level}
+        <span className="text-moss-70">
+          {browsing ? "browsing an item" : "in the breaker"}
+        </span>{" "}
+        · {view.item.type ?? "—"} · level {view.item.level}
         {view.placedAt !== null && (
           <>
             {" · placed "}

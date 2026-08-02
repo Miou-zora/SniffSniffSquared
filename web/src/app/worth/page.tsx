@@ -27,8 +27,8 @@ export default async function WorthPage() {
 
   return (
     <main className="mx-auto w-full max-w-[1400px] px-24 py-64">
-      <PageHeader label="worth breaking" current="/worth" />
-      <h1 className="text-heading-lg tracking-heading-lg mt-12">
+      <PageHeader current="/worth" />
+      <h1 className="text-heading-lg tracking-heading-lg mt-24">
         {worth.length} item{worth.length === 1 ? "" : "s"}{" "}
         {automatic ? "worth breaking" : "marked worth breaking"}
       </h1>

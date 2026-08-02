@@ -37,13 +37,9 @@ export default async function CraftPage() {
 
   return (
     <main className="mx-auto w-full max-w-[1400px] px-24 py-64">
-      <PageHeader
-        label="craft basket"
-        current="/craft"
-        search={<AddToBasket have={have} />}
-      />
+      <PageHeader current="/craft" search={<AddToBasket have={have} />} />
 
-      <h1 className="text-heading-lg tracking-heading-lg mt-12">
+      <h1 className="text-heading-lg tracking-heading-lg mt-24">
         {view.entries.length === 0
           ? "Nothing to craft yet"
           : view.ready

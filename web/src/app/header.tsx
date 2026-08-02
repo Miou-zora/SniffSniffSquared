@@ -5,13 +5,13 @@ import { Live } from "@/app/live";
 import { ItemSearch } from "@/app/search";
 
 /**
- * The bar every page opens with: where you are on the left, where else you can
- * go on the right.
+ * The bar every page opens with: the same title on the left, the same routes on
+ * the right, always.
  *
- * One component rather than three, because three drifted — each page linked to
- * a different pair of the others, so which routes existed depended on which one
- * you happened to be looking at. The nav here is the whole site, always, with
- * the page you are on marked instead of linked.
+ * It used to carry a per-page caption on the left — "in the breaker", "craft
+ * basket" — which made every page's header a different header, and said twice
+ * what the marked nav entry already says. What the page is belongs in its own
+ * heading, below; the bar is furniture and stays put.
  */
 const PAGES = [
   { href: "/", label: "breaker" },
@@ -22,13 +22,9 @@ const PAGES = [
 export type PageHref = (typeof PAGES)[number]["href"];
 
 export function PageHeader({
-  label,
   current,
   search,
 }: {
-  /** What this page is, in the caption slot. Not always the nav's word for it:
-   *  the breaker says "browsing an item" when you arrived from a search. */
-  label: string;
   current: PageHref;
   /** Replaces the item search, for a page that wants a different one — the
    *  basket's adds to the list rather than navigating away from it. */
@@ -36,7 +32,12 @@ export function PageHeader({
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-16">
-      <p className="text-caption tracking-caption text-moss-70 uppercase">{label}</p>
+      <Link
+        href="/"
+        className="text-caption tracking-caption text-phosphor-white hover:text-lime-pulse font-display uppercase"
+      >
+        Sniff<span className="text-lime-pulse">Sniff</span>Squared
+      </Link>
       <div className="flex flex-wrap items-center justify-end gap-16">
         <nav className="flex flex-wrap items-center gap-16">
           {PAGES.map((page) =>
