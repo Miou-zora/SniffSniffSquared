@@ -21,11 +21,32 @@ const subscribe = () => () => {};
  * The placeholder is a space rather than nothing, so the line does not jump
  * when the time lands.
  */
-export function LocalTime({ iso }: { iso: string }) {
+export function LocalTime({
+  iso,
+  withDate = false,
+}: {
+  iso: string;
+  withDate?: boolean;
+}) {
   const hydrated = useSyncExternalStore(
     subscribe,
     () => true,
     () => false,
   );
-  return <span>{hydrated ? new Date(iso).toLocaleTimeString("fr-FR") : " "}</span>;
+  if (!hydrated) return <span> </span>;
+  const at = new Date(iso);
+  // A list spanning days needs the day; a single timestamp on the page it
+  // belongs to does not.
+  return (
+    <span>
+      {withDate
+        ? at.toLocaleString("fr-FR", {
+            day: "2-digit",
+            month: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : at.toLocaleTimeString("fr-FR")}
+    </span>
+  );
 }

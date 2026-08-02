@@ -23,6 +23,13 @@ export interface WorthRow {
   /** True when a crush of this item fixed the coefficient; false when assumed. */
   observed: boolean;
   coefficient: number;
+  /**
+   * When that crush happened, ISO — the reading's age, which is the thing that
+   * decides whether the coefficient is still worth believing. Null when no
+   * crush of this item was ever captured. A string rather than a Date so it
+   * crosses into the client component that sorts on it.
+   */
+  crushedAt: string | null;
   status: Status;
   manual: boolean;
 }
@@ -82,6 +89,7 @@ export async function worthList(): Promise<{
     focus_rune: string | null;
     coefficient: string;
     observed: boolean;
+    crushed_at: Date | null;
   }>(
     `WITH candidates AS (
        -- Everything judgeable under Automatic, your marks alone otherwise.
@@ -98,7 +106,7 @@ export async function worthList(): Promise<{
        UNION SELECT item_id FROM offers WHERE $2
      ),
      coef AS (
-       SELECT DISTINCT ON (item_id) item_id, yield_percent
+       SELECT DISTINCT ON (item_id) item_id, yield_percent, seen_at
          FROM crushes WHERE item_id IS NOT NULL
         ORDER BY item_id, seen_at DESC
      ),
@@ -190,7 +198,8 @@ export async function worthList(): Promise<{
             CASE WHEN COALESCE(bf.value, 0) > COALESCE(nf.value, 0)
                  THEN bf.rune END AS focus_rune,
             COALESCE(cf.yield_percent, 100) AS coefficient,
-            cf.yield_percent IS NOT NULL AS observed
+            cf.yield_percent IS NOT NULL AS observed,
+            cf.seen_at AS crushed_at
        FROM candidates AS m(item_id)
        LEFT JOIN items i ON i.item_id = m.item_id
        LEFT JOIN no_focus nf ON nf.item_id = m.item_id AND nf.priced
@@ -227,6 +236,7 @@ export async function worthList(): Promise<{
       focus: observed ? r.focus_rune : null,
       observed,
       coefficient: Number(r.coefficient),
+      crushedAt: r.crushed_at === null ? null : r.crushed_at.toISOString(),
       status: marked ?? "skip",
       manual: marked !== null,
     });
