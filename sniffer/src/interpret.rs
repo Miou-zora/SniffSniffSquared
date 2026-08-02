@@ -34,6 +34,11 @@ pub fn interpret(key: &str, body: &[u8]) -> Option<String> {
             Some(effect) => format!("crush requested {{ focus effect {effect} }}"),
             None => "crush requested { no focus }".to_string(),
         }),
+        "inventory" => inventory(body).map(|items| {
+            let stacks = items.iter().filter(|i| i.quantity > 1).count();
+            format!("inventory {{ {} slots, {stacks} stacked }}", items.len())
+        }),
+        "inventory_remove" => inventory_remove(body).map(|uid| format!("gone {{ uid={uid} }}")),
         _ => None,
     }
 }
@@ -46,6 +51,8 @@ pub fn is_known_key(key: &str) -> bool {
             | Some("crush_result")
             | Some("crush_request")
             | Some("crush_slot_put")
+            | Some("inventory")
+            | Some("inventory_remove")
     )
 }
 
@@ -281,6 +288,9 @@ pub fn crush_focus(body: &[u8]) -> Option<u64> {
 pub struct ItemDetail {
     pub uid: u64,
     pub item_id: u64,
+    /// How many are in this stack. Absent on the wire for a single copy, which
+    /// is every piece of equipment, so it reads 1 there.
+    pub quantity: u64,
     /// `(effect id, rolled value)`, in wire order.
     pub stats: Vec<(u64, i64)>,
 }
@@ -301,36 +311,116 @@ pub fn item_detail_full(body: &[u8]) -> Option<ItemDetail> {
             while !r2.eof() {
                 let (f2, w2) = r2.tag()?;
                 if f2 == 4 && w2 == WireType::Len {
-                    let lvl3 = r2.len_field()?;
-                    let mut r3 = Reader::new(lvl3);
-                    let (mut uid, mut item) = (0u64, 0u64);
-                    let mut stats = Vec::new();
-                    while !r3.eof() {
-                        let (f3, w3) = r3.tag()?;
-                        match (f3, w3) {
-                            (1, WireType::Varint) => uid = r3.varint()?,
-                            (4, WireType::Varint) => item = r3.varint()?,
-                            (5, WireType::Len) => {
-                                // A malformed stat line should not discard the
-                                // uid and type, which are what the crush needs.
-                                match r3.len_field().and_then(stat_line) {
-                                    Some(line) => stats.push(line),
-                                    None => break,
-                                }
-                            }
-                            (_, w3) => {
-                                if !r3.skip(w3) {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if uid != 0 && item != 0 {
-                        return Some(ItemDetail { uid, item_id: item, stats });
+                    if let Some(detail) = item_entry(r2.len_field()?) {
+                        return Some(detail);
                     }
                 } else if !r2.skip(w2) {
                     return None;
                 }
+            }
+        } else if !r.skip(wt) {
+            return None;
+        }
+    }
+    None
+}
+
+/// One item entry: uid, type, how many, and what it rolled.
+///
+/// The same submessage appears inside `item_detail` (one item, under field 2/4)
+/// and inside every slot of the `inventory` listing (under field 1/4), so both
+/// read it here rather than growing two parsers that drift apart.
+fn item_entry(buf: &[u8]) -> Option<ItemDetail> {
+    let mut r = Reader::new(buf);
+    let (mut uid, mut item) = (0u64, 0u64);
+    // Absent for a single copy, which is how equipment always arrives.
+    let mut quantity = 1u64;
+    let mut stats = Vec::new();
+    while !r.eof() {
+        let (f, w) = r.tag()?;
+        match (f, w) {
+            (1, WireType::Varint) => uid = r.varint()?,
+            (3, WireType::Varint) => quantity = r.varint()?,
+            (4, WireType::Varint) => item = r.varint()?,
+            (5, WireType::Len) => {
+                // A malformed stat line should not discard the uid and type,
+                // which are what the crush needs.
+                match r.len_field().and_then(stat_line) {
+                    Some(line) => stats.push(line),
+                    None => break,
+                }
+            }
+            (_, w) => {
+                if !r.skip(w) {
+                    break;
+                }
+            }
+        }
+    }
+    (uid != 0 && item != 0).then_some(ItemDetail { uid, item_id: item, quantity, stats })
+}
+
+// ---- inventory: what is actually in the bags --------------------------------
+//
+// Identified without a known-plaintext read: every item put into the breaker
+// over the whole capture (12 of 12, matched by instance uid) appears in the
+// listing that preceded its placement, and none of them appear in the other
+// container listing the server sends. That is the player's own inventory and
+// nothing else.
+//
+//   field 1  message  REPEATED, one per slot
+//       field 1  varint   slot / position
+//       field 4  message  the item entry read by `item_entry` above
+//
+// It is a full snapshot, not a delta: the listing is the whole bag, so storing
+// it means replacing what was there rather than adding to it. Removals arrive
+// separately as `inventory_remove`, and a stack whose size changed is described
+// again by `item_detail`.
+
+/// Every item in an inventory listing. Empty is a real answer — an empty bag.
+pub fn inventory(body: &[u8]) -> Option<Vec<ItemDetail>> {
+    let mut r = Reader::new(body);
+    let mut out = Vec::new();
+    while !r.eof() {
+        let (field, wt) = r.tag()?;
+        if field == 1 && wt == WireType::Len {
+            let slot = r.len_field()?;
+            let mut r2 = Reader::new(slot);
+            while !r2.eof() {
+                let (f2, w2) = r2.tag()?;
+                if f2 == 4 && w2 == WireType::Len {
+                    // One unreadable slot costs that slot, not the listing —
+                    // and a listing that gave up would be read as an empty bag.
+                    if let Some(entry) = r2.len_field().and_then(item_entry) {
+                        out.push(entry);
+                    }
+                } else if !r2.skip(w2) {
+                    break;
+                }
+            }
+        } else if !r.skip(wt) {
+            return None;
+        }
+    }
+    Some(out)
+}
+
+// ---- inventory_remove: one instance is gone ---------------------------------
+//
+//   field 3  varint  the instance uid that left the bags
+//
+// Confirmed against every crush in the capture: the uid of the item placed in
+// the breaker arrives here 1 to 11 seconds after the crush destroyed it, 8 of 8.
+
+/// The instance uid this message says has left the inventory.
+pub fn inventory_remove(body: &[u8]) -> Option<u64> {
+    let mut r = Reader::new(body);
+    while !r.eof() {
+        let (field, wt) = r.tag()?;
+        if field == 3 && wt == WireType::Varint {
+            let uid = r.varint()?;
+            if uid != 0 {
+                return Some(uid);
             }
         } else if !r.skip(wt) {
             return None;
@@ -798,6 +888,61 @@ mod tests {
     fn crush_rejects_unrelated_messages() {
         assert!(crush_result(PRICE_LIST).is_none(), "a price list is not a crush");
         assert!(item_detail(PRICE_LIST).is_none());
+    }
+
+    /// A real inventory listing, the smallest one in the capture. Identified by
+    /// the fact that every item ever put into the breaker appears in the
+    /// listing that preceded its placement, matched by instance uid.
+    ///
+    /// Kept as a file rather than inline: it is 2.3 KB of real bytes, and
+    /// trimming it to fit on the page would make it a fixture somebody wrote.
+    const INVENTORY: &[u8] = include_bytes!("../testdata/inventory.bin");
+
+    /// Real capture, packet #89909: the uid of an item that left the bags.
+    const GONE: &[u8] = &[0x18, 0xdc, 0xb7, 0x97, 0x6e];
+
+    #[test]
+    fn inventory_reads_every_slot() {
+        let items = inventory(INVENTORY).expect("parses");
+        assert_eq!(items.len(), 45, "one entry per occupied slot");
+        let first = &items[0];
+        assert_eq!((first.uid, first.item_id), (247103788, 9174));
+        assert_eq!(first.quantity, 1, "equipment is one copy");
+        assert_eq!(items.iter().map(|i| i.quantity).sum::<u64>(), 267);
+    }
+
+    #[test]
+    fn inventory_keeps_stack_sizes() {
+        let items = inventory(INVENTORY).expect("parses");
+        let stacked: Vec<_> = items.iter().filter(|i| i.quantity > 1).collect();
+        assert_eq!(stacked.len(), 10, "the resources, as opposed to the gear");
+        // 8 Moyenne pierre d'ame, the first stack in the listing.
+        let stack = stacked[0];
+        assert_eq!((stack.uid, stack.item_id, stack.quantity), (247103796, 9687, 8));
+    }
+
+    #[test]
+    fn inventory_remove_reads_the_uid() {
+        assert_eq!(inventory_remove(GONE), Some(231070684));
+    }
+
+    #[test]
+    fn inventory_reads_nothing_out_of_another_message() {
+        // A price list carries no item entry, so it reads as an empty bag --
+        // which is exactly why main.rs refuses to apply an empty snapshot: an
+        // empty listing and a listing that was never one look the same here.
+        assert_eq!(inventory(PRICE_LIST).map(|i| i.len()), Some(0));
+        // `inventory_remove` is a bare uid, and a bare uid is a shape half the
+        // protocol shares -- a price list's field 3 reads as one. Nothing tells
+        // these two apart structurally; the wire key does, which is why this
+        // parser is only ever handed a message that key already matched.
+        assert_eq!(inventory_remove(PRICE_LIST), Some(2609), "item id, not a uid");
+    }
+
+    #[test]
+    fn item_detail_defaults_to_one_copy() {
+        let d = item_detail_full(ITEM_DETAIL_RING).expect("ring decodes");
+        assert_eq!(d.quantity, 1, "no quantity on the wire means a single copy");
     }
 
     #[test]

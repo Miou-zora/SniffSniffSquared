@@ -40,6 +40,13 @@ actually levelled. DofusDB returns each recipe's ingredients alongside the
 query, so those are written into `recipes` on the way past and the basket does
 not then make sixty more requests to price them.
 
+**What you already own comes off the top.** Each pile row carries `have` from
+`inventory` and a `short` — the buy plan and the cost are for the shortfall, so
+a resource the bags already cover reads as settled and costs nothing. The
+pooling comparison (`pooled` vs `separate`) deliberately ignores stock: it
+answers "one trip or several", and subtracting stock from one side only would
+make it a different number that means nothing.
+
 **DofusDB serves 50 rows per request whatever `$limit` asks for.** Anything
 reading a list has to page or chunk; asking for 200 ids answers with about 50
 and the rest look like ids that do not exist. `fetchItems` chunks by 50,
@@ -86,6 +93,12 @@ All defined in `../init.sql`:
 - **`item_stats`** — `(uid, effect_id) -> item_id, value`. What one _instance_
   actually rolled, off the wire. Keyed by instance because two copies of an item
   roll differently, and the instance does not survive the crush.
+- **`inventory`** — what is in the bags: `uid -> item_id, quantity`, off the
+  wire. Two stacks of one resource are two rows, so "how many do I have" sums
+  by `item_id`. A listing from the server is a full snapshot and **replaces**
+  the table, so a row that vanished is an item that is gone — never treat an
+  empty table as "no data", it is also what an empty bag looks like. Quantity
+  is 1 for equipment, which does not carry the field at all.
 - **`items`** — `item_id -> name_fr, level, type_fr, icon_id`. Filled offline by
   `../tools/import_items.py`, so a name may be missing for a freshly seen id.
 - **`item_effects`** — the min/max an item _type_ can roll per line, from

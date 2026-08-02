@@ -47,8 +47,9 @@ run from `sniffer/`** (it resolves `keymap.json` and `proto/` relative to cwd).
 docker-compose.yml  postgres + pgadmin + web; `sniffer` service is Linux-only
 init.sql            schema both apps depend on (packets, prices, offers,
                     offer_stats, crushes, crush_placements, item_stats, items,
-                    item_effects, recipes, runes, + item_marks/app_settings/
-                    craft_basket which `web/` owns and writes)
+                    item_effects, recipes, runes, inventory,
+                    + item_marks/app_settings/craft_basket which `web/` owns
+                    and writes)
                     + views item_effect_weights, item_break_weight
 docs/               observations.md — annotated real captures
                     brisage-model.md + brisage-runes.json — the kamas maths,
@@ -64,6 +65,8 @@ tools/              import_runes.py   seeds `runes` from brisage-runes.json
                                       archived packets into offers/offer_stats
                     backfill_crushes.py recovers crushes the interpreter once
                                       rejected for yielding no runes
+                    backfill_inventory.py replays the newest archived bag
+                                      listing into `inventory`
 RUNBOOK.md          the guide. Start here for anything protocol-related.
 
 sniffer/            the Rust capture app — RUN IT FROM THIS DIRECTORY
@@ -234,7 +237,16 @@ name it in `messages::DEFAULTS`, parse it in `interpret.rs` matching on the
 | `item_detail` | `kev` | uid -> item type id; cached to fill `crushes.item_id` |
 | `crush_request` | `ker` | the crush command; field 1 = focus effect id, absent if none. Display only |
 | `crush_slot_put` | `kch` | item put into the breaker -> `crush_placements`. Carries only the uid; the type comes from the `item_detail` that answers it |
+| `inventory` | `iss` | the whole bag as a snapshot -> `inventory` (replaces the table). Entries share `item_detail`'s shape, quantity at field 3 |
+| `inventory_remove` | `ivf` | one instance has left the bag -> deletes that row. A bare uid at field 3 |
 | `price_list_legacy` | `kdh` | the 2026-07-10 price list; gone from the wire, kept for tests |
+
+`inventory` was identified without reading anything off the screen: every item
+ever put into the breaker (12 of 12, matched by instance uid) appears in the
+`iss` that preceded its placement, and none appear in `iso`, the other
+container listing. `ivf` followed from the same set — the crushed uid arrives
+there 1–11 s after each crush, 8 of 8. Both checks are one query each and are
+worth redoing if a build rotates the keys.
 
 Next up (RUNBOOK part 3 items 5-6): identify `iuz` — 3 seen, 68-80 KB each,
 server-only, matched a full price ladder during known-plaintext search, so it

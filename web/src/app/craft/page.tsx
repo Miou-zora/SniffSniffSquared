@@ -62,9 +62,11 @@ export default async function CraftPage() {
       <h1 className="text-heading-lg tracking-heading-lg mt-12">
         {view.entries.length === 0
           ? "Nothing to craft yet"
-          : view.cost === null
-            ? `${view.pile.length} resource${view.pile.length === 1 ? "" : "s"} to buy`
-            : `${k(view.cost)} of resources`}
+          : view.ready
+            ? "You have everything"
+            : view.cost === null
+              ? `${view.pile.length} resource${view.pile.length === 1 ? "" : "s"} to buy`
+              : `${k(view.cost)} left to buy`}
       </h1>
 
       <div className="mt-24">
@@ -76,9 +78,22 @@ export default async function CraftPage() {
       ) : (
         <>
           <p className="text-body tracking-body text-sage-40 mt-12 max-w-[74ch]">
-            Quantities are added up across the whole basket before they are priced, so a
-            resource two crafts share is bought once, off the batch ladder that fits the
-            total.
+            {view.ready ? (
+              <>
+                Every resource these crafts need is already in your bags. Buy anything
+                else and the counts here follow it, off the wire.{" "}
+              </>
+            ) : (
+              <>
+                Quantities are added up across the whole basket before they are priced, so
+                a resource two crafts share is bought once, off the batch ladder that fits
+                the total. What you are carrying comes off the top —{" "}
+                <span className="text-phosphor-white">
+                  {view.covered} of {view.pile.length}
+                </span>{" "}
+                already covered.{" "}
+              </>
+            )}
             {view.unpriced > 0 && (
               <>
                 {" "}
@@ -237,6 +252,7 @@ function Pile({ rows, total }: { rows: PileRow[]; total: number | null }) {
           <tr className="border-phosphor-blue-black text-caption tracking-caption text-deep-fern border-b uppercase">
             <th className="py-12 pr-16 pl-20 font-medium">resource</th>
             <th className="py-12 pr-16 text-right font-medium">need</th>
+            <th className="py-12 pr-16 text-right font-medium">have</th>
             <th className="py-12 pr-16 font-medium">buy</th>
             <th className="py-12 pr-20 text-right font-medium">cost</th>
           </tr>
@@ -260,20 +276,47 @@ function Pile({ rows, total }: { rows: PileRow[]; total: number | null }) {
                 {kamas.format(r.quantity)}
               </td>
               <td
-                className="text-sage-40 py-12 pr-16 tabular-nums"
+                className={`py-12 pr-16 text-right tabular-nums ${
+                  r.short === 0
+                    ? "text-lime-pulse"
+                    : r.have > 0
+                      ? "text-moss-80"
+                      : "text-deep-fern"
+                }`}
                 title={
-                  r.plan === null
-                    ? "No price captured for this resource"
-                    : r.plan.rule === "cheapest"
-                      ? "One batch size for the lot — mixing would cost more per unit"
-                      : undefined
+                  r.short === 0
+                    ? "In the bags — nothing to buy"
+                    : r.have > 0
+                      ? `${r.short} short`
+                      : "None in the bags"
                 }
               >
-                {r.plan === null ? (
+                {kamas.format(r.have)}
+              </td>
+              <td
+                className="text-sage-40 py-12 pr-16 tabular-nums"
+                title={
+                  r.short === 0
+                    ? "Already covered by what you are carrying"
+                    : r.plan === null
+                      ? "No price captured for this resource"
+                      : r.plan.rule === "cheapest"
+                        ? "One batch size for the lot — mixing would cost more per unit"
+                        : undefined
+                }
+              >
+                {r.short === 0 ? (
+                  // The one place the lime is spent on a row: this is the line
+                  // you stop reading, and a tick is faster than a number.
+                  <span className="text-lime-pulse">✓ have it</span>
+                ) : r.plan === null ? (
                   <span className="text-deep-fern">no price</span>
                 ) : (
                   <>
                     {describePlan(r.plan)}
+                    {r.have > 0 && (
+                      <span className="text-deep-fern"> · {r.short} short</span>
+                    )}
                     {r.overbuy > 0 && (
                       <span className="text-deep-fern"> · {r.overbuy} spare</span>
                     )}
@@ -281,7 +324,7 @@ function Pile({ rows, total }: { rows: PileRow[]; total: number | null }) {
                 )}
               </td>
               <td className="text-sage-40 py-12 pr-20 text-right tabular-nums">
-                {r.cost === null ? "—" : k(r.cost)}
+                {r.cost === null ? "—" : r.cost === 0 ? "—" : k(r.cost)}
               </td>
             </tr>
           ))}
@@ -291,6 +334,7 @@ function Pile({ rows, total }: { rows: PileRow[]; total: number | null }) {
             <td className="text-caption tracking-caption text-deep-fern py-12 pr-16 pl-20 uppercase">
               total
             </td>
+            <td />
             <td />
             <td />
             <td className="text-phosphor-white py-12 pr-20 text-right tabular-nums">

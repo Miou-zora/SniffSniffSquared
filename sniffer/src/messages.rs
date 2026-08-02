@@ -40,6 +40,10 @@ pub const DEFAULTS: &[(&str, &str)] = &[
     // putting an item into the breaker's slot; carries only the instance uid,
     // the type arrives in the item_detail that answers it
     ("crush_slot_put", "kch"),
+    // the whole bag, as a snapshot — see interpret::inventory
+    ("inventory", "iss"),
+    // one instance has left the bag: crushed, sold, dropped
+    ("inventory_remove", "ivf"),
 ];
 
 /// Where an override file is looked for, relative to the working directory.

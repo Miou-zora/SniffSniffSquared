@@ -159,6 +159,25 @@ CREATE TABLE IF NOT EXISTS item_stats (
 
 CREATE INDEX IF NOT EXISTS idx_item_stats_item ON item_stats (item_id);
 
+-- What is in the bags, off the wire. One row per stack.
+--
+-- The listing the server sends is a full snapshot, so a snapshot replaces this
+-- table rather than adding to it: an item sold while the sniffer was not
+-- running has to disappear, and a table that only grows would keep promising
+-- resources that are long gone. Removals arrive on their own and delete a row.
+--
+-- Two stacks of the same resource are two rows, because the wire keeps them
+-- apart. Anything asking "how many do I have" sums by item_id. Quantity is 1
+-- for equipment, which does not carry the field at all.
+CREATE TABLE IF NOT EXISTS inventory (
+    uid      BIGINT PRIMARY KEY,
+    item_id  BIGINT NOT NULL,
+    quantity BIGINT NOT NULL,
+    seen_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_inventory_item ON inventory (item_id);
+
 -- Item name/level/type, resolved from DofusDB by tools/import_items.py.
 --
 -- Deliberately not filled by the sniffer: the capture path stays free of

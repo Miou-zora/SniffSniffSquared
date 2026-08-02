@@ -260,6 +260,33 @@ const ITEM_STAT_INSERT: &str = "INSERT INTO item_stats (uid, effect_id, item_id,
     VALUES ($1,$2,$3,$4)
     ON CONFLICT (uid, effect_id) DO UPDATE SET value = EXCLUDED.value, seen_at = now()";
 
+/// What is actually in the bags, keyed by instance.
+///
+/// The listing the server sends is a full snapshot, so a snapshot replaces the
+/// table rather than adding to it — an item sold while the sniffer was not
+/// running has to disappear, and a table that only ever grows would keep
+/// promising resources that are long gone.
+///
+/// Quantity is the stack size: 1 for equipment, which the wire leaves out
+/// entirely, and the real count for resources. Two stacks of the same resource
+/// are two rows, because the wire keeps them apart; anything asking "how many
+/// do I have" sums by item_id.
+const INVENTORY_DDL: &str = "CREATE TABLE IF NOT EXISTS inventory (
+    uid      BIGINT PRIMARY KEY,
+    item_id  BIGINT NOT NULL,
+    quantity BIGINT NOT NULL,
+    seen_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_inventory_item ON inventory (item_id);
+DROP TRIGGER IF EXISTS trg_inventory_notify ON inventory;
+CREATE TRIGGER trg_inventory_notify AFTER INSERT OR UPDATE OR DELETE ON inventory
+    FOR EACH STATEMENT EXECUTE FUNCTION notify_breaker()";
+
+const INVENTORY_INSERT: &str = "INSERT INTO inventory (uid, item_id, quantity)
+    VALUES ($1,$2,$3)
+    ON CONFLICT (uid) DO UPDATE SET item_id = EXCLUDED.item_id,
+        quantity = EXCLUDED.quantity, seen_at = now()";
+
 /// Matches the `packets` table in init.sql. Re-declared here so the sniffer
 /// works against a database that was created before that table existed.
 const PACKETS_DDL: &str = "CREATE TABLE IF NOT EXISTS packets (
@@ -331,12 +358,75 @@ fn build_dispatch() -> Dispatcher {
     if stats_db.is_some() {
         println!("[db] connected; item_detail stat lines -> table item_stats");
     }
+    // The bags. A listing replaces the table; a removal deletes one row; and an
+    // item described on its own updates that row, which is how a stack that
+    // grew between listings gets its new size.
+    let mut inventory_db = db_client_with(&with_notify(INVENTORY_DDL));
+    if inventory_db.is_some() {
+        println!("[db] connected; inventory -> table inventory");
+    }
+    let mut detail_inventory_db = db_client_with(&with_notify(INVENTORY_DDL));
+    if let Some(inventory_key) = messages::keymap().key("inventory") {
+        d.on(inventory_key, move |e| {
+            let Some(items) = interpret::inventory(e.body) else { return };
+            // An empty listing is a real answer, but it is also what a parse
+            // that quietly went wrong looks like, and acting on it would wipe
+            // the table. A bag with nothing in it is not worth that risk.
+            if items.is_empty() {
+                return;
+            }
+            let Some(client) = inventory_db.as_mut() else { return };
+            // One transaction: a half-applied snapshot would read as an
+            // inventory that holds neither the old items nor all the new ones.
+            let result = client.build_transaction().start().and_then(|mut tx| {
+                tx.execute("DELETE FROM inventory", &[])?;
+                for item in &items {
+                    tx.execute(
+                        INVENTORY_INSERT,
+                        &[&(item.uid as i64), &(item.item_id as i64), &(item.quantity as i64)],
+                    )?;
+                }
+                tx.commit()
+            });
+            if let Err(err) = result {
+                eprintln!("[db] inventory snapshot failed: {err}");
+            }
+        });
+    }
+    if let Some(gone_key) = messages::keymap().key("inventory_remove") {
+        let mut gone_db = db_client_with(&with_notify(INVENTORY_DDL));
+        d.on(gone_key, move |e| {
+            let Some(uid) = interpret::inventory_remove(e.body) else { return };
+            if let Some(client) = gone_db.as_mut() {
+                if let Err(err) =
+                    client.execute("DELETE FROM inventory WHERE uid = $1", &[&(uid as i64)])
+                {
+                    eprintln!("[db] inventory delete failed: {err}");
+                }
+            }
+        });
+    }
+
     if let Some(detail_key) = messages::keymap().key("item_detail") {
         let cache = uid_to_item.clone();
         let pending = awaiting_placement.clone();
         d.on(detail_key, move |e| {
             if let Some(detail) = interpret::item_detail_full(e.body) {
                 let (uid, item) = (detail.uid, detail.item_id);
+                // Only an item already in the bag: a detail also arrives for
+                // things merely looked at — a marketplace listing, someone
+                // else's gear — and those are not yours to count.
+                if let Some(client) = detail_inventory_db.as_mut() {
+                    let row: [&(dyn postgres::types::ToSql + Sync); 3] =
+                        [&(uid as i64), &(item as i64), &(detail.quantity as i64)];
+                    if let Err(err) = client.execute(
+                        "UPDATE inventory SET item_id = $2, quantity = $3, seen_at = now()
+                           WHERE uid = $1",
+                        &row,
+                    ) {
+                        eprintln!("[db] inventory update failed: {err}");
+                    }
+                }
                 if let Some(client) = stats_db.as_mut() {
                     for (effect, value) in &detail.stats {
                         let row: [&(dyn postgres::types::ToSql + Sync); 4] =

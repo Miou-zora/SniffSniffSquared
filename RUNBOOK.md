@@ -733,6 +733,51 @@ regardless, it is a heartbeat or entity update and the size distribution
 The higher-volume keys above are better targets if the goal is understanding
 the session rather than this particular message.
 
+### Resolved: the inventory is `iss`, and `ivf` removes from it
+
+Identified with no known plaintext at all, which is worth remembering as a
+method: **the archive can be its own ground truth.** Every item ever put into
+the breaker is an item the player was carrying, and `crush_placements` records
+the instance uid of each one. So:
+
+```sql
+-- for each placement, does the newest listing before it contain that uid?
+```
+
+12 placements, 12 hits in `iss`, 0 in `iso` — the other big container listing
+the server sends. Nothing else in the capture holds that set. `ivf` fell out of
+the same anchor: the crushed uid turns up in one 1–11 s after each crush, 8 of
+8. Both are a single query and neither needed the game running.
+
+Shapes, which reuse `item_detail`'s entry:
+
+```
+iss  1 (repeated, one per slot)
+       1  varint  slot
+       4  message
+            1  varint  instance uid
+            3  varint  stack size   <- absent for equipment, read as 1
+            4  varint  item type id
+            5  message repeated, stat lines (8 = value, 9 = effect id)
+
+ivf  3  varint  the uid that left the bags
+```
+
+`iss` is a **snapshot, not a delta** — it is the whole bag, so storing it means
+replacing the table. `sniffer/src/main.rs` does that in one transaction and
+refuses to apply an empty listing: an empty bag and a parse that quietly failed
+look identical here, and only one of them should wipe the table.
+
+`ivf` is a bare uid in field 3, a shape half the protocol shares — a price list
+reads as one. Nothing tells them apart structurally; the wire key does. That is
+fine as long as the parser is only ever handed a message that key matched, and
+`interpret::inventory_reads_nothing_out_of_another_message` pins exactly that.
+
+Not yet answered: what arrives when a stack you already own grows — buying 10
+more of something already in the bag. `item_detail` for that uid updates the
+row, and the next listing corrects everything regardless, so counts are right
+within a snapshot either way.
+
 ### Resolved: item ids are DofusDB ids
 
 `prices.item_id` can be looked up directly at `https://api.dofusdb.fr/items/<id>`

@@ -49,7 +49,14 @@ export interface PileRow {
   iconId: number | null;
   /** Units the recipes ask for. */
   quantity: number;
-  /** Null when nothing in `prices` quotes this resource. */
+  /** Units already in the bags, off the wire. */
+  have: number;
+  /** What is still missing — 0 once the bags cover the recipe. */
+  short: number;
+  /**
+   * The buy plan for what is missing, not for the whole line. Null when nothing
+   * in `prices` quotes this resource; absent once you own enough.
+   */
   plan: BuyPlan | null;
   cost: number | null;
   /** Units the plan buys beyond what is needed, because a batch overshot. */
@@ -74,6 +81,28 @@ export interface BasketView {
   separate: number;
   /** Basket items with no recipe at all. */
   uncraftable: number;
+  /** Resources the bags already cover in full. */
+  covered: number;
+  /** True when every resource is covered — nothing left to buy. */
+  ready: boolean;
+}
+
+/**
+ * How many units of each item are in the bags.
+ *
+ * Summed by item id: two stacks of the same resource are two rows on the wire
+ * and two rows here, but one number at the counter.
+ */
+export async function held(itemIds: number[]): Promise<Map<number, number>> {
+  if (itemIds.length === 0) return new Map();
+  const rows = await query<{ item_id: string; units: string }>(
+    `SELECT item_id, sum(quantity) AS units
+       FROM inventory
+      WHERE item_id = ANY($1::bigint[])
+      GROUP BY item_id`,
+    [[...new Set(itemIds)]],
+  );
+  return new Map(rows.map((r) => [Number(r.item_id), Number(r.units)]));
 }
 
 export async function basketQuantities(): Promise<Map<number, number>> {
@@ -377,6 +406,8 @@ export async function loadBasket(): Promise<BasketView> {
       pooled: 0,
       separate: 0,
       uncraftable: 0,
+      covered: 0,
+      ready: false,
     };
   }
 
@@ -420,6 +451,8 @@ export async function loadBasket(): Promise<BasketView> {
         name: named(line.itemId),
         iconId: names.get(line.itemId)?.iconId ?? null,
         quantity: 0,
+        have: 0,
+        short: 0,
         plan: null,
         cost: null,
         overbuy: 0,
@@ -431,11 +464,20 @@ export async function loadBasket(): Promise<BasketView> {
     }
   }
 
+  // What is already in the bags comes off the top: the trip is for what is
+  // missing, and a line you can already cover costs nothing and needs no plan.
+  const owned = await held([...totals.keys()]);
+  let pooled = 0;
   for (const row of totals.values()) {
+    row.have = owned.get(row.itemId) ?? 0;
+    row.short = Math.max(0, row.quantity - row.have);
     const ladder = ladders.get(row.itemId);
-    row.plan = ladder ? planBuy(row.quantity, ladder) : null;
-    row.cost = row.plan?.cost ?? null;
-    row.overbuy = row.plan ? row.plan.units - row.quantity : 0;
+    row.plan = row.short > 0 && ladder ? planBuy(row.short, ladder) : null;
+    row.cost = row.short === 0 ? 0 : (row.plan?.cost ?? null);
+    row.overbuy = row.plan ? row.plan.units - row.short : 0;
+    // The batching comparison is about the whole recipe, stock aside — see the
+    // note on `separate` below.
+    pooled += (ladder ? planBuy(row.quantity, ladder)?.cost : null) ?? 0;
   }
 
   // Sorted by how much you have to buy, not by what it costs: the list is read
@@ -445,7 +487,9 @@ export async function loadBasket(): Promise<BasketView> {
     (a, b) => b.quantity - a.quantity || a.name.localeCompare(b.name, "fr"),
   );
 
-  const unpriced = pile.filter((r) => r.cost === null).length;
+  // A line you already own does not need a price to be settled, so it is not
+  // counted as missing one.
+  const unpriced = pile.filter((r) => r.short > 0 && r.cost === null).length;
   const cost = unpriced > 0 ? null : pile.reduce((sum, r) => sum + (r.cost ?? 0), 0);
 
   // What one entry costs on its own, and what the same shopping costs bought
@@ -453,6 +497,10 @@ export async function loadBasket(): Promise<BasketView> {
   // up: an unpriced ingredient makes the *total* unknowable, but it says
   // nothing about whether pooling the rest was worth doing, and that comparison
   // is the reason this page exists.
+  //
+  // Both also ignore what is already in the bags. They answer a question about
+  // batching -- one trip or several -- and subtracting stock from one side only
+  // would turn that into a different, meaningless number.
   let separate = 0;
   for (const entry of entries) {
     if (entry.ingredients === null) continue;
@@ -475,8 +523,10 @@ export async function loadBasket(): Promise<BasketView> {
     pile,
     cost,
     unpriced,
-    pooled: pile.reduce((sum, r) => sum + (r.cost ?? 0), 0),
+    pooled,
     separate,
     uncraftable: entries.filter((e) => e.ingredients === null).length,
+    covered: pile.filter((r) => r.short === 0).length,
+    ready: pile.length > 0 && pile.every((r) => r.short === 0),
   };
 }
