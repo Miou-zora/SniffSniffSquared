@@ -84,9 +84,12 @@ export function BulkAdd({ jobs }: { jobs: JobOption[] }) {
         job: { id: jobId, minLevel: range.lo, maxLevel: range.hi },
       }),
     });
-    const body: { found?: number; added?: number; error?: string } = await res
-      .json()
-      .catch(() => ({}));
+    const body: {
+      found?: number;
+      added?: number;
+      levels?: [number, number] | null;
+      error?: string;
+    } = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) {
       setReport(body.error ?? "that did not work");
@@ -94,12 +97,16 @@ export function BulkAdd({ jobs }: { jobs: JobOption[] }) {
     }
     const found = body.found ?? 0;
     const added = body.added ?? 0;
+    // Both ends of the band are inclusive, and the levels actually found say so
+    // out loud -- a band whose top level simply has no recipes is otherwise
+    // indistinguishable from one that was quietly cut short.
+    const span = body.levels ? ` · levels ${body.levels[0]}–${body.levels[1]}` : "";
     setReport(
       found === 0
         ? "nothing is crafted in that range"
         : added === 0
-          ? `all ${found} were already in the basket`
-          : `added ${added} of ${found}${added < found ? ", the rest were already in" : ""}`,
+          ? `all ${found} were already in the basket${span}`
+          : `added ${added} of ${found}${added < found ? ", rest already in" : ""}${span}`,
     );
     router.refresh();
   };
@@ -123,10 +130,12 @@ export function BulkAdd({ jobs }: { jobs: JobOption[] }) {
             ))}
           </select>
         </Field>
+        {/* "including" rather than "to": both ends are inclusive, and a plain
+            "to 45" reads as a stop sign to half the people who see it. */}
         <Field label="from level">
           <Level value={min} onChange={setMin} />
         </Field>
-        <Field label="to level">
+        <Field label="up to and including">
           <Level value={max} onChange={setMax} />
         </Field>
         <button

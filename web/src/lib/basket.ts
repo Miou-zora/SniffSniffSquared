@@ -279,9 +279,9 @@ export async function addJobRange(
   jobId: number,
   minLevel: number,
   maxLevel: number,
-): Promise<{ found: number; added: number }> {
+): Promise<{ found: number; added: number; levels: [number, number] | null }> {
   const recipes = await jobRecipes(jobId, minLevel, maxLevel);
-  if (recipes.length === 0) return { found: 0, added: 0 };
+  if (recipes.length === 0) return { found: 0, added: 0, levels: null };
 
   await rememberRecipes(recipes);
 
@@ -298,7 +298,16 @@ export async function addJobRange(
   // answer is cached into `items` for every other page too.
   await fetchItems(recipes.map((r) => r.itemId));
 
-  return { found: recipes.length, added: inserted.length };
+  // The levels actually found, which is not always the band asked for: both
+  // ends are inclusive, but a band can simply have nothing at its top. Saying
+  // which levels came back is the only way to tell those two apart from the
+  // outside, and "did it include 45?" is otherwise unanswerable.
+  const levels = recipes.map((r) => r.level).filter((l) => l > 0);
+  return {
+    found: recipes.length,
+    added: inserted.length,
+    levels: levels.length > 0 ? [Math.min(...levels), Math.max(...levels)] : null,
+  };
 }
 
 /**
