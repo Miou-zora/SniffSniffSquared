@@ -18,6 +18,17 @@ projection table on the right. `/items` is every breakable item — what it is
 worth and whether it has been measured — and `/craft` is the craft basket,
 several crafts pooled into one shopping list.
 
+**`/item/[id]` has two shapes.** Something breakable leads with its projection
+and carries its price history underneath; a rune or a resource has no
+projection to lead with, so the history is the page. One item, one address —
+the price history used to be a route of its own, which meant two half-answers
+per item. `/price/[id]` redirects.
+
+**Carrying rune-mapped lines does not make an item breakable.** A rune *is* a
+stat line, so that test alone gave Rune Vi a projection of what it is worth to
+turn into runes. `isBreakableKind` excludes it by type name, and `broken.ts`
+makes the same exclusion in SQL — one rule in two languages.
+
 **`/items` was two pages.** "What is worth breaking" and "what have I not
 broken yet" turned out to be the same table read with different columns hidden,
 and keeping them apart meant neither could sort by the other's numbers while
@@ -32,7 +43,8 @@ src/lib/breaker.ts     loads a placement and applies it (server)
 src/lib/worth.ts       the economics of a set of items, one SQL pass (server)
 src/lib/broken.ts      the catalogue: what is breakable, and what was measured
 src/lib/catalogue.ts   the two joined, which is what /items renders
-src/lib/history.ts     one item's price over time, for /price/[id]
+src/lib/history.ts     one item's price over time, shown on its item page
+src/lib/kind.ts        is this the sort of item the crusher takes
 src/lib/basket.ts      the craft basket: recipes pooled into one buy (server)
 src/app/projection.tsx the table — client, for the metric switch and n+x
 src/app/live.tsx       LISTEN/NOTIFY subscriber that refreshes the page
@@ -306,7 +318,8 @@ something else is already on it** — usually the `web` container; stop it with
 
 **Recharts**, per the chart guidance in `.agents/skills/ui-ux-pro-max` — line
 chart for a trend over time, SVG under a thousand points, hover plus zoom, and
-a data table as the accessible fallback. `/price/[id]` is the only chart so far.
+a data table as the accessible fallback. The price history on `/item/[id]` is
+the only chart so far.
 
 Two decisions worth keeping if more are added:
 

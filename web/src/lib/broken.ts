@@ -124,6 +124,9 @@ async function jobsFor(itemIds: number[]): Promise<Map<number, number>> {
  * Runes and percepteur gear carry stat lines and are not things you break for a
  * coefficient, so they are not part of the count.
  *
+ * `isBreakableKind` in lib/kind.ts is this same rule for one item at a time —
+ * change them together.
+ *
  * Every test is wrapped in COALESCE, and that is not decoration: `type_id` is
  * NULL on everything the read-side cache resolved — the offline importer is the
  * only thing that fills it — so `type_id = 78` is NULL there, `NOT (NULL OR …)`

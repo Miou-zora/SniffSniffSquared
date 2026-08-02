@@ -32,7 +32,16 @@ export default async function Home() {
  * They differ only in how the item was chosen — what is worth knowing about it
  * is the same either way, and duplicating this is how the two would drift.
  */
-export function ItemView({ view, verdict }: { view: BreakerView; verdict: Verdict }) {
+export function ItemView({
+  view,
+  verdict,
+  children,
+}: {
+  view: BreakerView;
+  verdict: Verdict;
+  /** Rendered under the projection — the item page hangs its price history here. */
+  children?: React.ReactNode;
+}) {
   const best = view.shown.outcomes[0];
   const priced = best !== undefined && best.unitPrice !== null;
 
@@ -50,6 +59,7 @@ export function ItemView({ view, verdict }: { view: BreakerView; verdict: Verdic
           <Projection model={view.projection} itemName={view.item.name} />
         </div>
       )}
+      {children}
     </main>
   );
 }

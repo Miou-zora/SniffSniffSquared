@@ -45,7 +45,7 @@ export function RunePrice({
     // exists if we know which item the rune is.
     return itemId ? (
       <Link
-        href={`/price/${itemId}`}
+        href={`/item/${itemId}`}
         className={`hover:text-lime-pulse ${className ?? ""}`}
       >
         {rune}
@@ -66,7 +66,7 @@ export function RunePrice({
 
   return (
     <Component
-      {...(itemId ? { href: `/price/${itemId}` } : { tabIndex: 0 })}
+      {...(itemId ? { href: `/item/${itemId}` } : { tabIndex: 0 })}
       className={`decoration-circuit-border cursor-help underline decoration-dotted underline-offset-4 outline-none ${className ?? ""}`}
       onPointerEnter={(e: React.PointerEvent<HTMLElement>) => show(e.currentTarget)}
       onPointerLeave={() => setAt(null)}
@@ -82,7 +82,7 @@ export function RunePrice({
             className="border-circuit-border bg-ground-iron text-caption tracking-caption pointer-events-none z-50 block rounded-xl border px-12 py-8 whitespace-nowrap"
           >
             <span className="text-deep-fern block uppercase">
-              {rune} on the market{itemId ? " · click for its history" : ""}
+              {rune} on the market{itemId ? " · click for its page" : ""}
             </span>
             {SIZES.map((size, i) => (
               <span key={size} className="mt-4 flex justify-between gap-16">
