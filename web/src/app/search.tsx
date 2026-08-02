@@ -111,10 +111,7 @@ export function ItemSearch({
                       remember. Items with none keep the square so the list of
                       names stays a column. */}
                   {hit.iconId === null ? (
-                    <span
-                      aria-hidden
-                      className="border-circuit-border block h-24 w-24 shrink-0 rounded-md border"
-                    />
+                    <span aria-hidden className="block h-24 w-24 shrink-0" />
                   ) : (
                     <Image
                       src={iconUrl(hit.iconId)}

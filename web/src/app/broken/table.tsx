@@ -158,10 +158,7 @@ export function BrokenTable({
                 <td className="py-12 pr-16 pl-20">
                   <div className="flex items-center gap-12">
                     {r.iconId === null ? (
-                      <span
-                        aria-hidden
-                        className="border-circuit-border block h-24 w-24 shrink-0 rounded-md border"
-                      />
+                      <span aria-hidden className="block h-24 w-24 shrink-0" />
                     ) : (
                       <Image
                         src={iconUrl(r.iconId)}

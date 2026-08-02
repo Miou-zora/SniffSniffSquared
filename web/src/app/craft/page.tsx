@@ -110,7 +110,8 @@ function Empty() {
  *
  * `alt=""`: the name is right next to it, and a screen reader reading the same
  * word twice is worse than not reading the picture at all. An item DofusDB has
- * no icon for keeps the same square of space, so the column stays a column.
+ * no icon for keeps the space but draws nothing — the column stays a column
+ * without a row of empty boxes reading as a decoration nobody asked for.
  *
  * `unoptimized` because these are already 13-20 KB PNGs shown at 32 px: running
  * them through the optimizer would add a server round trip, and a sharp
@@ -121,7 +122,7 @@ function Icon({ iconId, size = 32 }: { iconId: number | null; size?: number }) {
     return (
       <span
         aria-hidden
-        className="border-circuit-border block shrink-0 rounded-lg border"
+        className="block shrink-0"
         style={{ width: size, height: size }}
       />
     );

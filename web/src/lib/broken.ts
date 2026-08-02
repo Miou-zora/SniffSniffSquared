@@ -11,6 +11,7 @@
  * what "breakable" means — a template with no rune lines yields nothing.
  */
 import { craftJobs, rememberRecipes, type JobRecipe } from "@/lib/basket";
+import { fetchItems } from "@/lib/breaker";
 import { query } from "@/lib/db";
 import type { Status } from "@/lib/verdict";
 
@@ -184,10 +185,18 @@ export async function brokenList(): Promise<BrokenView> {
     jobName: null,
   }));
 
-  const [byItem, jobs] = await Promise.all([
+  // Icons for the rows that have never been drawn anywhere else. Cached back
+  // into `items`, so this is one round trip per item ever rather than per view,
+  // and it is what keeps the left of the table from being a column of blanks.
+  const iconless = out.filter((r) => r.iconId === null).map((r) => r.itemId);
+  const [byItem, jobs, icons] = await Promise.all([
     jobsFor(out.map((r) => r.itemId)),
     craftJobs(),
+    fetchItems(iconless),
   ]);
+  for (const row of out) {
+    if (row.iconId === null) row.iconId = icons.get(row.itemId)?.iconId ?? null;
+  }
   const jobName = new Map(jobs.map((j) => [j.id, j.name]));
   for (const row of out) {
     row.jobId = byItem.get(row.itemId) ?? null;
