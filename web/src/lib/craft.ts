@@ -37,7 +37,19 @@ export interface BuyPlan {
   rule: "mixed" | "cheapest";
 }
 
-/** The sizes this ladder actually quotes, largest first. */
+/**
+ * The sizes this ladder actually quotes and that are worth buying, largest
+ * first.
+ *
+ * A bigger batch is not automatically a better deal — sellers price x10 above
+ * ten x1 often enough that it matters. Any size a smaller one beats per unit is
+ * dropped here, because the smaller one substitutes for it exactly, with no
+ * overbuy and at a lower price. Without this the fill below reaches for the
+ * biggest batch that fits and pays over the odds for it: 12 Plume de Batofu came
+ * out as 1x10 + 2x1 at 18 892 k where 12x1 costs 15 564 k.
+ *
+ * Ties keep the larger size — same kamas, fewer purchases at the counter.
+ */
 function offered(ladder: Ladder): { size: number; price: number }[] {
   const bySize: Record<number, number> = {
     1: ladder.b1,
@@ -45,9 +57,21 @@ function offered(ladder: Ladder): { size: number; price: number }[] {
     100: ladder.b100,
     1000: ladder.b1000,
   };
-  return SIZES.map((size) => ({ size, price: bySize[size] ?? 0 })).filter(
+  const quoted = SIZES.map((size) => ({ size, price: bySize[size] ?? 0 })).filter(
     (o) => o.price > 0,
   );
+
+  // Smallest first, so every size is judged against what is under it.
+  let best = Infinity;
+  const worthwhile: { size: number; price: number }[] = [];
+  for (const offer of [...quoted].reverse()) {
+    const perUnit = offer.price / offer.size;
+    if (perUnit <= best) {
+      worthwhile.push(offer);
+      best = perUnit;
+    }
+  }
+  return worthwhile.reverse();
 }
 
 function priceOf(picks: Pick[]): number {
