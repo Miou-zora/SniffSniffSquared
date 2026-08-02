@@ -34,6 +34,17 @@ shopping list at the wrong price. Ingredients are taken one level deep: an
 ingredient that is itself craftable is priced as a purchase, since the question
 the page answers is what to buy.
 
+It also fills in bulk: `addJobRange()` adds everything a job makes between two
+levels — every Bijoutier recipe from 41 to 45 — which is how a craft job is
+actually levelled. DofusDB returns each recipe's ingredients alongside the
+query, so those are written into `recipes` on the way past and the basket does
+not then make sixty more requests to price them.
+
+**DofusDB serves 50 rows per request whatever `$limit` asks for.** Anything
+reading a list has to page or chunk; asking for 200 ids answers with about 50
+and the rest look like ids that do not exist. `fetchItems` chunks by 50,
+`jobRecipes` pages with `$skip`.
+
 `brisage.ts` is imported from both sides, which is why it stays free of I/O.
 `Projection` receives weights and prices rather than finished rows, so the
 custom `n+x` column recomputes in the browser with no round trip.

@@ -100,6 +100,178 @@ export async function clearBasket(): Promise<void> {
   await query(`DELETE FROM craft_basket`);
 }
 
+/** A craft job, for the "everything this job makes between two levels" add. */
+export interface JobOption {
+  id: number;
+  name: string;
+}
+
+/**
+ * The game's jobs, from DofusDB. Cached for a week — the list changes with game
+ * releases, not with play. An outage returns nothing, which hides the bulk add
+ * rather than breaking the page.
+ */
+export async function craftJobs(): Promise<JobOption[]> {
+  try {
+    const res = await fetch("https://api.dofusdb.fr/jobs?$limit=50", {
+      next: { revalidate: 604_800 },
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (!res.ok) return [];
+    const body: unknown = await res.json();
+    const data = (body as { data?: unknown }).data;
+    if (!Array.isArray(data)) return [];
+    const out: JobOption[] = [];
+    for (const raw of data) {
+      const job = raw as { id?: unknown; name?: { fr?: unknown } };
+      const id = Number(job.id);
+      const name = job.name?.fr;
+      if (!Number.isFinite(id) || typeof name !== "string") continue;
+      out.push({ id, name });
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+  } catch {
+    return [];
+  }
+}
+
+/** One craftable a job makes, with the recipe that came back alongside it. */
+interface JobRecipe {
+  itemId: number;
+  level: number;
+  ingredients: { itemId: number; quantity: number }[];
+}
+
+/** DofusDB serves 50 rows a request whatever `$limit` says. */
+const PAGE = 50;
+/** 20 pages of results is already an unreadable basket; past that it is a typo. */
+const MAX_PAGES = 20;
+
+/**
+ * Everything `jobId` can make between two levels, recipe included.
+ *
+ * The recipe travels with the query, which is the point: adding 60 items would
+ * otherwise be 60 more requests when the basket comes to price them.
+ */
+async function jobRecipes(
+  jobId: number,
+  minLevel: number,
+  maxLevel: number,
+): Promise<JobRecipe[]> {
+  const out: JobRecipe[] = [];
+  for (let page = 0; page < MAX_PAGES; page++) {
+    let data: unknown;
+    try {
+      const url =
+        `https://api.dofusdb.fr/recipes?jobId=${jobId}` +
+        `&resultLevel[$gte]=${minLevel}&resultLevel[$lte]=${maxLevel}` +
+        `&$limit=${PAGE}&$skip=${page * PAGE}` +
+        `&$select[]=resultId&$select[]=resultLevel` +
+        `&$select[]=ingredientIds&$select[]=quantities`;
+      const res = await fetch(url, {
+        next: { revalidate: 604_800 },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!res.ok) break;
+      const body: unknown = await res.json();
+      data = (body as { data?: unknown }).data;
+    } catch {
+      // Whatever came back before the failure is still a usable basket.
+      break;
+    }
+    if (!Array.isArray(data) || data.length === 0) break;
+    for (const raw of data) {
+      const r = raw as {
+        resultId?: unknown;
+        resultLevel?: unknown;
+        ingredientIds?: unknown;
+        quantities?: unknown;
+      };
+      const itemId = Number(r.resultId);
+      if (!Number.isFinite(itemId)) continue;
+      const ids = r.ingredientIds;
+      const quantities = r.quantities;
+      // A mismatched pair is a recipe we cannot read rather than a partial one,
+      // and half a recipe would price the item too cheaply.
+      if (!Array.isArray(ids) || !Array.isArray(quantities)) continue;
+      if (ids.length === 0 || ids.length !== quantities.length) continue;
+      out.push({
+        itemId,
+        level: Number(r.resultLevel) || 0,
+        ingredients: ids.map((id, i) => ({
+          itemId: Number(id),
+          quantity: Number(quantities[i]),
+        })),
+      });
+    }
+    if (data.length < PAGE) break;
+  }
+  return out;
+}
+
+/**
+ * Keep the recipes that came back with the job query.
+ *
+ * Same table and same shape as tools/import_items.py writes, and replaced
+ * wholesale for the same reason: an ingredient dropped between game versions
+ * has to lose its row rather than linger next to the new one.
+ */
+async function rememberRecipes(recipes: JobRecipe[]): Promise<void> {
+  const withLines = recipes.filter((r) => r.ingredients.length > 0);
+  if (withLines.length === 0) return;
+  await query(`DELETE FROM recipes WHERE item_id = ANY($1::bigint[])`, [
+    withLines.map((r) => r.itemId),
+  ]);
+  const tuples: string[] = [];
+  const values: unknown[] = [];
+  for (const recipe of withLines) {
+    recipe.ingredients.forEach((ing, position) => {
+      const i = values.length;
+      tuples.push(`($${i + 1},$${i + 2},$${i + 3},$${i + 4})`);
+      values.push(recipe.itemId, position, ing.itemId, ing.quantity);
+    });
+  }
+  await query(
+    `INSERT INTO recipes (item_id, position, ingredient_id, quantity)
+     VALUES ${tuples.join(",")}
+     ON CONFLICT (item_id, position) DO UPDATE SET
+       ingredient_id = EXCLUDED.ingredient_id, quantity = EXCLUDED.quantity`,
+    values,
+  );
+}
+
+/**
+ * Add everything a job makes in a level band, one copy each.
+ *
+ * Items already in the basket keep the quantity you set — a bulk add is "make
+ * sure these are all in here", not "reset what I was doing".
+ */
+export async function addJobRange(
+  jobId: number,
+  minLevel: number,
+  maxLevel: number,
+): Promise<{ found: number; added: number }> {
+  const recipes = await jobRecipes(jobId, minLevel, maxLevel);
+  if (recipes.length === 0) return { found: 0, added: 0 };
+
+  await rememberRecipes(recipes);
+
+  const inserted = await query<{ item_id: string }>(
+    `INSERT INTO craft_basket (item_id, quantity)
+     SELECT unnest($1::bigint[]), 1
+     ON CONFLICT (item_id) DO NOTHING
+     RETURNING item_id`,
+    [recipes.map((r) => r.itemId)],
+  );
+
+  // Named now rather than on the next page load: 60 fresh ids is 60 rows
+  // reading "Item 10181" until something asks DofusDB who they are, and the
+  // answer is cached into `items` for every other page too.
+  await fetchItems(recipes.map((r) => r.itemId));
+
+  return { found: recipes.length, added: inserted.length };
+}
+
 /**
  * Recipes for many items at once.
  *

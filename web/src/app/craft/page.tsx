@@ -1,9 +1,15 @@
 import Image from "next/image";
 import Link from "next/link";
 
-import { AddToBasket, ClearBasket, Quantity } from "@/app/craft/controls";
+import { AddToBasket, BulkAdd, ClearBasket, Quantity } from "@/app/craft/controls";
 import { Live } from "@/app/live";
-import { loadBasket, type BasketEntry, type PileRow } from "@/lib/basket";
+import {
+  craftJobs,
+  loadBasket,
+  type BasketEntry,
+  type PileNeed,
+  type PileRow,
+} from "@/lib/basket";
 import { iconUrl } from "@/lib/icon";
 import { describePlan } from "@/lib/craft";
 
@@ -25,7 +31,7 @@ function k(v: number) {
  * on an item's page, read twice.
  */
 export default async function CraftPage() {
-  const view = await loadBasket();
+  const [view, jobs] = await Promise.all([loadBasket(), craftJobs()]);
   const have = Object.fromEntries(view.entries.map((e) => [e.itemId, e.quantity]));
   const saved = view.separate - view.pooled;
 
@@ -60,6 +66,10 @@ export default async function CraftPage() {
             ? `${view.pile.length} resource${view.pile.length === 1 ? "" : "s"} to buy`
             : `${k(view.cost)} of resources`}
       </h1>
+
+      <div className="mt-24">
+        <BulkAdd jobs={jobs} />
+      </div>
 
       {view.entries.length === 0 ? (
         <Empty />
@@ -188,6 +198,28 @@ function Crafts({ entries }: { entries: BasketEntry[] }) {
   );
 }
 
+/**
+ * Which crafts want this resource, and how much each takes.
+ *
+ * Cut to the three biggest with a count for the rest: a whole job's level band
+ * puts thirty crafts on one line of Ébonite, and thirty names is not a reason,
+ * it is a wall. The full list stays in the title for when it is.
+ */
+function NeedBy({ needBy }: { needBy: PileNeed[] }) {
+  const ordered = [...needBy].sort((a, b) => b.quantity - a.quantity);
+  const shown = ordered.slice(0, 3);
+  const rest = ordered.length - shown.length;
+  return (
+    <span
+      className="text-caption text-deep-fern block"
+      title={ordered.map((n) => `${n.quantity} × ${n.name}`).join("\n")}
+    >
+      {shown.map((n) => `${n.quantity} × ${n.name}`).join(" · ")}
+      {rest > 0 && ` · +${rest} more`}
+    </span>
+  );
+}
+
 function Pile({ rows, total }: { rows: PileRow[]; total: number | null }) {
   if (rows.length === 0) {
     return (
@@ -220,11 +252,7 @@ function Pile({ rows, total }: { rows: PileRow[]; total: number | null }) {
                   <Icon iconId={r.iconId} />
                   <div className="min-w-0">
                     <span className="text-phosphor-white">{r.name}</span>
-                    {r.needBy.length > 1 && (
-                      <span className="text-caption text-deep-fern block">
-                        {r.needBy.map((n) => `${n.quantity} × ${n.name}`).join(" · ")}
-                      </span>
-                    )}
+                    {r.needBy.length > 1 && <NeedBy needBy={r.needBy} />}
                   </div>
                 </div>
               </td>

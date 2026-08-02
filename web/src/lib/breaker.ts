@@ -600,41 +600,60 @@ function effectRanges(raw: unknown): ItemMeta["ranges"] {
   return out;
 }
 
+/**
+ * DofusDB serves at most 50 rows per request whatever `$limit` asks for, so a
+ * longer list has to be chunked — asking for 200 ids quietly answers about the
+ * first 50 and leaves the rest looking like items that do not exist. The
+ * importer has always chunked by 50; this is the same rule, read-side.
+ */
+const DOFUSDB_PAGE = 50;
+
 export async function fetchItems(itemIds: number[]): Promise<Map<number, ItemMeta>> {
   const out = new Map<number, ItemMeta>();
   if (itemIds.length === 0) return out;
-  try {
-    const params = itemIds.map((id) => `id[$in][]=${id}`).join("&");
-    const res = await fetch(
-      `https://api.dofusdb.fr/items?$limit=${itemIds.length}&${params}`,
-      { next: { revalidate: 604_800 }, signal: AbortSignal.timeout(4_000) },
-    );
-    if (!res.ok) return out;
-    const body: unknown = await res.json();
-    const data = (body as { data?: unknown }).data;
-    if (!Array.isArray(data)) return out;
-    for (const raw of data) {
-      const it = raw as {
-        id?: unknown;
-        level?: unknown;
-        iconId?: unknown;
-        name?: { fr?: unknown };
-        type?: { name?: { fr?: unknown } };
-      };
-      const id = Number(it.id);
-      if (!Number.isFinite(id)) continue;
-      const iconId = Number(it.iconId);
-      out.set(id, {
-        name: typeof it.name?.fr === "string" ? it.name.fr : null,
-        level: Number.isFinite(Number(it.level)) ? Number(it.level) : null,
-        type: typeof it.type?.name?.fr === "string" ? it.type.name.fr : null,
-        iconId: Number.isFinite(iconId) && iconId > 0 ? iconId : null,
-        ranges: effectRanges(raw),
-      });
-    }
-  } catch {
-    // Enrichment is a nicety; every caller has a fallback.
+
+  const chunks: number[][] = [];
+  for (let i = 0; i < itemIds.length; i += DOFUSDB_PAGE) {
+    chunks.push(itemIds.slice(i, i + DOFUSDB_PAGE));
   }
+
+  // One failing chunk costs its own ids, not the whole lookup.
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      try {
+        const params = chunk.map((id) => `id[$in][]=${id}`).join("&");
+        const res = await fetch(
+          `https://api.dofusdb.fr/items?$limit=${DOFUSDB_PAGE}&${params}`,
+          { next: { revalidate: 604_800 }, signal: AbortSignal.timeout(8_000) },
+        );
+        if (!res.ok) return;
+        const body: unknown = await res.json();
+        const data = (body as { data?: unknown }).data;
+        if (!Array.isArray(data)) return;
+        for (const raw of data) {
+          const it = raw as {
+            id?: unknown;
+            level?: unknown;
+            iconId?: unknown;
+            name?: { fr?: unknown };
+            type?: { name?: { fr?: unknown } };
+          };
+          const id = Number(it.id);
+          if (!Number.isFinite(id)) continue;
+          const iconId = Number(it.iconId);
+          out.set(id, {
+            name: typeof it.name?.fr === "string" ? it.name.fr : null,
+            level: Number.isFinite(Number(it.level)) ? Number(it.level) : null,
+            type: typeof it.type?.name?.fr === "string" ? it.type.name.fr : null,
+            iconId: Number.isFinite(iconId) && iconId > 0 ? iconId : null,
+            ranges: effectRanges(raw),
+          });
+        }
+      } catch {
+        // Enrichment is a nicety; every caller has a fallback.
+      }
+    }),
+  );
   await remember(out);
   return out;
 }
