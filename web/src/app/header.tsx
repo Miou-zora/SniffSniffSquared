@@ -17,6 +17,7 @@ const PAGES = [
   { href: "/", label: "breaker" },
   { href: "/worth", label: "worth breaking" },
   { href: "/craft", label: "craft basket" },
+  { href: "/broken", label: "coverage" },
 ] as const;
 
 export type PageHref = (typeof PAGES)[number]["href"];

@@ -14,8 +14,10 @@ Reads the Postgres database that the Rust sniffer writes to. **This app never
 captures traffic and never writes game data**; it is a reader.
 
 `/` is the **breaker page**: the item currently in the crusher on the left, a
-projection table on the right. `/worth` ranks what is worth breaking, and
-`/craft` is the craft basket — several crafts, one pooled shopping list.
+projection table on the right. `/worth` ranks what is worth breaking, `/craft`
+is the craft basket — several crafts, one pooled shopping list — and `/broken`
+is coverage: which items have had their coefficient measured and which have
+not.
 
 ```
 src/lib/brisage.ts     the model, pure functions, no I/O
@@ -23,6 +25,7 @@ src/lib/craft.ts       what a recipe costs off the batch ladder, pure, no I/O
 src/lib/breaker.ts     loads a placement and applies it (server)
 src/lib/worth.ts       the ranked list, one SQL pass (server)
 src/lib/basket.ts      the craft basket: recipes pooled into one buy (server)
+src/lib/broken.ts      which equipment has been crushed, and which has not
 src/app/projection.tsx the table — client, for the metric switch and n+x
 src/app/live.tsx       LISTEN/NOTIFY subscriber that refreshes the page
 ```
