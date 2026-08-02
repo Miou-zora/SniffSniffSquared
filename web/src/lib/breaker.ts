@@ -571,15 +571,10 @@ export interface ItemMeta {
   name: string | null;
   level: number | null;
   type: string | null;
-  /** DofusDB icon id — see `iconUrl`. */
+  /** DofusDB icon id — `iconUrl` in src/lib/icon.ts turns it into an image. */
   iconId: number | null;
   /** The template: what each line on this item type can roll between. */
   ranges: { effectId: number; min: number; max: number }[];
-}
-
-/** Where DofusDB draws an item's icon. Verified 200, 13-20 KB PNGs. */
-export function iconUrl(iconId: number): string {
-  return `https://api.dofusdb.fr/img/items/${iconId}.png`;
 }
 
 /**

@@ -34,7 +34,7 @@ export default async function WorthPage() {
         <p className="text-caption tracking-caption text-moss-70 uppercase">
           worth breaking
         </p>
-        <div className="flex items-center gap-16">
+        <div className="flex flex-wrap items-center justify-end gap-16">
           <Link
             href="/craft"
             className="text-caption tracking-caption text-fern-link hover:text-lime-pulse uppercase"

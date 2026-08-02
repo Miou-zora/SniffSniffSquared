@@ -4,7 +4,7 @@ import Link from "next/link";
 import { AddToBasket, ClearBasket, Quantity } from "@/app/craft/controls";
 import { Live } from "@/app/live";
 import { loadBasket, type BasketEntry, type PileRow } from "@/lib/basket";
-import { iconUrl } from "@/lib/breaker";
+import { iconUrl } from "@/lib/icon";
 import { describePlan } from "@/lib/craft";
 
 // Prices move while you play, and the basket is written from the browser.
@@ -35,7 +35,7 @@ export default async function CraftPage() {
         <p className="text-caption tracking-caption text-moss-70 uppercase">
           craft basket
         </p>
-        <div className="flex items-center gap-16">
+        <div className="flex flex-wrap items-center justify-end gap-16">
           <Link
             href="/"
             className="text-caption tracking-caption text-fern-link hover:text-lime-pulse uppercase"

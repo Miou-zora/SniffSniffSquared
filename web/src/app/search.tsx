@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { ItemHit } from "@/app/api/items/search/route";
+import { iconUrl } from "@/lib/icon";
 
 /**
  * Item picker, so the page can answer for an item you do not hold.
@@ -68,8 +70,11 @@ export function ItemSearch({
 
   const results = q.trim().length < 2 ? [] : hits;
 
+  // A width rather than a max-width: the header sizes itself to its contents,
+  // so `w-full` alone has nothing to resolve against and the box collapses to
+  // roughly its placeholder.
   return (
-    <div ref={box} className="relative w-full max-w-[22rem]">
+    <div ref={box} className="relative w-full max-w-full sm:w-[26rem] lg:w-[32rem]">
       <label htmlFor={inputId} className="sr-only">
         search an item
       </label>
@@ -98,10 +103,30 @@ export function ItemSearch({
                   }
                   router.push(`/item/${hit.itemId}`);
                 }}
-                className="hover:bg-carbon-veil flex w-full cursor-pointer items-baseline justify-between gap-12 px-16 py-12 text-left"
+                className="hover:bg-carbon-veil flex w-full cursor-pointer items-center justify-between gap-12 px-16 py-12 text-left"
               >
-                <span className="text-body-sm tracking-body-sm text-phosphor-white">
-                  {hit.name}
+                <span className="flex min-w-0 items-center gap-12">
+                  {/* The icon is what you recognise; the name is what you had to
+                      remember. Items with none keep the square so the list of
+                      names stays a column. */}
+                  {hit.iconId === null ? (
+                    <span
+                      aria-hidden
+                      className="border-circuit-border block h-24 w-24 shrink-0 rounded-md border"
+                    />
+                  ) : (
+                    <Image
+                      src={iconUrl(hit.iconId)}
+                      alt=""
+                      width={24}
+                      height={24}
+                      className="shrink-0"
+                      unoptimized
+                    />
+                  )}
+                  <span className="text-body-sm tracking-body-sm text-phosphor-white truncate">
+                    {hit.name}
+                  </span>
                 </span>
                 <span className="text-caption tracking-caption text-deep-fern shrink-0">
                   {hit.level !== null && `lvl ${hit.level}`}

@@ -1,3 +1,4 @@
+import { fetchItems } from "@/lib/breaker";
 import { query } from "@/lib/db";
 import { marksOf, type Status } from "@/lib/verdict";
 
@@ -8,6 +9,8 @@ export interface ItemHit {
   name: string;
   level: number | null;
   type: string | null;
+  /** DofusDB icon id — a name is easy to mistake, the picture is not. */
+  iconId: number | null;
   /** True when the wire has seen this id — those are the ones with real data. */
   known: boolean;
   /** Your verdict, when you have recorded one. */
@@ -35,8 +38,9 @@ export async function GET(request: Request) {
     name_fr: string | null;
     level: number | null;
     type_fr: string | null;
+    icon_id: string | null;
   }>(
-    `SELECT item_id, name_fr, level, type_fr
+    `SELECT item_id, name_fr, level, type_fr, icon_id
        FROM items
       WHERE name_fr ILIKE '%' || $1 || '%'
       ORDER BY length(name_fr), name_fr
@@ -49,6 +53,7 @@ export async function GET(request: Request) {
     name: r.name_fr ?? `Item ${r.item_id}`,
     level: r.level,
     type: r.type_fr,
+    iconId: r.icon_id === null ? null : Number(r.icon_id),
     known: true,
     mark: null,
   }));
@@ -57,6 +62,17 @@ export async function GET(request: Request) {
     const seen = new Set(items.map((i) => i.itemId));
     for (const hit of await searchDofusDb(q, 8 - items.length)) {
       if (!seen.has(hit.itemId)) items.push(hit);
+    }
+  }
+
+  // Rows named before `icon_id` existed have no picture yet. Asking for it
+  // caches it back into `items`, so this is one round trip per item ever
+  // rather than one per search, and a failure costs the icon, not the result.
+  const iconless = items.filter((i) => i.iconId === null).map((i) => i.itemId);
+  if (iconless.length > 0) {
+    const meta = await fetchItems(iconless);
+    for (const item of items) {
+      if (item.iconId === null) item.iconId = meta.get(item.itemId)?.iconId ?? null;
     }
   }
 
@@ -94,17 +110,20 @@ async function searchDofusDb(q: string, limit: number): Promise<ItemHit[]> {
       const it = raw as {
         id?: unknown;
         level?: unknown;
+        iconId?: unknown;
         name?: { fr?: unknown };
         type?: { name?: { fr?: unknown } };
       };
       const itemId = Number(it.id);
       const name = it.name?.fr;
       if (!Number.isFinite(itemId) || typeof name !== "string") continue;
+      const iconId = Number(it.iconId);
       out.push({
         itemId,
         name,
         level: Number.isFinite(Number(it.level)) ? Number(it.level) : null,
         type: typeof it.type?.name?.fr === "string" ? it.type.name.fr : null,
+        iconId: Number.isFinite(iconId) && iconId > 0 ? iconId : null,
         known: false,
         mark: null,
       });
