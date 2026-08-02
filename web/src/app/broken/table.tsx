@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { LocalTime } from "@/app/local-time";
@@ -49,6 +50,9 @@ export function BrokenTable({
   });
   const [show, setShow] = useState<"all" | "unbroken" | "broken">("all");
   const [job, setJob] = useState<number | "">("");
+  const [loading, setLoading] = useState(false);
+  const [report, setReport] = useState<string | null>(null);
+  const router = useRouter();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
@@ -134,6 +138,49 @@ export function BrokenTable({
           {shown.length} shown
         </span>
       </div>
+
+      {/* The list can only hold what the database knows, and what it knows is
+          whatever was browsed, held or imported. Twelve Sculpteur items against
+          the 289 the job makes is a sample, not coverage — so the page offers
+          to go and fetch the rest, once, per job. */}
+      {job !== "" && (
+        <p className="text-caption tracking-caption text-sage-40 mt-12 flex flex-wrap items-center gap-12">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={async () => {
+              setLoading(true);
+              setReport(null);
+              const res = await fetch("/api/catalogue", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ jobId: job }),
+              });
+              const body: { recipes?: number; error?: string } = await res
+                .json()
+                .catch(() => ({}));
+              setLoading(false);
+              setReport(
+                res.ok
+                  ? `${body.recipes ?? 0} recipes known for this job`
+                  : (body.error ?? "that did not work"),
+              );
+              router.refresh();
+            }}
+            className="border-circuit-border text-lime-pulse hover:border-lime-pulse focus-visible:ring-lime-pulse cursor-pointer rounded-lg border px-12 py-8 uppercase outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? "fetching…" : "load this job's full catalogue"}
+          </button>
+          {report === null ? (
+            <span>
+              Only what has been browsed, held or imported is listed. This asks DofusDB
+              for the rest — once; after that it is in the database.
+            </span>
+          ) : (
+            <span className="text-moss-70">{report}</span>
+          )}
+        </p>
+      )}
 
       <div className="border-circuit-border mt-16 overflow-x-auto rounded-2xl border">
         <table className="w-full min-w-[760px] border-collapse text-left">

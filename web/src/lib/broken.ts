@@ -10,7 +10,7 @@
  * lines map to runes. That is what `item_break_weight` counts, and it is also
  * what "breakable" means — a template with no rune lines yields nothing.
  */
-import { craftJobs, rememberRecipes, type JobRecipe } from "@/lib/basket";
+import { craftJobs, jobRecipes, rememberRecipes, type JobRecipe } from "@/lib/basket";
 import { fetchItems } from "@/lib/breaker";
 import { query } from "@/lib/db";
 import type { Status } from "@/lib/verdict";
@@ -39,7 +39,7 @@ export interface BrokenRow {
 export interface BrokenView {
   rows: BrokenRow[];
   broken: number;
-  /** Every job that makes something on the list, for the filter. */
+  /** Every craft job, for the filter and for the catalogue loader. */
   jobs: { id: number; name: string }[];
 }
 
@@ -133,6 +133,32 @@ const IS_EQUIPMENT = `NOT COALESCE(i.type_id = 78, false)
       AND NOT COALESCE(i.type_fr LIKE 'Rune%', false)
       AND NOT COALESCE(i.type_fr = 'Fers de Percepteur', false)`;
 
+/**
+ * Pull a job's whole catalogue into the database.
+ *
+ * This page can only list what the database knows, and what it knows is
+ * whatever happened to be browsed, held or imported — twelve Sculpteur items
+ * against the 289 the job actually makes. That is not coverage, it is a
+ * sample, and a sample cannot answer "what have I not broken".
+ *
+ * So the catalogue is fetched on demand, per job: every recipe, then the items
+ * they make. Both are written down — recipes with their job, items with their
+ * name, level, icon and template ranges — so the question is asked of DofusDB
+ * once and of Postgres forever after.
+ */
+export async function loadJobCatalogue(
+  jobId: number,
+): Promise<{ recipes: number; items: number }> {
+  const recipes = await jobRecipes(jobId, 1, 200);
+  if (recipes.length === 0) return { recipes: 0, items: 0 };
+  await rememberRecipes(recipes);
+  // fetchItems writes names, levels, icons and the template ranges, and it is
+  // the ranges that decide whether an item is breakable at all — without them
+  // the rows would arrive and then be filtered straight back out.
+  const meta = await fetchItems(recipes.map((r) => r.itemId));
+  return { recipes: recipes.length, items: meta.size };
+}
+
 export async function brokenList(): Promise<BrokenView> {
   const rows = await query<{
     item_id: string;
@@ -203,16 +229,12 @@ export async function brokenList(): Promise<BrokenView> {
     row.jobName = row.jobId === null ? null : (jobName.get(row.jobId) ?? null);
   }
 
-  // Only the jobs that make something here, so the filter never offers a
-  // choice that empties the table.
-  const present = [...new Set(out.map((r) => r.jobId))].filter(
-    (id): id is number => id !== null,
-  );
+  // Every job, not only the ones already represented: picking one the database
+  // has nothing for is how you find out it has nothing for it, and the page
+  // offers to go and get it.
   return {
     rows: out,
     broken: out.filter((r) => r.crushes > 0).length,
-    jobs: present
-      .map((id) => ({ id, name: jobName.get(id) ?? `Job ${id}` }))
-      .sort((a, b) => a.name.localeCompare(b.name, "fr")),
+    jobs,
   };
 }

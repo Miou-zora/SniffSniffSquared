@@ -47,6 +47,13 @@ not then make sixty more requests to price them.
 `inventory` and a `short` — the buy plan and the cost are for the shortfall, so
 a resource the bags already cover reads as settled and costs nothing.
 
+**Coverage lists what the database knows, which is not what the game has.**
+`items` fills from what was browsed, held or imported, so a job can read as
+twelve items when it makes 289. `/broken` offers to fetch a job's whole
+catalogue — every recipe, then the items they make, written down with their
+names, levels, icons and template ranges. It is a button rather than something
+the page does on its own: a dozen round trips, worth doing once per job.
+
 **DofusDB serves 50 rows per request whatever `$limit` asks for.** Anything
 reading a list has to page or chunk; asking for 200 ids answers with about 50
 and the rest look like ids that do not exist. `fetchItems` chunks by 50,

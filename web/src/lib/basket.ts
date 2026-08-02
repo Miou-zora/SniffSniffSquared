@@ -166,7 +166,10 @@ export interface JobRecipe {
 
 /** DofusDB serves 50 rows a request whatever `$limit` says. */
 const PAGE = 50;
-/** 20 pages of results is already an unreadable basket; past that it is a typo. */
+/**
+ * 20 pages is 1000 recipes, which is past the largest job in the game — so a
+ * band that hits this ceiling is a query that went wrong rather than a real one.
+ */
 const MAX_PAGES = 20;
 
 /**
@@ -175,7 +178,7 @@ const MAX_PAGES = 20;
  * The recipe travels with the query, which is the point: adding 60 items would
  * otherwise be 60 more requests when the basket comes to price them.
  */
-async function jobRecipes(
+export async function jobRecipes(
   jobId: number,
   minLevel: number,
   maxLevel: number,
