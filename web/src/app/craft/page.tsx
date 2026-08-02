@@ -85,11 +85,17 @@ export default async function CraftPage() {
                 itself.
               </>
             )}
-            {saved > 0 && (
+            {/* Named on both sides, or it reads as a discount from nowhere: it
+                is one shopping list priced two ways, and the saving is the
+                difference between them. Hidden once the bags cover everything,
+                where a saving on a trip you are not making means nothing. */}
+            {saved > 0 && !view.ready && (
               <>
                 {" "}
-                Buying for each craft separately would cost{" "}
-                <span className="text-lime-pulse">{k(saved)}</span> more.
+                Pooling is worth <span className="text-lime-pulse">{k(saved)}</span>: this
+                list costs {k(view.pooled)} bought in one go, against {k(view.separate)}{" "}
+                if you shopped for each craft on its own, because a shared resource only
+                reaches the cheaper batch sizes once the quantities are added together.
               </>
             )}
           </p>
