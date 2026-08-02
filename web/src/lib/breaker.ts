@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import type { RuneLadder } from "@/app/rune-price";
 import { planBuy, type BuyPlan, type Ladder } from "@/lib/craft";
 import {
   coefficientColumns,
@@ -90,6 +91,12 @@ export interface ProjectionModel {
    * average would read as a worse item rather than as missing data.
    */
   average: ProjectionBasis | null;
+  /**
+   * The full batch ladder per rune name, for the hover that shows what a rune
+   * actually sells for. Keyed by name because that is what the UI has in hand,
+   * and a rune name maps to exactly one item id.
+   */
+  runeLadders: Record<string, RuneLadder>;
 }
 
 export interface BreakerView {
@@ -290,7 +297,19 @@ async function buildView(
   const runeIds = weighted
     .map((l) => l.runeItemId)
     .filter((id): id is number => id !== null);
-  const priceByRuneItemId = await latestPrices([...new Set(runeIds)]);
+  // The x1 price is what a yield multiplies by; the whole ladder is what the
+  // rune actually sells for, and the hover on its name shows it.
+  const [priceByRuneItemId, ladderByRuneItemId] = await Promise.all([
+    latestPrices([...new Set(runeIds)]),
+    latestLadders([...new Set(runeIds)]),
+  ]);
+  const runeLadders: Record<string, RuneLadder> = {};
+  for (const line of weighted) {
+    if (line.rune === null || line.runeItemId === null) continue;
+    const ladder = ladderByRuneItemId.get(line.runeItemId);
+    if (ladder)
+      runeLadders[line.rune] = [ladder.b1, ladder.b10, ladder.b100, ladder.b1000];
+  }
 
   const columns = coefficientColumns(coefficient);
   const outcomes = focusOutcomes(weighted, columns, priceByRuneItemId).sort((a, b) => {
@@ -386,6 +405,7 @@ async function buildView(
       craft: await craftEstimate(itemId),
       copy: basisOf(weighted, outcomes, priceByRuneItemId),
       average: averageBasis(weighted, outcomes, columns, priceByRuneItemId, averages),
+      runeLadders,
     },
   };
 }

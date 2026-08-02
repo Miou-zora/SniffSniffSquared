@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { PageHeader } from "@/app/header";
+import { RunePrice } from "@/app/rune-price";
 import { Projection } from "@/app/projection";
 import { LocalTime } from "@/app/local-time";
 import { VerdictBadge } from "@/app/verdict-badge";
@@ -149,7 +150,14 @@ function BestRune({ view, priced }: { view: BreakerView; priced: boolean }) {
       </p>
       <div className="mt-12 flex flex-wrap items-baseline gap-x-16 gap-y-8">
         <span className="text-lime-pulse font-goga text-heading tracking-heading">
-          {focusWins ? best.rune : "no focus"}
+          {focusWins ? (
+            <RunePrice
+              rune={best.rune}
+              ladder={view.projection.runeLadders[best.rune] ?? null}
+            />
+          ) : (
+            "no focus"
+          )}
         </span>
         <span className="text-subheading tracking-subheading text-phosphor-white">
           {n(focusWins ? runesNow : noneRunes, 1)} runes

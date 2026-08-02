@@ -4,6 +4,7 @@ import { useMemo, useState, useId } from "react";
 import { COEFFICIENT_STEPS, decay, profitPercent, runeCount } from "@/lib/brisage";
 import { describePlan } from "@/lib/craft";
 import { LocalTime } from "@/app/local-time";
+import { RunePrice } from "@/app/rune-price";
 import type { ProjectionModel } from "@/lib/breaker";
 
 type Metric = "runes" | "value" | "profit";
@@ -428,7 +429,14 @@ export function Projection({
                         : "text-phosphor-white"
                   }`}
                 >
-                  {row.label}
+                  {row.key === "no-focus" ? (
+                    row.label
+                  ) : (
+                    <RunePrice
+                      rune={row.label}
+                      ladder={model.runeLadders[row.label] ?? null}
+                    />
+                  )}
                 </td>
                 {row.cells.map((cell, j) => (
                   <Cell

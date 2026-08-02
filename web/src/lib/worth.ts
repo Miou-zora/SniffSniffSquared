@@ -1,3 +1,4 @@
+import type { RuneLadder } from "@/app/rune-price";
 import { query } from "@/lib/db";
 import { allMarks, mode, threshold, type Status } from "@/lib/verdict";
 import { fetchItems, fetchRecipe, latestLadders, loadItem } from "@/lib/breaker";
@@ -20,6 +21,8 @@ export interface WorthRow {
   craft: number | null;
   /** The rune worth focusing, or null when crushing plain wins. */
   focus: string | null;
+  /** That rune's batch ladder, for the hover. Null when none was captured. */
+  focusLadder: RuneLadder | null;
   /** True when a crush of this item fixed the coefficient; false when assumed. */
   observed: boolean;
   coefficient: number;
@@ -234,6 +237,7 @@ export async function worthList(): Promise<{
       against: null,
       craft: null,
       focus: observed ? r.focus_rune : null,
+      focusLadder: null,
       observed,
       coefficient: Number(r.coefficient),
       crushedAt: r.crushed_at === null ? null : r.crushed_at.toISOString(),
@@ -279,6 +283,14 @@ export async function worthList(): Promise<{
     }
   }
 
+  // Ladders for the runes that survived, so hovering one says what it sells
+  // for. Only the focus runes, and only on the rows being shown.
+  for (const [rune, ladder] of await runeLadders(
+    judged.map((r) => r.focus).filter((f): f is string => f !== null),
+  )) {
+    for (const row of judged) if (row.focus === rune) row.focusLadder = ladder;
+  }
+
   judged.sort((a, b) => (b.profit ?? -Infinity) - (a.profit ?? -Infinity));
   return { rows: judged, automatic, thresholdPercent };
 }
@@ -316,6 +328,30 @@ function price(row: WorthRow): void {
  * priced — a sum over the ingredients that happen to be on the market is not a
  * cheaper craft, it is a wrong one.
  */
+/**
+ * The batch ladder behind each named rune.
+ *
+ * Two hops, because a rune is a row in `runes` keyed by effect and an item id
+ * on the market: name -> item id -> the newest ladder quoted for it. A rune
+ * nobody has browsed simply has none.
+ */
+async function runeLadders(names: string[]): Promise<Map<string, RuneLadder>> {
+  const out = new Map<string, RuneLadder>();
+  const wanted = [...new Set(names)];
+  if (wanted.length === 0) return out;
+  const rows = await query<{ rune: string; item_id: string }>(
+    `SELECT DISTINCT rune, item_id FROM runes
+      WHERE rune = ANY($1::text[]) AND item_id IS NOT NULL`,
+    [wanted],
+  );
+  const ladders = await latestLadders(rows.map((r) => Number(r.item_id)));
+  for (const row of rows) {
+    const ladder = ladders.get(Number(row.item_id));
+    if (ladder) out.set(row.rune, [ladder.b1, ladder.b10, ladder.b100, ladder.b1000]);
+  }
+  return out;
+}
+
 async function craftCosts(itemIds: number[]): Promise<Map<number, number>> {
   const out = new Map<number, number>();
   if (itemIds.length === 0) return out;

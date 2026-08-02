@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { LocalTime } from "@/app/local-time";
+import { RunePrice } from "@/app/rune-price";
 import { RowLink } from "@/app/worth/row";
 import type { WorthRow } from "@/lib/worth";
 
@@ -109,7 +110,13 @@ export function WorthTable({ rows }: { rows: WorthRow[] }) {
               <td className="text-sage-40 py-12 pr-16 text-right tabular-nums">
                 {r.level ?? "—"}
               </td>
-              <td className="text-moss-80 py-12 pr-16">{r.focus ?? "no focus"}</td>
+              <td className="text-moss-80 py-12 pr-16">
+                {r.focus === null ? (
+                  "no focus"
+                ) : (
+                  <RunePrice rune={r.focus} ladder={r.focusLadder} />
+                )}
+              </td>
               <td className="text-moss-80 py-12 pr-16 text-right tabular-nums">
                 {r.value === null ? "—" : `${kamas.format(Math.round(r.value))} k`}
               </td>
