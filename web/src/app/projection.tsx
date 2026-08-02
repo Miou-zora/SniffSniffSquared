@@ -151,6 +151,7 @@ export function Projection({
     const focusRows = active.focuses.map((f) => ({
       key: String(f.effectId),
       label: f.rune,
+      runeItemId: f.runeItemId,
       unpriced: f.unitPrice === null,
       cells: cellsFor((coefficient) => {
         const runes = runeCount(f.focusWeight, f.runeWeight, coefficient);
@@ -161,6 +162,7 @@ export function Projection({
     const noFocus = {
       key: "no-focus",
       label: "no focus",
+      runeItemId: null,
       unpriced: active.noFocusLines.every((l) => l.unitPrice === null),
       cells: cellsFor((coefficient) => {
         let runes = 0;
@@ -435,6 +437,7 @@ export function Projection({
                     <RunePrice
                       rune={row.label}
                       ladder={model.runeLadders[row.label] ?? null}
+                      itemId={row.runeItemId}
                     />
                   )}
                 </td>

@@ -23,6 +23,8 @@ export interface WorthRow {
   focus: string | null;
   /** That rune's batch ladder, for the hover. Null when none was captured. */
   focusLadder: RuneLadder | null;
+  /** The rune's own item id, so its price history is one click away. */
+  focusItemId: number | null;
   /** True when a crush of this item fixed the coefficient; false when assumed. */
   observed: boolean;
   coefficient: number;
@@ -232,6 +234,7 @@ export async function judgeItems(itemIds: number[]): Promise<{
       craft: null,
       focus: observed ? r.focus_rune : null,
       focusLadder: null,
+      focusItemId: null,
       observed,
       coefficient: Number(r.coefficient),
       crushedAt: r.crushed_at === null ? null : r.crushed_at.toISOString(),
@@ -266,10 +269,14 @@ export async function judgeItems(itemIds: number[]): Promise<{
 
   // Ladders for the runes that survived, so hovering one says what it sells
   // for. Only the focus runes, and only on the rows being shown.
-  for (const [rune, ladder] of await runeLadders(
+  for (const [rune, found] of await runeLadders(
     judged.map((r) => r.focus).filter((f): f is string => f !== null),
   )) {
-    for (const row of judged) if (row.focus === rune) row.focusLadder = ladder;
+    for (const row of judged) {
+      if (row.focus !== rune) continue;
+      row.focusLadder = found.ladder;
+      row.focusItemId = found.itemId;
+    }
   }
 
   judged.sort((a, b) => (b.profit ?? -Infinity) - (a.profit ?? -Infinity));
@@ -316,8 +323,10 @@ function price(row: WorthRow): void {
  * on the market: name -> item id -> the newest ladder quoted for it. A rune
  * nobody has browsed simply has none.
  */
-async function runeLadders(names: string[]): Promise<Map<string, RuneLadder>> {
-  const out = new Map<string, RuneLadder>();
+async function runeLadders(
+  names: string[],
+): Promise<Map<string, { itemId: number; ladder: RuneLadder | null }>> {
+  const out = new Map<string, { itemId: number; ladder: RuneLadder | null }>();
   const wanted = [...new Set(names)];
   if (wanted.length === 0) return out;
   const rows = await query<{ rune: string; item_id: string }>(
@@ -327,8 +336,14 @@ async function runeLadders(names: string[]): Promise<Map<string, RuneLadder>> {
   );
   const ladders = await latestLadders(rows.map((r) => Number(r.item_id)));
   for (const row of rows) {
-    const ladder = ladders.get(Number(row.item_id));
-    if (ladder) out.set(row.rune, [ladder.b1, ladder.b10, ladder.b100, ladder.b1000]);
+    const itemId = Number(row.item_id);
+    const ladder = ladders.get(itemId);
+    // The id is worth returning even with no ladder: the rune has a history
+    // page either way, and an empty one says "never seen on the market".
+    out.set(row.rune, {
+      itemId,
+      ladder: ladder ? [ladder.b1, ladder.b10, ladder.b100, ladder.b1000] : null,
+    });
   }
   return out;
 }

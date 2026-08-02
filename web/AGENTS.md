@@ -32,6 +32,7 @@ src/lib/breaker.ts     loads a placement and applies it (server)
 src/lib/worth.ts       the economics of a set of items, one SQL pass (server)
 src/lib/broken.ts      the catalogue: what is breakable, and what was measured
 src/lib/catalogue.ts   the two joined, which is what /items renders
+src/lib/history.ts     one item's price over time, for /price/[id]
 src/lib/basket.ts      the craft basket: recipes pooled into one buy (server)
 src/app/projection.tsx the table — client, for the metric switch and n+x
 src/app/live.tsx       LISTEN/NOTIFY subscriber that refreshes the page
@@ -300,6 +301,26 @@ something else is already on it** — usually the `web` container; stop it with
   not reliably fire the request's abort signal. One was measured surviving five
   minutes with nothing behind it. Verified: five concurrent streams use one
   connection, and still one after all five are SIGKILLed.
+
+## Charts
+
+**Recharts**, per the chart guidance in `.agents/skills/ui-ux-pro-max` — line
+chart for a trend over time, SVG under a thousand points, hover plus zoom, and
+a data table as the accessible fallback. `/price/[id]` is the only chart so far.
+
+Two decisions worth keeping if more are added:
+
+- **One series unless the extra ones separate.** Plotting all four batch sizes
+  per unit put them within two pixels of each other, so the lines overlapped and
+  their labels collided. The hover carries the whole ladder instead, and the
+  table under the chart has every capture.
+- **The y-axis covers the data, not zero.** 178 → 169 against a zero baseline is
+  a flat line in the top seventh of the plot. A line's slope is the value; a
+  bar's length is, which is why bars would have to start at zero. The caption
+  says which it is.
+
+`ResponsiveContainer` measures the DOM, so nothing paints server-side: the
+wrapper carries an explicit height or the page shifts on hydration.
 
 ## Not decided yet
 

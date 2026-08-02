@@ -301,7 +301,11 @@ export function ItemsTable({
                       "—"
                     )
                   ) : (
-                    <RunePrice rune={r.focus} ladder={r.focusLadder} />
+                    <RunePrice
+                      rune={r.focus}
+                      ladder={r.focusLadder}
+                      itemId={r.focusItemId}
+                    />
                   )}
                 </td>
                 <td className="text-moss-80 py-12 pr-16 text-right tabular-nums">

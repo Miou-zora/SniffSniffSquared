@@ -29,6 +29,7 @@ export interface CatalogueRow extends CoverageRow {
   /** The rune worth focusing, or null when crushing plain wins. */
   focus: string | null;
   focusLadder: RuneLadder | null;
+  focusItemId: number | null;
   /** The verdict: your mark, else the threshold under Automatic. */
   status: Status;
   manual: boolean;
@@ -67,6 +68,7 @@ export async function catalogueList(): Promise<CatalogueView> {
       against: e?.against ?? null,
       focus: e?.focus ?? null,
       focusLadder: e?.focusLadder ?? null,
+      focusItemId: e?.focusItemId ?? null,
       status: e?.status ?? "skip",
       manual: e?.manual ?? false,
     };
@@ -98,6 +100,7 @@ export async function catalogueList(): Promise<CatalogueView> {
       against: e.against,
       focus: e.focus,
       focusLadder: e.focusLadder,
+      focusItemId: e.focusItemId,
       status: e.status,
       manual: e.manual,
     });

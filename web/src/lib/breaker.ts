@@ -26,6 +26,7 @@ export interface AverageStat {
 export interface ProjectionBasis {
   focuses: {
     rune: string;
+    runeItemId: number | null;
     effectId: number;
     runeWeight: number;
     focusWeight: number;
@@ -419,6 +420,7 @@ function basisOf(
   return {
     focuses: outcomes.map((o) => ({
       rune: o.rune,
+      runeItemId: o.runeItemId,
       effectId: o.effectId,
       runeWeight: o.runeWeight,
       focusWeight: o.focusWeight,

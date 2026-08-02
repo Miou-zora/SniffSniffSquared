@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -27,18 +28,36 @@ const SIZES = [1, 10, 100, 1000] as const;
 export function RunePrice({
   rune,
   ladder,
+  itemId,
   className,
 }: {
   rune: string;
   /** Null when nothing has been captured for this rune — then it is just text. */
   ladder: RuneLadder | null;
+  /** When known, the tooltip points at that rune's price history. */
+  itemId?: number | null;
   className?: string;
 }) {
   const [at, setAt] = useState<{ left: number; top: number } | null>(null);
 
   if (ladder === null || ladder.every((p) => p <= 0)) {
-    return <span className={className}>{rune}</span>;
+    // No captured ladder, so nothing to hover — but a history page still
+    // exists if we know which item the rune is.
+    return itemId ? (
+      <Link
+        href={`/price/${itemId}`}
+        className={`hover:text-lime-pulse ${className ?? ""}`}
+      >
+        {rune}
+      </Link>
+    ) : (
+      <span className={className}>{rune}</span>
+    );
   }
+
+  // A link when the rune's own page exists, plain text when it does not —
+  // same hover either way, so the ladder never depends on which it is.
+  const Component = (itemId ? Link : "span") as React.ElementType;
 
   const show = (el: HTMLElement) => {
     const box = el.getBoundingClientRect();
@@ -46,12 +65,12 @@ export function RunePrice({
   };
 
   return (
-    <span
-      tabIndex={0}
+    <Component
+      {...(itemId ? { href: `/price/${itemId}` } : { tabIndex: 0 })}
       className={`decoration-circuit-border cursor-help underline decoration-dotted underline-offset-4 outline-none ${className ?? ""}`}
-      onPointerEnter={(e) => show(e.currentTarget)}
+      onPointerEnter={(e: React.PointerEvent<HTMLElement>) => show(e.currentTarget)}
       onPointerLeave={() => setAt(null)}
-      onFocus={(e) => show(e.currentTarget)}
+      onFocus={(e: React.FocusEvent<HTMLElement>) => show(e.currentTarget)}
       onBlur={() => setAt(null)}
     >
       {rune}
@@ -62,7 +81,9 @@ export function RunePrice({
             style={{ position: "fixed", left: at.left, top: at.top }}
             className="border-circuit-border bg-ground-iron text-caption tracking-caption pointer-events-none z-50 block rounded-xl border px-12 py-8 whitespace-nowrap"
           >
-            <span className="text-deep-fern block uppercase">{rune} on the market</span>
+            <span className="text-deep-fern block uppercase">
+              {rune} on the market{itemId ? " · click for its history" : ""}
+            </span>
             {SIZES.map((size, i) => (
               <span key={size} className="mt-4 flex justify-between gap-16">
                 <span className="text-sage-40">x{size}</span>
@@ -81,6 +102,6 @@ export function RunePrice({
           </span>,
           document.body,
         )}
-    </span>
+    </Component>
   );
 }
