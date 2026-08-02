@@ -11,8 +11,17 @@ import type { ItemHit } from "@/app/api/items/search/route";
  * stats and prices, the rest are DofusDB names whose page will lean on the
  * template. Saying which is which up front beats letting someone pick a name
  * and find an empty projection.
+ *
+ * Picking an item opens its page, unless a caller wants the hit instead — the
+ * craft basket adds it rather than navigating away from the list being built.
  */
-export function ItemSearch() {
+export function ItemSearch({
+  onPick,
+  placeholder = "Search an item…",
+}: {
+  onPick?: (hit: ItemHit) => void;
+  placeholder?: string;
+} = {}) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<ItemHit[]>([]);
   const [open, setOpen] = useState(false);
@@ -71,7 +80,7 @@ export function ItemSearch() {
         onChange={(e) => setQ(e.target.value)}
         onFocus={() => results.length > 0 && setOpen(true)}
         onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
-        placeholder="Search an item…"
+        placeholder={placeholder}
         className="border-circuit-border focus:border-lime-pulse text-body-sm tracking-body-sm text-phosphor-white placeholder:text-deep-fern bg-ground-iron w-full rounded-xl border px-16 py-12 outline-none"
       />
       {open && (results.length > 0 || loading) && (
@@ -82,6 +91,11 @@ export function ItemSearch() {
                 type="button"
                 onClick={() => {
                   setOpen(false);
+                  if (onPick) {
+                    onPick(hit);
+                    setQ("");
+                    return;
+                  }
                   router.push(`/item/${hit.itemId}`);
                 }}
                 className="hover:bg-carbon-veil flex w-full cursor-pointer items-baseline justify-between gap-12 px-16 py-12 text-left"

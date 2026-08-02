@@ -571,8 +571,15 @@ export interface ItemMeta {
   name: string | null;
   level: number | null;
   type: string | null;
+  /** DofusDB icon id — see `iconUrl`. */
+  iconId: number | null;
   /** The template: what each line on this item type can roll between. */
   ranges: { effectId: number; min: number; max: number }[];
+}
+
+/** Where DofusDB draws an item's icon. Verified 200, 13-20 KB PNGs. */
+export function iconUrl(iconId: number): string {
+  return `https://api.dofusdb.fr/img/items/${iconId}.png`;
 }
 
 /**
@@ -615,15 +622,18 @@ export async function fetchItems(itemIds: number[]): Promise<Map<number, ItemMet
       const it = raw as {
         id?: unknown;
         level?: unknown;
+        iconId?: unknown;
         name?: { fr?: unknown };
         type?: { name?: { fr?: unknown } };
       };
       const id = Number(it.id);
       if (!Number.isFinite(id)) continue;
+      const iconId = Number(it.iconId);
       out.set(id, {
         name: typeof it.name?.fr === "string" ? it.name.fr : null,
         level: Number.isFinite(Number(it.level)) ? Number(it.level) : null,
         type: typeof it.type?.name?.fr === "string" ? it.type.name.fr : null,
+        iconId: Number.isFinite(iconId) && iconId > 0 ? iconId : null,
         ranges: effectRanges(raw),
       });
     }
@@ -650,13 +660,15 @@ async function remember(meta: Map<number, ItemMeta>): Promise<void> {
   for (const [itemId, m] of meta) {
     try {
       await query(
-        `INSERT INTO items (item_id, name_fr, level, type_fr) VALUES ($1,$2,$3,$4)
+        `INSERT INTO items (item_id, name_fr, level, type_fr, icon_id)
+         VALUES ($1,$2,$3,$4,$5)
          ON CONFLICT (item_id) DO UPDATE SET
            name_fr = COALESCE(EXCLUDED.name_fr, items.name_fr),
            level = COALESCE(EXCLUDED.level, items.level),
            type_fr = COALESCE(EXCLUDED.type_fr, items.type_fr),
+           icon_id = COALESCE(EXCLUDED.icon_id, items.icon_id),
            updated_at = now()`,
-        [itemId, m.name, m.level, m.type],
+        [itemId, m.name, m.level, m.type, m.iconId],
       );
       if (m.ranges.length === 0) continue;
       // Replaced wholesale, like the importer does: a template that loses a

@@ -14,15 +14,25 @@ Reads the Postgres database that the Rust sniffer writes to. **This app never
 captures traffic and never writes game data**; it is a reader.
 
 `/` is the **breaker page**: the item currently in the crusher on the left, a
-projection table on the right.
+projection table on the right. `/worth` ranks what is worth breaking, and
+`/craft` is the craft basket — several crafts, one pooled shopping list.
 
 ```
 src/lib/brisage.ts     the model, pure functions, no I/O
 src/lib/craft.ts       what a recipe costs off the batch ladder, pure, no I/O
 src/lib/breaker.ts     loads a placement and applies it (server)
+src/lib/worth.ts       the ranked list, one SQL pass (server)
+src/lib/basket.ts      the craft basket: recipes pooled into one buy (server)
 src/app/projection.tsx the table — client, for the metric switch and n+x
 src/app/live.tsx       LISTEN/NOTIFY subscriber that refreshes the page
 ```
+
+**The basket pools before it prices.** Quantities are summed across every craft
+in it and `planBuy` runs once on the total, because the ladder prices 4 Ébonite
+differently from 2 twice over. Planning per craft would print the right
+shopping list at the wrong price. Ingredients are taken one level deep: an
+ingredient that is itself craftable is priced as a purchase, since the question
+the page answers is what to buy.
 
 `brisage.ts` is imported from both sides, which is why it stays free of I/O.
 `Projection` receives weights and prices rather than finished rows, so the
@@ -65,7 +75,7 @@ All defined in `../init.sql`:
 - **`item_stats`** — `(uid, effect_id) -> item_id, value`. What one _instance_
   actually rolled, off the wire. Keyed by instance because two copies of an item
   roll differently, and the instance does not survive the crush.
-- **`items`** — `item_id -> name_fr, level, type_fr`. Filled offline by
+- **`items`** — `item_id -> name_fr, level, type_fr, icon_id`. Filled offline by
   `../tools/import_items.py`, so a name may be missing for a freshly seen id.
 - **`item_effects`** — the min/max an item _type_ can roll per line, from
   DofusDB. Use it to estimate a copy you do not own; use `item_stats` for one
@@ -86,8 +96,9 @@ item_id`. `effect_id` is the join from a stat line to the rune it yields;
   so it is the only thing worth recording. Derive the rest. `item_id` is
   nullable when the uid could not be mapped. There is no focus column: the focus
   travels in a separate message and does not change the yield.
-- **`item_marks`** / **`app_settings`** — the two tables this app writes as its
-  own state. Your verdict on an item, and the threshold the automatic one uses. They
+- **`item_marks`** / **`app_settings`** / **`craft_basket`** — the three tables
+  this app writes as its own state. Your verdict on an item, the threshold the
+  automatic one uses, and what you mean to craft. They
   are annotations, not capture: losing them costs an opinion, never an
   observation, which is why writing them does not break the reader rule above.
   The app also caches DofusDB lookups into `items` and `item_effects` — the same
@@ -134,13 +145,13 @@ read as glob patterns).
 
 Fields that matter:
 
-| field       | use                                                                                |
-| ----------- | ---------------------------------------------------------------------------------- |
-| `id`        | joins to `prices.item_id`                                                          |
-| `name`      | `{ fr, en }` — localised, pick per locale                                          |
-| `iconId`    | image at `https://api.dofusdb.fr/img/items/{iconId}.png` (verified 200, ~13-20 KB) |
-| `type.name` | `{ fr, en }`, e.g. "Alliage"                                                       |
-| `level`     | item level                                                                         |
+| field       | use                                                                                                                                |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `id`        | joins to `prices.item_id`                                                                                                          |
+| `name`      | `{ fr, en }` — localised, pick per locale                                                                                          |
+| `iconId`    | image at `https://api.dofusdb.fr/img/items/{iconId}.png` (verified 200, ~13-20 KB); cached into `items.icon_id`, drawn by `/craft` |
+| `type.name` | `{ fr, en }`, e.g. "Alliage"                                                                                                       |
+| `level`     | item level                                                                                                                         |
 
 Verified against all six captured ids: all resolve, and all are type "Alliage",
 consistent with having browsed one HDV resource category.
@@ -253,5 +264,7 @@ something else is already on it** — usually the `web` container; stop it with
 
 ## Not decided yet
 
-- **Item icons.** `iconId` from DofusDB is available and unused.
+- **Item icons beyond `/craft`.** `items.icon_id` is filled for every id the
+  basket has drawn, and `iconUrl()` in `src/lib/breaker.ts` turns it into an
+  image. The worth list and the item pages still show names alone.
 - **Price history.** `prices` is a time series and only its latest row is read.

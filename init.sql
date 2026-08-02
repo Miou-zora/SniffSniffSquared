@@ -64,6 +64,20 @@ CREATE TABLE IF NOT EXISTS app_settings (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- What you intend to craft, so the resources can be bought in one trip.
+--
+-- The third table the web app owns, and an annotation like the two above: it
+-- records an intention, not an observation. Two items that share an ingredient
+-- are one purchase at the counter, and the batch ladder only prices it right
+-- when the quantities are added up first -- 2 + 2 ebonite is 4, which may be a
+-- x10 rather than four x1.
+CREATE TABLE IF NOT EXISTS craft_basket (
+    item_id  BIGINT PRIMARY KEY,
+    -- How many copies of that item you mean to craft.
+    quantity INTEGER     NOT NULL DEFAULT 1 CHECK (quantity > 0),
+    added_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Individual marketplace offers, and the stats the copy on sale rolled.
 --
 -- `prices` and this table are both "what the market says" and they are not the
@@ -156,8 +170,16 @@ CREATE TABLE IF NOT EXISTS items (
     level      INT,
     type_id    BIGINT,
     type_fr    TEXT,
+    -- DofusDB icon, drawn from https://api.dofusdb.fr/img/items/<icon_id>.png.
+    -- A shopping list of resource names is hard to match against the inventory
+    -- you are looking at; the icon is what the game itself shows.
+    icon_id    BIGINT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- For databases created before `icon_id` existed. CREATE TABLE IF NOT EXISTS
+-- above leaves an existing table alone, columns included.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS icon_id BIGINT;
 
 -- The stat ranges an item *type* can roll, from DofusDB. Filled by
 -- tools/import_items.py alongside `items`.

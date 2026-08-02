@@ -47,8 +47,8 @@ run from `sniffer/`** (it resolves `keymap.json` and `proto/` relative to cwd).
 docker-compose.yml  postgres + pgadmin + web; `sniffer` service is Linux-only
 init.sql            schema both apps depend on (packets, prices, offers,
                     offer_stats, crushes, crush_placements, item_stats, items,
-                    item_effects, recipes, runes, + item_marks/app_settings
-                    which `web/` owns and writes)
+                    item_effects, recipes, runes, + item_marks/app_settings/
+                    craft_basket which `web/` owns and writes)
                     + views item_effect_weights, item_break_weight
 docs/               observations.md — annotated real captures
                     brisage-model.md + brisage-runes.json — the kamas maths,

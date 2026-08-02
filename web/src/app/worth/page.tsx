@@ -35,6 +35,12 @@ export default async function WorthPage() {
           worth breaking
         </p>
         <div className="flex items-center gap-16">
+          <Link
+            href="/craft"
+            className="text-caption tracking-caption text-fern-link hover:text-lime-pulse uppercase"
+          >
+            craft basket
+          </Link>
           <ItemSearch />
           <Live />
         </div>

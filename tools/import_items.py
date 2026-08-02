@@ -278,7 +278,7 @@ def effect_ranges(item):
 
 
 def fetch_items(ids):
-    """({item_id: (name, level, type_id, type_name)}, {item_id: ranges}) from DofusDB."""
+    """({item_id: (name, level, type_id, type_name, icon_id)}, {item_id: ranges})."""
     import requests
 
     found, ranges = {}, {}
@@ -299,6 +299,8 @@ def fetch_items(ids):
                 it.get("level"),
                 t.get("id"),
                 (t.get("name") or {}).get("fr"),
+                # Drawn by web/ from https://api.dofusdb.fr/img/items/<id>.png.
+                it.get("iconId"),
             )
             ranges[iid] = effect_ranges(it)
     return found, ranges
@@ -387,17 +389,18 @@ def enrich(refresh, dry_run):
         return
 
     values = ",\n  ".join(
-        "(%d,%s,%s,%s,%s)" % (k, lit(n), lit(lv), lit(ti), lit(tn))
-        for k, (n, lv, ti, tn) in sorted(found.items())
+        "(%d,%s,%s,%s,%s,%s)" % (k, lit(n), lit(lv), lit(ti), lit(tn), lit(ic))
+        for k, (n, lv, ti, tn, ic) in sorted(found.items())
     )
     psql(
-        "INSERT INTO items (item_id, name_fr, level, type_id, type_fr)\nVALUES\n  "
+        "INSERT INTO items (item_id, name_fr, level, type_id, type_fr, icon_id)\nVALUES\n  "
         + values
         + "\nON CONFLICT (item_id) DO UPDATE SET\n"
           "  name_fr = COALESCE(EXCLUDED.name_fr, items.name_fr),\n"
           "  level = COALESCE(EXCLUDED.level, items.level),\n"
           "  type_id = COALESCE(EXCLUDED.type_id, items.type_id),\n"
           "  type_fr = COALESCE(EXCLUDED.type_fr, items.type_fr),\n"
+          "  icon_id = COALESCE(EXCLUDED.icon_id, items.icon_id),\n"
           "  updated_at = now();\n"
     )
 

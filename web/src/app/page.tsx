@@ -87,6 +87,12 @@ function Header({ view, verdict }: { view: BreakerView; verdict: Verdict }) {
           >
             worth breaking
           </Link>
+          <Link
+            href="/craft"
+            className="text-caption tracking-caption text-fern-link hover:text-lime-pulse uppercase"
+          >
+            craft basket
+          </Link>
           <ItemSearch />
           <Live />
         </div>
