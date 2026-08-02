@@ -1,7 +1,7 @@
 import type { RuneLadder } from "@/app/rune-price";
 import { query } from "@/lib/db";
 import { allMarks, mode, threshold, type Status } from "@/lib/verdict";
-import { fetchItems, fetchRecipe, latestLadders, loadItem } from "@/lib/breaker";
+import { fetchRecipe, latestLadders, loadItem } from "@/lib/breaker";
 import { planBuy } from "@/lib/craft";
 
 export interface WorthRow {
@@ -67,7 +67,7 @@ export interface WorthRow {
  * crushes have come back at 126% and 143%, so an assumed row can understate as
  * easily as overstate.
  */
-export async function worthList(): Promise<{
+export async function judgeItems(itemIds: number[]): Promise<{
   rows: WorthRow[];
   automatic: boolean;
   thresholdPercent: number;
@@ -78,9 +78,10 @@ export async function worthList(): Promise<{
     threshold(),
   ]);
   const automatic = current === "automatic";
-  if (marks.size === 0 && !automatic) {
-    return { rows: [], automatic, thresholdPercent };
-  }
+  // Your marks belong on the list whatever the catalogue holds: an item marked
+  // before anything ever named it is exactly the row that would go missing.
+  const wanted = [...new Set([...itemIds, ...marks.keys()])];
+  if (wanted.length === 0) return { rows: [], automatic, thresholdPercent };
 
   const rows = await query<{
     item_id: string;
@@ -95,18 +96,11 @@ export async function worthList(): Promise<{
     crushed_at: Date | null;
   }>(
     `WITH candidates AS (
-       -- Everything judgeable under Automatic, your marks alone otherwise.
-       --
-       -- Every table that has ever named an item, not just the items table:
-       -- that one is filled offline, so an item crushed an hour ago is missing
-       -- and was silently unjudgeable — Anneau Solo had a captured coefficient,
-       -- captured stats, and no row here.
+       -- Whatever the caller asked about. It used to pick its own candidates
+       -- from every table that has ever named an item, which is the same set
+       -- the catalogue now hands in — and being told means the list and its
+       -- economics can never disagree about which items exist.
        SELECT item_id FROM unnest($1::bigint[]) AS t(item_id)
-       UNION SELECT item_id FROM items WHERE $2
-       UNION SELECT item_id FROM crushes WHERE $2 AND item_id IS NOT NULL
-       UNION SELECT item_id FROM item_stats WHERE $2
-       UNION SELECT item_id FROM crush_placements WHERE $2
-       UNION SELECT item_id FROM offers WHERE $2
      ),
      coef AS (
        SELECT DISTINCT ON (item_id) item_id, yield_percent, seen_at
@@ -210,7 +204,7 @@ export async function worthList(): Promise<{
        LEFT JOIN offer_cost oc ON oc.item_id = m.item_id
        LEFT JOIN stack_cost sc ON sc.item_id = m.item_id
        LEFT JOIN coef cf ON cf.item_id = m.item_id`,
-    [[...marks.keys()], automatic],
+    [wanted],
   );
 
   const out: WorthRow[] = [];
@@ -258,29 +252,16 @@ export async function worthList(): Promise<{
   await fillFromInstances(out);
 
   // The verdict, once every figure is in: a mark if you set one, else the
-  // threshold under Automatic. Rows that end up an unmarked "skip" are dropped
-  // rather than listed — that is every item below the bar.
-  const judged = out.filter((row) => {
-    if (row.manual) return true;
-    if (!automatic) return false;
-    if (row.profit === null) return false;
-    row.status = row.profit >= thresholdPercent ? "worth" : "skip";
-    return row.status === "worth";
-  });
-
-  // Names last, for the rows that survived: under Automatic the candidate set
-  // is every item the database has ever seen, and asking DofusDB to name all of
-  // them is a request nobody needs answered.
-  const unnamed = judged.filter((r) => r.name.startsWith("Item ")).map((r) => r.itemId);
-  if (unnamed.length > 0) {
-    const meta = await fetchItems(unnamed);
-    for (const row of judged) {
-      const m = meta.get(row.itemId);
-      if (!m) continue;
-      row.name = m.name ?? row.name;
-      row.level = row.level ?? m.level;
-      row.type = row.type ?? m.type;
-    }
+  // threshold under Automatic. Every row is returned and labelled rather than
+  // filtered — the page decides what to show, and it wants to show the rows
+  // that fell short too.
+  const judged = out;
+  for (const row of judged) {
+    if (row.manual) continue;
+    row.status =
+      automatic && row.profit !== null && row.profit >= thresholdPercent
+        ? "worth"
+        : "skip";
   }
 
   // Ladders for the runes that survived, so hovering one says what it sells
@@ -373,7 +354,11 @@ async function craftCosts(itemIds: number[]): Promise<Map<number, number>> {
   // The same DofusDB fallback the item page uses, or a marked item the importer
   // has not reached shows "no recipe" here while its own page prices the craft
   // happily — two screens disagreeing about the same item.
-  const missing = itemIds.filter((id) => !byItem.has(id));
+  // Capped: this is one request per item, and the catalogue is hundreds of
+  // items deep now. The ones with no recipe row are mostly drop-only gear that
+  // has no recipe at all, so the budget goes on the first few and the rest
+  // read as "no craft" until the importer or a job load reaches them.
+  const missing = itemIds.filter((id) => !byItem.has(id)).slice(0, 40);
   for (const id of missing) {
     const recipe = await fetchRecipe(id);
     if (recipe === null) continue;

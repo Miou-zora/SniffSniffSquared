@@ -52,5 +52,6 @@ export async function POST(request: Request) {
   }
 
   revalidatePath("/");
+  revalidatePath("/items");
   return Response.json({ ok: true });
 }

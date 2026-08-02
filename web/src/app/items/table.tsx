@@ -6,64 +6,89 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { LocalTime } from "@/app/local-time";
-import { RowLink } from "@/app/worth/row";
-import type { BrokenRow } from "@/lib/broken";
+import { RunePrice } from "@/app/rune-price";
+import { RowLink } from "@/app/items/row";
+import type { CatalogueRow } from "@/lib/catalogue";
 import { iconUrl } from "@/lib/icon";
 
-type Key = "level" | "name" | "crushes" | "coefficient" | "crushedAt";
+const kamas = new Intl.NumberFormat("fr-FR");
+
+function k(v: number | null) {
+  return v === null ? "—" : `${kamas.format(Math.round(v))} k`;
+}
+
+function pct(v: number) {
+  return `${v >= 0 ? "+" : ""}${v.toLocaleString("fr-FR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })}%`;
+}
+
+type Key =
+  "name" | "level" | "crushes" | "coefficient" | "profit" | "focus" | "crushedAt";
 
 const LABELS: Record<Key, string> = {
-  level: "level",
   name: "item",
+  level: "level",
   crushes: "broken",
   coefficient: "coefficient",
+  profit: "profit",
+  focus: "focus",
   crushedAt: "last broken",
 };
 
-/** Ascending by level is the default: coverage is read from the bottom up. */
 const DEFAULT_DIR: Record<Key, "asc" | "desc"> = {
-  level: "asc",
   name: "asc",
+  level: "asc",
   crushes: "desc",
   coefficient: "desc",
+  profit: "desc",
+  focus: "asc",
   crushedAt: "desc",
 };
 
 /**
- * The coverage table: every breakable item, and whether its coefficient has
- * ever been measured.
- *
- * The filter matters more than the sort here. "Not broken yet" is the list you
- * act on — it is what to take to the crusher next — and on a full catalogue it
- * is most of the rows, so it gets a button rather than a scroll.
+ * Which question the table is being asked. Each one wants its own order, so a
+ * chip sets the sort with it: ranking coverage by profit would bury the rows
+ * that view exists to show, which are exactly the ones with no profit yet.
  */
-export function BrokenTable({
+type View = "worth" | "unbroken" | "skip" | "all";
+
+const VIEWS: { id: View; label: string; sort: Key }[] = [
+  { id: "worth", label: "worth breaking", sort: "profit" },
+  { id: "unbroken", label: "not broken yet", sort: "level" },
+  { id: "skip", label: "marked skip", sort: "profit" },
+  { id: "all", label: "everything", sort: "level" },
+];
+
+export function ItemsTable({
   rows,
   jobs,
 }: {
-  rows: BrokenRow[];
+  rows: CatalogueRow[];
   jobs: { id: number; name: string }[];
 }) {
+  const [view, setView] = useState<View>("worth");
   const [sort, setSort] = useState<{ key: Key; dir: "asc" | "desc" }>({
-    key: "level",
-    dir: "asc",
+    key: "profit",
+    dir: "desc",
   });
-  const [show, setShow] = useState<"all" | "unbroken" | "broken">("all");
   const [job, setJob] = useState<number | "">("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<string | null>(null);
   const router = useRouter();
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
 
   const shown = useMemo(() => {
-    // A blank bound is no bound, not zero: leaving "to" empty has to mean
-    // "everything above `from`" rather than an empty table.
+    // A blank bound is no bound, not zero: clearing "to" has to widen the list
+    // rather than empty it.
     const lo = Number.parseInt(from, 10);
     const hi = Number.parseInt(to, 10);
     const filtered = rows.filter((r) => {
-      if (show === "broken" && r.crushes === 0) return false;
-      if (show === "unbroken" && r.crushes > 0) return false;
+      if (view === "worth" && r.status !== "worth") return false;
+      if (view === "skip" && !(r.manual && r.status === "skip")) return false;
+      if (view === "unbroken" && r.crushes > 0) return false;
       if (job !== "" && r.jobId !== job) return false;
       if (Number.isInteger(lo) && (r.level ?? 0) < lo) return false;
       if (Number.isInteger(hi) && (r.level ?? 0) > hi) return false;
@@ -73,9 +98,9 @@ export function BrokenTable({
     return filtered.sort((a, b) => {
       const x = a[sort.key];
       const y = b[sort.key];
-      // Never-broken rows have no coefficient and no date. They sink either
-      // way: the column has nothing to say about them, and floating them to
-      // the top of an ascending sort would claim it did.
+      // Missing values sink whichever way the column points. A row with no
+      // profit is not the best row and not the worst one; it is one the
+      // question does not apply to.
       if (x === null && y === null) return a.name.localeCompare(b.name, "fr");
       if (x === null) return 1;
       if (y === null) return -1;
@@ -85,7 +110,7 @@ export function BrokenTable({
           : String(x).localeCompare(String(y), "fr");
       return cmp === 0 ? a.name.localeCompare(b.name, "fr") : cmp * dir;
     });
-  }, [rows, sort, show, job, from, to]);
+  }, [rows, sort, view, job, from, to]);
 
   const toggle = (key: Key) =>
     setSort((now) =>
@@ -94,26 +119,28 @@ export function BrokenTable({
         : { key, dir: DEFAULT_DIR[key] },
     );
 
+  const pick = (next: View) => {
+    setView(next);
+    const preset = VIEWS.find((v) => v.id === next);
+    if (preset) setSort({ key: preset.sort, dir: DEFAULT_DIR[preset.sort] });
+  };
+
   return (
     <>
       <div className="mt-24 flex flex-wrap items-center gap-8">
-        {(["all", "unbroken", "broken"] as const).map((option) => (
+        {VIEWS.map((v) => (
           <button
-            key={option}
+            key={v.id}
             type="button"
-            onClick={() => setShow(option)}
-            aria-pressed={show === option}
+            onClick={() => pick(v.id)}
+            aria-pressed={view === v.id}
             className={`text-caption tracking-caption focus-visible:ring-lime-pulse cursor-pointer rounded-lg border px-12 py-8 uppercase transition-colors duration-150 outline-none focus-visible:ring-2 ${
-              show === option
+              view === v.id
                 ? "border-lime-pulse text-lime-pulse"
                 : "border-circuit-border text-sage-40 hover:text-phosphor-white"
             }`}
           >
-            {option === "all"
-              ? "everything"
-              : option === "unbroken"
-                ? "not broken yet"
-                : "already broken"}
+            {v.label}
           </button>
         ))}
         <select
@@ -141,8 +168,8 @@ export function BrokenTable({
 
       {/* The list can only hold what the database knows, and what it knows is
           whatever was browsed, held or imported. Twelve Sculpteur items against
-          the 289 the job makes is a sample, not coverage — so the page offers
-          to go and fetch the rest, once, per job. */}
+          the 289 the job makes is a sample, not a catalogue — so the page
+          offers to go and fetch the rest, once, per job. */}
       {job !== "" && (
         <p className="text-caption tracking-caption text-sage-40 mt-12 flex flex-wrap items-center gap-12">
           <button
@@ -183,13 +210,18 @@ export function BrokenTable({
       )}
 
       <div className="border-circuit-border mt-16 overflow-x-auto rounded-2xl border">
-        <table className="w-full min-w-[760px] border-collapse text-left">
+        <table className="w-full min-w-[1100px] border-collapse text-left">
           <thead>
             <tr className="border-phosphor-blue-black text-caption tracking-caption text-deep-fern border-b uppercase">
               <Sortable column="name" sort={sort} onSort={toggle} first />
               <Sortable column="level" sort={sort} onSort={toggle} align="right" />
               <Sortable column="crushes" sort={sort} onSort={toggle} align="right" />
               <Sortable column="coefficient" sort={sort} onSort={toggle} align="right" />
+              <Sortable column="focus" sort={sort} onSort={toggle} />
+              <th className="py-12 pr-16 text-right font-medium">runes worth</th>
+              <th className="py-12 pr-16 text-right font-medium">a copy costs</th>
+              <th className="py-12 pr-16 text-right font-medium">to craft</th>
+              <Sortable column="profit" sort={sort} onSort={toggle} align="right" />
               <Sortable
                 column="crushedAt"
                 sort={sort}
@@ -225,9 +257,12 @@ export function BrokenTable({
                       </Link>
                       <span className="text-deep-fern text-caption block">
                         {r.type ?? "—"}
-                        {r.held && <span className="text-moss-70"> · held one</span>}
-                        {r.mark === "worth" && (
-                          <span className="text-lime-pulse"> · worth breaking</span>
+                        {r.jobName !== null && ` · ${r.jobName}`}
+                        {r.manual && (
+                          <span className="text-moss-70">
+                            {" "}
+                            · {r.status === "worth" ? "marked worth" : "marked skip"}
+                          </span>
                         )}
                       </span>
                     </div>
@@ -246,9 +281,6 @@ export function BrokenTable({
                       : `${r.crushes} crush${r.crushes === 1 ? "" : "es"} captured`
                   }
                 >
-                  {/* The count is the point on a row that has one: a second
-                      crush of the same item is a second reading of a rate that
-                      moves, and one reading is a sample of one. */}
                   {r.crushes === 0
                     ? "not yet"
                     : `${r.crushes} crush${r.crushes === 1 ? "" : "es"}`}
@@ -260,6 +292,57 @@ export function BrokenTable({
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}%`}
+                </td>
+                <td className="text-moss-80 py-12 pr-16">
+                  {r.focus === null ? (
+                    r.crushes > 0 ? (
+                      "no focus"
+                    ) : (
+                      "—"
+                    )
+                  ) : (
+                    <RunePrice rune={r.focus} ladder={r.focusLadder} />
+                  )}
+                </td>
+                <td className="text-moss-80 py-12 pr-16 text-right tabular-nums">
+                  {k(r.value)}
+                </td>
+                <td className="text-sage-40 py-12 pr-16 text-right tabular-nums">
+                  {k(r.cost)}
+                </td>
+                <td
+                  className={`py-12 pr-16 text-right tabular-nums ${
+                    r.craft !== null && r.cost !== null && r.craft < r.cost
+                      ? "text-moss-80"
+                      : "text-sage-40"
+                  }`}
+                  title={
+                    r.craft === null
+                      ? "No recipe, or an ingredient with no captured price"
+                      : r.cost !== null && r.craft < r.cost
+                        ? "Cheaper to make than to buy"
+                        : undefined
+                  }
+                >
+                  {k(r.craft)}
+                </td>
+                <td
+                  className={`py-12 pr-16 text-right tabular-nums ${
+                    r.profit === null
+                      ? "text-deep-fern"
+                      : r.profit >= 0
+                        ? "text-lime-pulse"
+                        : "text-sage-40"
+                  }`}
+                  title={
+                    r.profit === null
+                      ? r.crushes === 0
+                        ? "Never broken, so its runes cannot be valued"
+                        : "No price captured for a copy, or for one of its runes"
+                      : `Against the ${r.against === "craft" ? "craft" : "market"} price`
+                  }
+                >
+                  {r.profit === null ? "—" : pct(r.profit)}
                 </td>
                 <td className="text-deep-fern py-12 pr-20 text-right tabular-nums">
                   {r.crushedAt === null ? "—" : <LocalTime iso={r.crushedAt} withDate />}
@@ -328,6 +411,8 @@ function Sortable({
         }`}
       >
         {LABELS[column]}
+        {/* The caret marks only the column in force; one on every heading reads
+            as decoration and stops saying anything. */}
         <span aria-hidden>{active ? (sort.dir === "asc" ? " ↑" : " ↓") : ""}</span>
       </button>
     </th>

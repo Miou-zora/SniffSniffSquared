@@ -1,5 +1,6 @@
 /**
- * Which equipment has been broken, and which has not.
+ * The catalogue: every breakable item, and whether its coefficient has ever
+ * been measured.
  *
  * The coefficient is per item type and the only way to learn one is to break a
  * copy — no amount of browsing tells you what a Kwape de Glace yields. So the
@@ -15,7 +16,7 @@ import { fetchItems } from "@/lib/breaker";
 import { query } from "@/lib/db";
 import type { Status } from "@/lib/verdict";
 
-export interface BrokenRow {
+export interface CoverageRow {
   itemId: number;
   name: string;
   level: number | null;
@@ -36,8 +37,8 @@ export interface BrokenRow {
   jobName: string | null;
 }
 
-export interface BrokenView {
-  rows: BrokenRow[];
+export interface CoverageView {
+  rows: CoverageRow[];
   broken: number;
   /** Every craft job, for the filter and for the catalogue loader. */
   jobs: { id: number; name: string }[];
@@ -159,7 +160,7 @@ export async function loadJobCatalogue(
   return { recipes: recipes.length, items: meta.size };
 }
 
-export async function brokenList(): Promise<BrokenView> {
+export async function coverage(): Promise<CoverageView> {
   const rows = await query<{
     item_id: string;
     name_fr: string | null;
@@ -196,7 +197,7 @@ export async function brokenList(): Promise<BrokenView> {
       ORDER BY i.level NULLS LAST, i.name_fr`,
   );
 
-  const out: BrokenRow[] = rows.map((r) => ({
+  const out: CoverageRow[] = rows.map((r) => ({
     itemId: Number(r.item_id),
     name: r.name_fr ?? `Item ${r.item_id}`,
     level: r.level,

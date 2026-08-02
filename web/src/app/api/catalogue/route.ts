@@ -22,6 +22,6 @@ export async function POST(request: Request) {
   }
 
   const result = await loadJobCatalogue(jobId);
-  revalidatePath("/broken");
+  revalidatePath("/items");
   return Response.json({ ok: true, ...result });
 }
