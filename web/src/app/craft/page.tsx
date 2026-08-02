@@ -37,7 +37,7 @@ export default async function CraftPage() {
 
   return (
     <main className="mx-auto w-full max-w-[1400px] px-24 py-64">
-      <PageHeader current="/craft" search={<AddToBasket have={have} />} />
+      <PageHeader current="/craft" />
 
       <h1 className="text-heading-lg tracking-heading-lg mt-24">
         {view.entries.length === 0
@@ -50,7 +50,7 @@ export default async function CraftPage() {
       </h1>
 
       <div className="mt-24">
-        <BulkAdd jobs={jobs} />
+        <BulkAdd jobs={jobs} single={<AddToBasket have={have} />} />
       </div>
 
       {view.entries.length === 0 ? (

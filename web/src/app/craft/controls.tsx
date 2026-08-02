@@ -53,7 +53,14 @@ export function AddToBasket({ have }: { have: Record<number, number> }) {
  * Items already in the basket keep the quantity you set; the report says how
  * many were new so it is clear nothing was overwritten.
  */
-export function BulkAdd({ jobs }: { jobs: JobOption[] }) {
+export function BulkAdd({
+  jobs,
+  single,
+}: {
+  jobs: JobOption[];
+  /** The one-item search, rendered above the job row. */
+  single?: React.ReactNode;
+}) {
   const router = useRouter();
   const [jobId, setJobId] = useState<number | "">("");
   const [min, setMin] = useState("1");
@@ -61,7 +68,9 @@ export function BulkAdd({ jobs }: { jobs: JobOption[] }) {
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<string | null>(null);
 
-  if (jobs.length === 0) return null;
+  // The job list needs DofusDB; the one-item search does not. An outage takes
+  // the bulk row away, not the ability to fill the basket.
+  const bulk = jobs.length > 0;
 
   const bounds = () => {
     const lo = Number.parseInt(min, 10);
@@ -113,44 +122,58 @@ export function BulkAdd({ jobs }: { jobs: JobOption[] }) {
 
   return (
     <div className="border-circuit-border rounded-2xl border px-20 py-16">
-      <div className="flex flex-wrap items-end gap-16">
-        <Field label="job">
-          <select
-            value={jobId}
-            onChange={(e) =>
-              setJobId(e.target.value === "" ? "" : Number(e.target.value))
-            }
-            className="border-circuit-border focus:border-lime-pulse text-body-sm tracking-body-sm text-phosphor-white bg-ground-iron cursor-pointer rounded-xl border px-12 py-8 outline-none"
-          >
-            <option value="">pick one…</option>
-            {jobs.map((j) => (
-              <option key={j.id} value={j.id}>
-                {j.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        {/* "including" rather than "to": both ends are inclusive, and a plain
+      {single !== undefined && (
+        <div className="flex flex-wrap items-end gap-16">
+          <Field label="one item">
+            <div className="w-full sm:w-[24rem]">{single}</div>
+          </Field>
+        </div>
+      )}
+      {single !== undefined && bulk && (
+        <div className="border-phosphor-blue-black text-caption tracking-caption text-deep-fern mt-16 border-t pt-16 uppercase">
+          or everything a job makes
+        </div>
+      )}
+      {bulk && (
+        <div className="mt-12 flex flex-wrap items-end gap-16">
+          <Field label="job">
+            <select
+              value={jobId}
+              onChange={(e) =>
+                setJobId(e.target.value === "" ? "" : Number(e.target.value))
+              }
+              className="border-circuit-border focus:border-lime-pulse text-body-sm tracking-body-sm text-phosphor-white bg-ground-iron cursor-pointer rounded-xl border px-12 py-8 outline-none"
+            >
+              <option value="">pick one…</option>
+              {jobs.map((j) => (
+                <option key={j.id} value={j.id}>
+                  {j.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {/* "including" rather than "to": both ends are inclusive, and a plain
             "to 45" reads as a stop sign to half the people who see it. */}
-        <Field label="from level">
-          <Level value={min} onChange={setMin} />
-        </Field>
-        <Field label="up to and including">
-          <Level value={max} onChange={setMax} />
-        </Field>
-        <button
-          type="button"
-          onClick={add}
-          disabled={!ready}
-          className="border-circuit-border text-body-sm tracking-body-sm text-lime-pulse hover:border-lime-pulse focus-visible:ring-lime-pulse cursor-pointer rounded-xl border px-16 py-8 transition-colors duration-150 outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {busy ? "adding…" : "add all"}
-        </button>
-        {report !== null && (
-          <span className="text-caption tracking-caption text-moss-70">{report}</span>
-        )}
-      </div>
-      {range === null && (
+          <Field label="from level">
+            <Level value={min} onChange={setMin} />
+          </Field>
+          <Field label="up to and including">
+            <Level value={max} onChange={setMax} />
+          </Field>
+          <button
+            type="button"
+            onClick={add}
+            disabled={!ready}
+            className="border-circuit-border text-body-sm tracking-body-sm text-lime-pulse hover:border-lime-pulse focus-visible:ring-lime-pulse cursor-pointer rounded-xl border px-16 py-8 transition-colors duration-150 outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? "adding…" : "add all"}
+          </button>
+          {report !== null && (
+            <span className="text-caption tracking-caption text-moss-70">{report}</span>
+          )}
+        </div>
+      )}
+      {bulk && range === null && (
         <p className="text-caption tracking-caption text-sage-40 mt-8">
           Levels run 1 to 200, low to high.
         </p>

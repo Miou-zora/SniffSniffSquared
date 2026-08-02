@@ -70,11 +70,12 @@ export function ItemSearch({
 
   const results = q.trim().length < 2 ? [] : hits;
 
-  // A width rather than a max-width: the header sizes itself to its contents,
-  // so `w-full` alone has nothing to resolve against and the box collapses to
-  // roughly its placeholder.
+  // Fills whatever it is given. The width lives on the slot in `PageHeader`,
+  // so a search that is wrapped in something and one that is not come out the
+  // same size — as a bare flex child `w-full` resolved against the whole row
+  // and pushed itself onto a line of its own.
   return (
-    <div ref={box} className="relative w-full max-w-full sm:w-[26rem] lg:w-[32rem]">
+    <div ref={box} className="relative w-full">
       <label htmlFor={inputId} className="sr-only">
         search an item
       </label>

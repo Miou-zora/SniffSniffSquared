@@ -60,7 +60,7 @@ export function PageHeader({
             ),
           )}
         </nav>
-        {search ?? <ItemSearch />}
+        <div className="w-full sm:w-[24rem] lg:w-[28rem]">{search ?? <ItemSearch />}</div>
         <Live />
       </div>
     </div>
