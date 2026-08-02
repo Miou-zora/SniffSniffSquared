@@ -393,6 +393,41 @@ fn build_dispatch() -> Dispatcher {
             }
         });
     }
+    if let Some(add_key) = messages::keymap().key("inventory_add") {
+        let mut add_db = db_client_with(&with_notify(INVENTORY_DDL));
+        d.on(add_key, move |e| {
+            let Some(item) = interpret::inventory_add(e.body) else { return };
+            if let Some(client) = add_db.as_mut() {
+                let row: [&(dyn postgres::types::ToSql + Sync); 3] =
+                    [&(item.uid as i64), &(item.item_id as i64), &(item.quantity as i64)];
+                if let Err(err) = client.execute(INVENTORY_INSERT, &row) {
+                    eprintln!("[db] inventory add failed: {err}");
+                }
+            }
+        });
+    }
+    if let Some(qty_key) = messages::keymap().key("inventory_quantity") {
+        let mut qty_db = db_client_with(&with_notify(INVENTORY_DDL));
+        d.on(qty_key, move |e| {
+            let Some((uid, quantity)) = interpret::inventory_quantity(e.body) else { return };
+            if let Some(client) = qty_db.as_mut() {
+                // The new size, not a delta: a row that drifted out of step
+                // gets corrected here rather than compounding the drift. A
+                // stack that ran out is a row that should go.
+                let result = if quantity == 0 {
+                    client.execute("DELETE FROM inventory WHERE uid = $1", &[&(uid as i64)])
+                } else {
+                    client.execute(
+                        "UPDATE inventory SET quantity = $2, seen_at = now() WHERE uid = $1",
+                        &[&(uid as i64), &(quantity as i64)],
+                    )
+                };
+                if let Err(err) = result {
+                    eprintln!("[db] inventory quantity failed: {err}");
+                }
+            }
+        });
+    }
     if let Some(gone_key) = messages::keymap().key("inventory_remove") {
         let mut gone_db = db_client_with(&with_notify(INVENTORY_DDL));
         d.on(gone_key, move |e| {

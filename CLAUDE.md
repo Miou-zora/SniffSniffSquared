@@ -238,6 +238,8 @@ name it in `messages::DEFAULTS`, parse it in `interpret.rs` matching on the
 | `crush_request` | `ker` | the crush command; field 1 = focus effect id, absent if none. Display only |
 | `crush_slot_put` | `kch` | item put into the breaker -> `crush_placements`. Carries only the uid; the type comes from the `item_detail` that answers it |
 | `inventory` | `iss` | the whole bag as a snapshot -> `inventory` (replaces the table). Entries share `item_detail`'s shape, quantity at field 3 |
+| `inventory_add` | `iun` | a new stack arrived -> upserts a row. One slot, in the listing's shape |
+| `inventory_quantity` | `iul` | a stack changed size -> updates that row. Field 4 = `{1: new size, 2: uid}`, and it is the **new size, not a delta** |
 | `inventory_remove` | `ivf` | one instance has left the bag -> deletes that row. A bare uid at field 3 |
 | `price_list_legacy` | `kdh` | the 2026-07-10 price list; gone from the wire, kept for tests |
 
@@ -245,8 +247,10 @@ name it in `messages::DEFAULTS`, parse it in `interpret.rs` matching on the
 ever put into the breaker (12 of 12, matched by instance uid) appears in the
 `iss` that preceded its placement, and none appear in `iso`, the other
 container listing. `ivf` followed from the same set — the crushed uid arrives
-there 1–11 s after each crush, 8 of 8. Both checks are one query each and are
-worth redoing if a build rotates the keys.
+there 1–11 s after each crush, 8 of 8. `iun`/`iul` came from one known
+purchase: nine Colonne Vertébrale bought one at a time, one `iun` then eight
+`iul` counting 1→9. Every check is a single query; redo them if a build
+rotates the keys. RUNBOOK part 3 has the shapes and the purchase sequence.
 
 Next up (RUNBOOK part 3 items 5-6): identify `iuz` — 3 seen, 68-80 KB each,
 server-only, matched a full price ladder during known-plaintext search, so it

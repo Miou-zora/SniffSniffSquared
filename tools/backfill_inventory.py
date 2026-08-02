@@ -1,24 +1,32 @@
 #!/usr/bin/env python3
 """
-Fill `inventory` from the newest archived inventory listing.
+Rebuild `inventory` from the archive: the newest listing, then every change.
 
-The sniffer writes this table live, but only from the moment it learned to: the
-listings are already in `packets` from before that, and the newest one is a
-complete snapshot of the bags. Replaying it means the craft basket can say what
-you already own without waiting for the game to send another.
+The sniffer writes this table live, but only from the moment it learned to. The
+messages are already in `packets` from before that, and replaying them means the
+craft basket can say what you own without waiting for the game to send another
+listing -- which it does rarely, whereas a purchase is described immediately.
 
-    field 1  message  REPEATED, one per slot
-        field 1  varint   slot
-        field 4  message
-            field 1  varint   instance uid
-            field 3  varint   how many are in the stack (absent = 1)
-            field 4  varint   item type id
+    inventory        field 1  message  REPEATED, one per slot
+                         field 1  varint  slot
+                         field 4  message  the entry below
 
-Mirrors interpret::inventory. A snapshot replaces the table wholesale, exactly
-as the live path does -- what is not in the newest listing is not in the bags.
+    entry            field 1  varint  instance uid
+                     field 3  varint  stack size (absent = 1)
+                     field 4  varint  item type id
+
+    inventory_add    the same shape, one slot
+    inventory_quan.  field 4  message
+                         field 1  varint  the new stack size
+                         field 2  varint  instance uid
+    inventory_remove field 3  varint  the uid that left
+
+Mirrors interpret::inventory and friends. The listing replaces the table
+wholesale, exactly as the live path does -- what it does not mention is not in
+the bags -- and the changes after it are applied in capture order.
 
 Usage:
-    tools/backfill_inventory.py             # replay the newest listing
+    tools/backfill_inventory.py             # replay listing + changes
     tools/backfill_inventory.py --dry-run   # report only
 """
 import argparse
@@ -43,16 +51,27 @@ def psql(sql, rows=False):
     return out.stdout
 
 
-def inventory_key():
-    """The wire key for the inventory listing -- it rotates per client build."""
+DEFAULT_KEYS = {
+    "inventory": "iss",
+    "inventory_add": "iun",
+    "inventory_quantity": "iul",
+    "inventory_remove": "ivf",
+}
+
+
+def wire_keys():
+    """Semantic name -> wire key. They rotate per client build, so keymap.json
+    wins over the defaults noted here, exactly as the Rust side does."""
+    keys = dict(DEFAULT_KEYS)
     try:
         with open(KEYMAP, encoding="utf-8") as fh:
-            k = json.load(fh).get("inventory")
-            if k:
-                return k
+            over = json.load(fh)
+        for name in keys:
+            if over.get(name):
+                keys[name] = over[name]
     except (OSError, ValueError) as e:
-        print("  ! could not read %s (%s); assuming 'iss'" % (KEYMAP, e))
-    return "iss"
+        print("  ! could not read %s (%s); using built-in keys" % (KEYMAP, e))
+    return keys
 
 
 def varint(b, i):
@@ -114,29 +133,96 @@ def parse_inventory(body):
     return out
 
 
+def parse_quantity(body):
+    """(uid, new stack size) from an inventory_quantity message."""
+    for f, wt, now in fields(body):
+        if f != 4 or wt != 2:
+            continue
+        uid = quantity = None
+        for f2, wt2, v in fields(now):
+            if wt2 != 0:
+                continue
+            if f2 == 1:
+                quantity = v
+            elif f2 == 2:
+                uid = v
+        if uid:
+            return uid, quantity or 0
+    return None
+
+
+def parse_remove(body):
+    """The uid an inventory_remove message says has gone."""
+    for f, wt, v in fields(body):
+        if f == 3 and wt == 0 and v:
+            return v
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="report without writing")
     args = ap.parse_args()
 
-    key = inventory_key()
+    keys = wire_keys()
+    listing = keys["inventory"]
     rows = psql(
-        "SELECT encode(body,'hex'), captured_at FROM packets"
+        "SELECT id, encode(body,'hex'), captured_at FROM packets"
         " WHERE msg_key = '%s' AND body IS NOT NULL"
-        " ORDER BY captured_at DESC, id DESC LIMIT 1" % key.replace("'", ""),
+        " ORDER BY captured_at DESC, id DESC LIMIT 1" % listing.replace("'", ""),
         rows=True,
     )
     if not rows:
-        sys.exit("no archived %s messages; nothing to replay" % key)
+        sys.exit("no archived %s messages; nothing to replay" % listing)
 
-    hexed, captured_at = rows[0]
+    from_id, hexed, captured_at = rows[0]
     items = parse_inventory(bytes.fromhex(hexed))
     print("backfill: newest %s listing at %s -- %d slot(s), %d unit(s)"
-          % (key, captured_at[:19], len(items), sum(q for _u, _i, q in items)))
+          % (listing, captured_at[:19], len(items), sum(q for _u, _i, q in items)))
     if not items:
         sys.exit("  ! parsed nothing; refusing to empty the table")
 
-    stacked = [(u, i, q) for u, i, q in items if q > 1]
+    # Everything that happened since, in capture order. The listing is a
+    # snapshot of one moment; a purchase minutes later is only in these.
+    bag = {uid: [item, quantity] for uid, item, quantity in items}
+    changes = psql(
+        "SELECT msg_key, encode(body,'hex') FROM packets"
+        " WHERE id > %d AND msg_key IN ('%s','%s','%s') AND body IS NOT NULL"
+        " ORDER BY id"
+        % (int(from_id), keys["inventory_add"], keys["inventory_quantity"],
+           keys["inventory_remove"]),
+        rows=True,
+    )
+    applied = 0
+    for key, body_hex in changes:
+        body = bytes.fromhex(body_hex)
+        if key == keys["inventory_add"]:
+            added = parse_inventory(body)
+            for uid, item, quantity in added:
+                bag[uid] = [item, quantity]
+            applied += len(added)
+        elif key == keys["inventory_quantity"]:
+            change = parse_quantity(body)
+            if change and change[0] in bag:
+                uid, quantity = change
+                if quantity <= 0:
+                    del bag[uid]
+                else:
+                    bag[uid][1] = quantity
+                applied += 1
+        elif key == keys["inventory_remove"]:
+            uid = parse_remove(body)
+            # A removal names a uid from anywhere, not only the bags -- the
+            # message is a bare id and the game uses it broadly. Only the ones
+            # that were in the bag count.
+            if uid in bag:
+                del bag[uid]
+                applied += 1
+    print("  %d change(s) after it, %d applied -- %d slot(s), %d unit(s)"
+          % (len(changes), applied, len(bag), sum(q for _i, q in bag.values())))
+
+    stacked = sorted(((u, i, q) for u, (i, q) in bag.items() if q > 1),
+                     key=lambda r: -r[2])
     for uid, item, quantity in stacked[:8]:
         name = psql("SELECT coalesce(name_fr,'?') FROM items WHERE item_id = %d" % item,
                     rows=True)
@@ -144,14 +230,14 @@ def main():
     if args.dry_run:
         return
 
-    values = ",\n  ".join("(%d,%d,%d)" % r for r in items)
+    values = ",\n  ".join("(%d,%d,%d)" % (u, i, q) for u, (i, q) in sorted(bag.items()))
     # Replace, do not merge: the listing is the whole bag, so a row it does not
     # mention is an item that is no longer there.
     psql("BEGIN;\nDELETE FROM inventory;\n"
          "INSERT INTO inventory (uid, item_id, quantity)\nVALUES\n  " + values +
          "\nON CONFLICT (uid) DO UPDATE SET item_id = EXCLUDED.item_id,"
          " quantity = EXCLUDED.quantity, seen_at = now();\nCOMMIT;\n")
-    print("  wrote %d row(s)" % len(items))
+    print("  wrote %d row(s)" % len(bag))
 
 
 if __name__ == "__main__":

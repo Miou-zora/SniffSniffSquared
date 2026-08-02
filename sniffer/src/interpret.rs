@@ -39,6 +39,10 @@ pub fn interpret(key: &str, body: &[u8]) -> Option<String> {
             format!("inventory {{ {} slots, {stacks} stacked }}", items.len())
         }),
         "inventory_remove" => inventory_remove(body).map(|uid| format!("gone {{ uid={uid} }}")),
+        "inventory_add" => inventory_add(body)
+            .map(|i| format!("picked up {{ uid={} item={} x{} }}", i.uid, i.item_id, i.quantity)),
+        "inventory_quantity" => inventory_quantity(body)
+            .map(|(uid, quantity)| format!("stack {{ uid={uid} now x{quantity} }}")),
         _ => None,
     }
 }
@@ -53,6 +57,8 @@ pub fn is_known_key(key: &str) -> bool {
             | Some("crush_slot_put")
             | Some("inventory")
             | Some("inventory_remove")
+            | Some("inventory_add")
+            | Some("inventory_quantity")
     )
 }
 
@@ -403,6 +409,62 @@ pub fn inventory(body: &[u8]) -> Option<Vec<ItemDetail>> {
         }
     }
     Some(out)
+}
+
+// ---- inventory_add: a new stack arrived -------------------------------------
+//
+// One slot, in the listing's own shape, so it reads with the same parser.
+// Identified against a known purchase: nine Colonne Vertebrale bought one at a
+// time produced one of these for the first — uid 253751293, quantity 1, item
+// 2323 — and a quantity change for each of the eight after it.
+
+/// The stack that just entered the bags.
+pub fn inventory_add(body: &[u8]) -> Option<ItemDetail> {
+    inventory(body)?.into_iter().next()
+}
+
+// ---- inventory_quantity: an existing stack changed size ---------------------
+//
+//   field 2  message  the stack as it was
+//       field 1  varint   the previous quantity
+//   field 4  message  the stack as it is now
+//       field 1  varint   the new quantity
+//       field 2  varint   instance uid
+//
+// From the same nine purchases: 1->2, 2->3, ... 8->9, all on uid 253751293,
+// ending at the nine that were bought. The previous quantity is on the wire and
+// is deliberately not returned — the new one is the answer, and a delta applied
+// to a row that drifted would compound the drift instead of correcting it.
+
+/// `(instance uid, the new stack size)`.
+pub fn inventory_quantity(body: &[u8]) -> Option<(u64, u64)> {
+    let mut r = Reader::new(body);
+    while !r.eof() {
+        let (field, wt) = r.tag()?;
+        if field == 4 && wt == WireType::Len {
+            let now = r.len_field()?;
+            let mut r2 = Reader::new(now);
+            let (mut quantity, mut uid) = (0u64, 0u64);
+            while !r2.eof() {
+                let (f2, w2) = r2.tag()?;
+                match (f2, w2) {
+                    (1, WireType::Varint) => quantity = r2.varint()?,
+                    (2, WireType::Varint) => uid = r2.varint()?,
+                    (_, w2) => {
+                        if !r2.skip(w2) {
+                            break;
+                        }
+                    }
+                }
+            }
+            if uid != 0 {
+                return Some((uid, quantity));
+            }
+        } else if !r.skip(wt) {
+            return None;
+        }
+    }
+    None
 }
 
 // ---- inventory_remove: one instance is gone ---------------------------------
@@ -924,6 +986,31 @@ mod tests {
     #[test]
     fn inventory_remove_reads_the_uid() {
         assert_eq!(inventory_remove(GONE), Some(231070684));
+    }
+
+    /// Real capture, packets #99201 and #99209: the first of nine Colonne
+    /// Vertebrale bought one at a time, and the change that followed it.
+    /// Item 2323 at uid 253751293, going 1 -> 2 on the second purchase.
+    const PICKED_UP: &[u8] = &[
+        0x0a, 0x14, 0x08, 0x3f, 0x22, 0x10, 0x08, 0xfd, 0xdf, 0xff, 0x78, 0x12, 0x04, 0x08,
+        0x01, 0x10, 0x01, 0x18, 0x01, 0x20, 0x93, 0x12,
+    ];
+    const RESTACKED: &[u8] = &[
+        0x12, 0x04, 0x08, 0x01, 0x10, 0x01, 0x22, 0x07, 0x08, 0x02, 0x10, 0xfd, 0xdf, 0xff,
+        0x78,
+    ];
+
+    #[test]
+    fn inventory_add_reads_the_new_stack() {
+        let item = inventory_add(PICKED_UP).expect("parses");
+        assert_eq!((item.uid, item.item_id, item.quantity), (253751293, 2323, 1));
+    }
+
+    #[test]
+    fn inventory_quantity_reads_the_new_size() {
+        // The wire carries the old size too; the new one is what is stored, so
+        // a row that drifted is corrected rather than having a delta applied.
+        assert_eq!(inventory_quantity(RESTACKED), Some((253751293, 2)));
     }
 
     #[test]

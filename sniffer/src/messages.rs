@@ -44,6 +44,10 @@ pub const DEFAULTS: &[(&str, &str)] = &[
     ("inventory", "iss"),
     // one instance has left the bag: crushed, sold, dropped
     ("inventory_remove", "ivf"),
+    // a new stack has arrived in the bag — one slot, same shape as a listing's
+    ("inventory_add", "iun"),
+    // an existing stack changed size: bought more, used some
+    ("inventory_quantity", "iul"),
 ];
 
 /// Where an override file is looked for, relative to the working directory.

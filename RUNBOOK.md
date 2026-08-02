@@ -773,10 +773,32 @@ reads as one. Nothing tells them apart structurally; the wire key does. That is
 fine as long as the parser is only ever handed a message that key matched, and
 `interpret::inventory_reads_nothing_out_of_another_message` pins exactly that.
 
-Not yet answered: what arrives when a stack you already own grows — buying 10
-more of something already in the bag. `item_detail` for that uid updates the
-row, and the next listing corrects everything regardless, so counts are right
-within a snapshot either way.
+The two changes in between are `iun` and `iul`, identified from a purchase of
+nine Colonne Vertébrale bought one at a time:
+
+```
+iun  1  message              a new stack: the listing's slot shape, one entry
+                             uid 253751293, quantity 1, item 2323
+
+iul  2  message  field 1     the size it was
+     4  message  field 1     the size it is now
+                 field 2     instance uid
+                             1->2, 2->3, ... 8->9, all on uid 253751293
+```
+
+The first purchase produced an `iun`, the eight after it an `iul` each, ending
+at the nine that were bought. **`iul` carries the new size, not a delta**, so a
+row that drifted out of step is corrected rather than compounded — store what it
+says and never add to what is there.
+
+The full purchase sequence, for whoever identifies the marketplace next:
+
+```
+C->S ked  1=batch 2=listing 3=price     the buy
+S->C keh  2=listing 3=left 4=item_id    what remains on sale
+S->C itf  1=kamas                       the new balance
+S->C iun / iul                          the bag changed
+```
 
 ### Resolved: item ids are DofusDB ids
 
