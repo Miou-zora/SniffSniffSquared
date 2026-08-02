@@ -69,15 +69,8 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
         <h1 className="text-heading-lg tracking-heading-lg">{history.item.name}</h1>
       </div>
       <p className="text-body tracking-body text-sage-40 mt-12 max-w-[74ch]">
-        <span className="text-moss-70">not something you break</span> ·{" "}
-        {history.item.type ?? "—"}
-        {history.item.level !== null && ` · level ${history.item.level}`}.{" "}
-        {/* Two ways to land here and they are not the same fact: a rune is what
-            breaking *produces*, where a resource simply has no lines. */}
-        {isBreakableKind(history.item.type)
-          ? "Its lines map to no rune, so there is nothing to project"
-          : "This is what breaking produces, not something to break"}{" "}
-        — what it sells for is the whole story.
+        <span className="text-moss-70">price history</span> · {history.item.type ?? "—"}
+        {history.item.level !== null && ` · level ${history.item.level}`}
       </p>
 
       <PriceHistory view={history} />

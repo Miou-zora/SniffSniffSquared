@@ -24,7 +24,7 @@ projection to lead with, so the history is the page. One item, one address —
 the price history used to be a route of its own, which meant two half-answers
 per item. `/price/[id]` redirects.
 
-**Carrying rune-mapped lines does not make an item breakable.** A rune *is* a
+**Carrying rune-mapped lines does not make an item breakable.** A rune _is_ a
 stat line, so that test alone gave Rune Vi a projection of what it is worth to
 turn into runes. `isBreakableKind` excludes it by type name, and `broken.ts`
 makes the same exclusion in SQL — one rule in two languages.
