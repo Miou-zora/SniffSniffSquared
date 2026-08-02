@@ -33,7 +33,6 @@ function k(v: number) {
 export default async function CraftPage() {
   const [view, jobs] = await Promise.all([loadBasket(), craftJobs()]);
   const have = Object.fromEntries(view.entries.map((e) => [e.itemId, e.quantity]));
-  const saved = view.separate - view.pooled;
 
   return (
     <main className="mx-auto w-full max-w-[1400px] px-24 py-64">
@@ -83,19 +82,6 @@ export default async function CraftPage() {
                 </span>{" "}
                 — browse them in the HDV with the sniffer running and the total completes
                 itself.
-              </>
-            )}
-            {/* Named on both sides, or it reads as a discount from nowhere: it
-                is one shopping list priced two ways, and the saving is the
-                difference between them. Hidden once the bags cover everything,
-                where a saving on a trip you are not making means nothing. */}
-            {saved > 0 && !view.ready && (
-              <>
-                {" "}
-                Pooling is worth <span className="text-lime-pulse">{k(saved)}</span>: this
-                list costs {k(view.pooled)} bought in one go, against {k(view.separate)}{" "}
-                if you shopped for each craft on its own, because a shared resource only
-                reaches the cheaper batch sizes once the quantities are added together.
               </>
             )}
           </p>

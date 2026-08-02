@@ -42,10 +42,7 @@ not then make sixty more requests to price them.
 
 **What you already own comes off the top.** Each pile row carries `have` from
 `inventory` and a `short` — the buy plan and the cost are for the shortfall, so
-a resource the bags already cover reads as settled and costs nothing. The
-pooling comparison (`pooled` vs `separate`) deliberately ignores stock: it
-answers "one trip or several", and subtracting stock from one side only would
-make it a different number that means nothing.
+a resource the bags already cover reads as settled and costs nothing.
 
 **DofusDB serves 50 rows per request whatever `$limit` asks for.** Anything
 reading a list has to page or chunk; asking for 200 ids answers with about 50

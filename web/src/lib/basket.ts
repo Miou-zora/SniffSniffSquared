@@ -71,14 +71,6 @@ export interface BasketView {
   cost: number | null;
   /** Ingredients with no captured price — the reason `cost` may be null. */
   unpriced: number;
-  /**
-   * `pooled` and `separate` price the same shopping two ways — one trip for the
-   * basket, versus a trip per craft — over the resources that have a price.
-   * They exclude the unpriced ones on both sides, so the difference between
-   * them is meaningful even when the total is not yet known.
-   */
-  pooled: number;
-  separate: number;
   /** Basket items with no recipe at all. */
   uncraftable: number;
   /** Resources the bags already cover in full. */
@@ -412,8 +404,6 @@ export async function loadBasket(): Promise<BasketView> {
       pile: [],
       cost: 0,
       unpriced: 0,
-      pooled: 0,
-      separate: 0,
       uncraftable: 0,
       covered: 0,
       ready: false,
@@ -476,7 +466,6 @@ export async function loadBasket(): Promise<BasketView> {
   // What is already in the bags comes off the top: the trip is for what is
   // missing, and a line you can already cover costs nothing and needs no plan.
   const owned = await held([...totals.keys()]);
-  let pooled = 0;
   for (const row of totals.values()) {
     row.have = owned.get(row.itemId) ?? 0;
     row.short = Math.max(0, row.quantity - row.have);
@@ -484,9 +473,6 @@ export async function loadBasket(): Promise<BasketView> {
     row.plan = row.short > 0 && ladder ? planBuy(row.short, ladder) : null;
     row.cost = row.short === 0 ? 0 : (row.plan?.cost ?? null);
     row.overbuy = row.plan ? row.plan.units - row.short : 0;
-    // The batching comparison is about the whole recipe, stock aside — see the
-    // note on `separate` below.
-    pooled += (ladder ? planBuy(row.quantity, ladder)?.cost : null) ?? 0;
   }
 
   // Sorted by how much you have to buy, not by what it costs: the list is read
@@ -501,16 +487,11 @@ export async function loadBasket(): Promise<BasketView> {
   const unpriced = pile.filter((r) => r.short > 0 && r.cost === null).length;
   const cost = unpriced > 0 ? null : pile.reduce((sum, r) => sum + (r.cost ?? 0), 0);
 
-  // What one entry costs on its own, and what the same shopping costs bought
-  // per craft. Both sides skip the resources with no price rather than giving
-  // up: an unpriced ingredient makes the *total* unknowable, but it says
-  // nothing about whether pooling the rest was worth doing, and that comparison
-  // is the reason this page exists.
-  //
-  // Both also ignore what is already in the bags. They answer a question about
-  // batching -- one trip or several -- and subtracting stock from one side only
-  // would turn that into a different, meaningless number.
-  let separate = 0;
+  // What one entry costs on its own, ignoring both the pooling and what is in
+  // the bags: it answers "is this one worth making", which is a question about
+  // the item rather than about the trip. Null as soon as one of its
+  // ingredients has no price — a sum over the ones that happen to be on the
+  // market is not a cheaper craft, it is a wrong one.
   for (const entry of entries) {
     if (entry.ingredients === null) continue;
     let own: number | null = 0;
@@ -521,7 +502,6 @@ export async function loadBasket(): Promise<BasketView> {
         own = null;
         continue;
       }
-      separate += plan.cost;
       if (own !== null) own += plan.cost;
     }
     entry.cost = own;
@@ -532,8 +512,6 @@ export async function loadBasket(): Promise<BasketView> {
     pile,
     cost,
     unpriced,
-    pooled,
-    separate,
     uncraftable: entries.filter((e) => e.ingredients === null).length,
     covered: pile.filter((r) => r.short === 0).length,
     ready: pile.length > 0 && pile.every((r) => r.short === 0),
