@@ -104,7 +104,8 @@ All defined in `../init.sql`:
 - **`item_effects`** — the min/max an item _type_ can roll per line, from
   DofusDB. Use it to estimate a copy you do not own; use `item_stats` for one
   you do. Views `item_effect_weights` and `item_break_weight` average it.
-- **`recipes`** — `item_id -> ingredient_id, quantity` per position, from
+- **`recipes`** — `item_id -> ingredient_id, quantity` per position, plus the
+  `job_id` that makes it (DofusDB numbering, 16 = Bijoutier). From
   DofusDB via `../tools/import_items.py`. The second answer to "what did this
   item cost", next to `prices`: a crafted item's real cost is its ingredients,
   bought off the batch ladder. Most items have no recipe, and that is not an

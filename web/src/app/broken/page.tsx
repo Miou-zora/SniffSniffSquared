@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
  * is the list of what is left to measure.
  */
 export default async function BrokenPage() {
-  const { rows, broken } = await brokenList();
+  const { rows, broken, jobs } = await brokenList();
 
   return (
     <main className="mx-auto w-full max-w-[1400px] px-24 py-64">
@@ -36,7 +36,7 @@ export default async function BrokenPage() {
           catalogue fills in.
         </p>
       ) : (
-        <BrokenTable rows={rows} />
+        <BrokenTable rows={rows} jobs={jobs} />
       )}
     </main>
   );

@@ -157,9 +157,10 @@ export async function craftJobs(): Promise<JobOption[]> {
 }
 
 /** One craftable a job makes, with the recipe that came back alongside it. */
-interface JobRecipe {
+export interface JobRecipe {
   itemId: number;
   level: number;
+  jobId: number;
   ingredients: { itemId: number; quantity: number }[];
 }
 
@@ -219,6 +220,10 @@ async function jobRecipes(
       out.push({
         itemId,
         level: Number(r.resultLevel) || 0,
+        // The query asked for one job, so every row is that job's -- worth
+        // storing, since which job makes a thing is otherwise a fact nothing
+        // in the database holds.
+        jobId,
         ingredients: ids.map((id, i) => ({
           itemId: Number(id),
           quantity: Number(quantities[i]),
@@ -237,7 +242,7 @@ async function jobRecipes(
  * wholesale for the same reason: an ingredient dropped between game versions
  * has to lose its row rather than linger next to the new one.
  */
-async function rememberRecipes(recipes: JobRecipe[]): Promise<void> {
+export async function rememberRecipes(recipes: JobRecipe[]): Promise<void> {
   const withLines = recipes.filter((r) => r.ingredients.length > 0);
   if (withLines.length === 0) return;
   await query(`DELETE FROM recipes WHERE item_id = ANY($1::bigint[])`, [
@@ -248,15 +253,16 @@ async function rememberRecipes(recipes: JobRecipe[]): Promise<void> {
   for (const recipe of withLines) {
     recipe.ingredients.forEach((ing, position) => {
       const i = values.length;
-      tuples.push(`($${i + 1},$${i + 2},$${i + 3},$${i + 4})`);
-      values.push(recipe.itemId, position, ing.itemId, ing.quantity);
+      tuples.push(`($${i + 1},$${i + 2},$${i + 3},$${i + 4},$${i + 5})`);
+      values.push(recipe.itemId, position, ing.itemId, ing.quantity, recipe.jobId);
     });
   }
   await query(
-    `INSERT INTO recipes (item_id, position, ingredient_id, quantity)
+    `INSERT INTO recipes (item_id, position, ingredient_id, quantity, job_id)
      VALUES ${tuples.join(",")}
      ON CONFLICT (item_id, position) DO UPDATE SET
-       ingredient_id = EXCLUDED.ingredient_id, quantity = EXCLUDED.quantity`,
+       ingredient_id = EXCLUDED.ingredient_id, quantity = EXCLUDED.quantity,
+       job_id = EXCLUDED.job_id`,
     values,
   );
 }

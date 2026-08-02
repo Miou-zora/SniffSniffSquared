@@ -10,6 +10,7 @@
  * lines map to runes. That is what `item_break_weight` counts, and it is also
  * what "breakable" means — a template with no rune lines yields nothing.
  */
+import { craftJobs, rememberRecipes, type JobRecipe } from "@/lib/basket";
 import { query } from "@/lib/db";
 import type { Status } from "@/lib/verdict";
 
@@ -29,11 +30,92 @@ export interface BrokenRow {
   held: boolean;
   /** Your verdict, when you set one. */
   mark: Status | null;
+  /** The job that crafts it, null when nothing does. */
+  jobId: number | null;
+  jobName: string | null;
 }
 
 export interface BrokenView {
   rows: BrokenRow[];
   broken: number;
+  /** Every job that makes something on the list, for the filter. */
+  jobs: { id: number; name: string }[];
+}
+
+/** DofusDB serves 50 rows a request whatever `$limit` says. */
+const PAGE = 50;
+
+/**
+ * Which job makes each item, `recipes` first and DofusDB for the rest.
+ *
+ * The answer is cached back as a whole recipe rather than as a loose job id:
+ * the recipe is what has a job, and writing it means the craft basket stops
+ * having to ask for the same one later. Batched 50 at a time — a catalogue of
+ * three hundred items is six requests, not three hundred.
+ */
+async function jobsFor(itemIds: number[]): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  if (itemIds.length === 0) return out;
+
+  const known = await query<{ item_id: string; job_id: number | null }>(
+    `SELECT DISTINCT item_id, job_id FROM recipes
+      WHERE item_id = ANY($1::bigint[]) AND job_id IS NOT NULL`,
+    [itemIds],
+  );
+  for (const row of known) {
+    if (row.job_id !== null) out.set(Number(row.item_id), row.job_id);
+  }
+
+  const missing = itemIds.filter((id) => !out.has(id));
+  const learned: JobRecipe[] = [];
+  for (let i = 0; i < missing.length; i += PAGE) {
+    const chunk = missing.slice(i, i + PAGE);
+    try {
+      const url =
+        `https://api.dofusdb.fr/recipes?$limit=${PAGE}` +
+        chunk.map((id) => `&resultId[$in][]=${id}`).join("") +
+        `&$select[]=resultId&$select[]=resultLevel&$select[]=jobId` +
+        `&$select[]=ingredientIds&$select[]=quantities`;
+      const res = await fetch(url, {
+        next: { revalidate: 604_800 },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!res.ok) continue;
+      const body: unknown = await res.json();
+      const data = (body as { data?: unknown }).data;
+      if (!Array.isArray(data)) continue;
+      for (const raw of data) {
+        const r = raw as {
+          resultId?: unknown;
+          resultLevel?: unknown;
+          jobId?: unknown;
+          ingredientIds?: unknown;
+          quantities?: unknown;
+        };
+        const itemId = Number(r.resultId);
+        const jobId = Number(r.jobId);
+        if (!Number.isFinite(itemId) || !Number.isFinite(jobId)) continue;
+        out.set(itemId, jobId);
+        const ids = r.ingredientIds;
+        const quantities = r.quantities;
+        if (!Array.isArray(ids) || !Array.isArray(quantities)) continue;
+        if (ids.length === 0 || ids.length !== quantities.length) continue;
+        learned.push({
+          itemId,
+          level: Number(r.resultLevel) || 0,
+          jobId,
+          ingredients: ids.map((id, j) => ({
+            itemId: Number(id),
+            quantity: Number(quantities[j]),
+          })),
+        });
+      }
+    } catch {
+      // A job label is a nicety; the coverage figure does not depend on it.
+    }
+  }
+  if (learned.length > 0) await rememberRecipes(learned);
+  return out;
 }
 
 /**
@@ -98,7 +180,30 @@ export async function brokenList(): Promise<BrokenView> {
     crushedAt: r.crushed_at === null ? null : r.crushed_at.toISOString(),
     held: r.held,
     mark: r.mark === "worth" || r.mark === "skip" ? r.mark : null,
+    jobId: null,
+    jobName: null,
   }));
 
-  return { rows: out, broken: out.filter((r) => r.crushes > 0).length };
+  const [byItem, jobs] = await Promise.all([
+    jobsFor(out.map((r) => r.itemId)),
+    craftJobs(),
+  ]);
+  const jobName = new Map(jobs.map((j) => [j.id, j.name]));
+  for (const row of out) {
+    row.jobId = byItem.get(row.itemId) ?? null;
+    row.jobName = row.jobId === null ? null : (jobName.get(row.jobId) ?? null);
+  }
+
+  // Only the jobs that make something here, so the filter never offers a
+  // choice that empties the table.
+  const present = [...new Set(out.map((r) => r.jobId))].filter(
+    (id): id is number => id !== null,
+  );
+  return {
+    rows: out,
+    broken: out.filter((r) => r.crushes > 0).length,
+    jobs: present
+      .map((id) => ({ id, name: jobName.get(id) ?? `Job ${id}` }))
+      .sort((a, b) => a.name.localeCompare(b.name, "fr")),
+  };
 }

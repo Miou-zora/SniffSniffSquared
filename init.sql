@@ -240,8 +240,15 @@ CREATE TABLE IF NOT EXISTS recipes (
     position      INT    NOT NULL,   -- order within the recipe
     ingredient_id BIGINT NOT NULL,
     quantity      INT    NOT NULL,
+    -- Which job makes it, as DofusDB numbers them (16 = Bijoutier). The same
+    -- for every position of a recipe; kept here because a recipe is what has a
+    -- job, and an item without one has no row to hang it on.
+    job_id        INT,
     PRIMARY KEY (item_id, position)
 );
+
+-- For databases created before `job_id` existed.
+ALTER TABLE recipes ADD COLUMN IF NOT EXISTS job_id INT;
 
 CREATE INDEX IF NOT EXISTS idx_recipes_ingredient ON recipes (ingredient_id);
 

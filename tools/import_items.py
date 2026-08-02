@@ -59,8 +59,10 @@ CREATE TABLE IF NOT EXISTS items (
     level      INT,
     type_id    BIGINT,
     type_fr    TEXT,
+    icon_id    BIGINT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE items ADD COLUMN IF NOT EXISTS icon_id BIGINT;
 CREATE TABLE IF NOT EXISTS item_effects (
     item_id   BIGINT NOT NULL,
     position  INT    NOT NULL,
@@ -75,8 +77,10 @@ CREATE TABLE IF NOT EXISTS recipes (
     position      INT    NOT NULL,
     ingredient_id BIGINT NOT NULL,
     quantity      INT    NOT NULL,
+    job_id        INT,
     PRIMARY KEY (item_id, position)
 );
+ALTER TABLE recipes ADD COLUMN IF NOT EXISTS job_id INT;
 CREATE INDEX IF NOT EXISTS idx_recipes_ingredient ON recipes (ingredient_id);
 
 -- Mirrors init.sql. Declared here too because init.sql only runs on a fresh
@@ -307,7 +311,7 @@ def fetch_items(ids):
 
 
 def fetch_recipes(ids):
-    """{item_id: [(position, ingredient_id, quantity)]} from DofusDB.
+    """{item_id: (job_id, [(position, ingredient_id, quantity)])} from DofusDB.
 
     Most items have no recipe -- every resource, and anything that only drops --
     and an absent recipe is not an error. An item listed twice keeps the last
@@ -333,22 +337,32 @@ def fetch_recipes(ids):
             # one, and storing half of it would price the item too cheaply.
             if iid is None or len(ings) != len(qtys) or not ings:
                 continue
-            out[int(iid)] = [(p, int(a), int(q)) for p, (a, q) in enumerate(zip(ings, qtys))]
+            job = rec.get("jobId")
+            out[int(iid)] = (
+                int(job) if job is not None else None,
+                [(p, int(a), int(q)) for p, (a, q) in enumerate(zip(ings, qtys))],
+            )
     return out
 
 
 def write_recipes(recipes):
     """Replace each item's recipe wholesale, for the same reason item_effects is
-    replaced: an ingredient dropped between game versions must lose its row."""
+    replaced: an ingredient dropped between game versions must lose its row.
+
+    `job_id` rides along on every row: which job makes a thing is otherwise a
+    fact nothing in the database holds, and web/ reads it to group coverage by
+    job."""
     if not recipes:
         return
-    rows = [(iid, pos, ing, qty)
-            for iid, rs in sorted(recipes.items()) for pos, ing, qty in rs]
+    rows = [(iid, pos, ing, qty, job)
+            for iid, (job, rs) in sorted(recipes.items()) for pos, ing, qty in rs]
     psql(
         "DELETE FROM recipes WHERE item_id IN (%s);\n"
         % ",".join(str(i) for i in sorted(recipes))
-        + "INSERT INTO recipes (item_id, position, ingredient_id, quantity)\nVALUES\n  "
-        + ",\n  ".join("(%d,%d,%d,%d)" % r for r in rows)
+        + "INSERT INTO recipes (item_id, position, ingredient_id, quantity, job_id)"
+          "\nVALUES\n  "
+        + ",\n  ".join("(%d,%d,%d,%d,%s)" % (r[0], r[1], r[2], r[3], lit(r[4]))
+                       for r in rows)
         + ";\n"
     )
     print("  %d ingredient(s) across %d recipe(s)" % (len(rows), len(recipes)))
@@ -367,7 +381,7 @@ def enrich(refresh, dry_run):
     # Without a name the craft estimate can only report a number id, and the
     # whole point of it is being able to read what is missing a price.
     recipes = fetch_recipes(ids)
-    ingredient_ids = sorted({ing for rs in recipes.values() for _, ing, _ in rs})
+    ingredient_ids = sorted({ing for _job, rs in recipes.values() for _, ing, _ in rs})
     unknown = [i for i in ingredient_ids if i not in found]
     if unknown:
         known = {int(r[0]) for r in psql(

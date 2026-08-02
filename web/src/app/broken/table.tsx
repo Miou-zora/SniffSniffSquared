@@ -36,17 +36,35 @@ const DEFAULT_DIR: Record<Key, "asc" | "desc"> = {
  * act on — it is what to take to the crusher next — and on a full catalogue it
  * is most of the rows, so it gets a button rather than a scroll.
  */
-export function BrokenTable({ rows }: { rows: BrokenRow[] }) {
+export function BrokenTable({
+  rows,
+  jobs,
+}: {
+  rows: BrokenRow[];
+  jobs: { id: number; name: string }[];
+}) {
   const [sort, setSort] = useState<{ key: Key; dir: "asc" | "desc" }>({
     key: "level",
     dir: "asc",
   });
   const [show, setShow] = useState<"all" | "unbroken" | "broken">("all");
+  const [job, setJob] = useState<number | "">("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
 
   const shown = useMemo(() => {
-    const filtered = rows.filter((r) =>
-      show === "all" ? true : show === "broken" ? r.crushes > 0 : r.crushes === 0,
-    );
+    // A blank bound is no bound, not zero: leaving "to" empty has to mean
+    // "everything above `from`" rather than an empty table.
+    const lo = Number.parseInt(from, 10);
+    const hi = Number.parseInt(to, 10);
+    const filtered = rows.filter((r) => {
+      if (show === "broken" && r.crushes === 0) return false;
+      if (show === "unbroken" && r.crushes > 0) return false;
+      if (job !== "" && r.jobId !== job) return false;
+      if (Number.isInteger(lo) && (r.level ?? 0) < lo) return false;
+      if (Number.isInteger(hi) && (r.level ?? 0) > hi) return false;
+      return true;
+    });
     const dir = sort.dir === "asc" ? 1 : -1;
     return filtered.sort((a, b) => {
       const x = a[sort.key];
@@ -63,7 +81,7 @@ export function BrokenTable({ rows }: { rows: BrokenRow[] }) {
           : String(x).localeCompare(String(y), "fr");
       return cmp === 0 ? a.name.localeCompare(b.name, "fr") : cmp * dir;
     });
-  }, [rows, sort, show]);
+  }, [rows, sort, show, job, from, to]);
 
   const toggle = (key: Key) =>
     setSort((now) =>
@@ -94,6 +112,24 @@ export function BrokenTable({ rows }: { rows: BrokenRow[] }) {
                 : "already broken"}
           </button>
         ))}
+        <select
+          value={job}
+          onChange={(e) => setJob(e.target.value === "" ? "" : Number(e.target.value))}
+          className="border-circuit-border focus:border-lime-pulse text-caption tracking-caption text-phosphor-white bg-ground-iron ml-8 cursor-pointer rounded-lg border px-12 py-8 outline-none"
+        >
+          <option value="">every job</option>
+          {jobs.map((j) => (
+            <option key={j.id} value={j.id}>
+              {j.name}
+            </option>
+          ))}
+        </select>
+        <span className="text-caption tracking-caption text-deep-fern flex items-center gap-8">
+          level
+          <Bound value={from} onChange={setFrom} placeholder="1" />
+          to
+          <Bound value={to} onChange={setTo} placeholder="200" />
+        </span>
         <span className="text-caption tracking-caption text-deep-fern ml-8">
           {shown.length} shown
         </span>
@@ -166,7 +202,12 @@ export function BrokenTable({ rows }: { rows: BrokenRow[] }) {
                       : `${r.crushes} crush${r.crushes === 1 ? "" : "es"} captured`
                   }
                 >
-                  {r.crushes === 0 ? "not yet" : `✓ ${r.crushes}`}
+                  {/* The count is the point on a row that has one: a second
+                      crush of the same item is a second reading of a rate that
+                      moves, and one reading is a sample of one. */}
+                  {r.crushes === 0
+                    ? "not yet"
+                    : `${r.crushes} crush${r.crushes === 1 ? "" : "es"}`}
                 </td>
                 <td className="text-moss-80 py-12 pr-16 text-right tabular-nums">
                   {r.coefficient === null
@@ -185,6 +226,30 @@ export function BrokenTable({ rows }: { rows: BrokenRow[] }) {
         </table>
       </div>
     </>
+  );
+}
+
+/** A level bound. Empty means unbounded, which is why it is not a number 0. */
+function Bound({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <input
+      type="number"
+      min={1}
+      max={200}
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      aria-label={`level ${placeholder === "1" ? "from" : "to"}`}
+      className="border-circuit-border focus:border-lime-pulse text-caption text-phosphor-white placeholder:text-deep-fern bg-ground-iron w-56 rounded-lg border px-8 py-8 tabular-nums outline-none"
+    />
   );
 }
 
