@@ -2,6 +2,7 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 
 import { PageHeader } from "@/app/header";
+import { CraftBreakdown } from "@/app/item/[id]/craft";
 import { PriceHistory } from "@/app/item/[id]/history";
 import { ItemView } from "@/app/page";
 import { loadItem } from "@/lib/breaker";
@@ -73,7 +74,17 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
         {history.item.level !== null && ` · level ${history.item.level}`}
       </p>
 
-      <PriceHistory view={history} />
+      <section className="mt-32">
+        <h2 className="text-heading-sm tracking-heading-sm">What it costs to craft</h2>
+        <div className="mt-12">
+          <CraftBreakdown estimate={view?.projection.craft ?? null} />
+        </div>
+      </section>
+
+      <section className="mt-32">
+        <h2 className="text-heading-sm tracking-heading-sm">Price history</h2>
+        <PriceHistory view={history} />
+      </section>
     </main>
   );
 }
