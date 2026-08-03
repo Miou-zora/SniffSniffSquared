@@ -8,6 +8,11 @@
 //!   sudo ./SniffSniffSquared "tcp port 5555" # custom BPF filter
 //!   DOFUS_DEV=en0 sudo ./SniffSniffSquared
 //!   ./SniffSniffSquared --list               # list devices
+//!
+//! Runs on macOS, Linux and Windows — it is libpcap everywhere, Npcap
+//! providing it on Windows. `--dev` takes an exact interface name (`en0`,
+//! `eth0`) or, failing that, a fragment of the adapter description, because a
+//! Windows name is `\Device\NPF_{GUID}`. See `match_device`.
 
 mod dispatch;
 mod dump;
@@ -661,18 +666,72 @@ fn insert_price(
 fn pick_device(dev_arg: Option<String>) -> Device {
     // precedence: --dev flag, then DOFUS_DEV env, then default
     if let Some(name) = dev_arg.or_else(|| std::env::var("DOFUS_DEV").ok()) {
-        return Device::list()
-            .unwrap_or_default()
-            .into_iter()
-            .find(|d| d.name == name)
-            .unwrap_or_else(|| panic!("device {name} not found (try --list)"));
+        let devices = Device::list().unwrap_or_default();
+        // a mistyped interface is user error, not a bug — report it plainly
+        // instead of a panic backtrace, which buries the candidate list
+        return match_device(devices, &name).unwrap_or_else(|e| {
+            eprintln!("[!] {e}");
+            std::process::exit(1);
+        });
     }
     Device::lookup().expect("device lookup").expect("no default device")
 }
 
+/// Resolve a user-supplied device string against the live device list.
+///
+/// Exact name first, so `en0`/`eth0` keep resolving to exactly themselves and
+/// can never be shadowed by a substring hit elsewhere in the list. Only if that
+/// misses do we try a case-insensitive substring of the name or description —
+/// which is what makes this usable on Windows, where the real name is
+/// `\Device\NPF_{A3307B35-BC43-...}` and nobody is typing a GUID by hand:
+/// `--dev Wi-Fi` or `--dev Realtek` finds it via the adapter description.
+///
+/// An ambiguous substring is an error rather than a silent pick. Windows lists
+/// several near-identical virtual adapters, and quietly capturing on the wrong
+/// one looks exactly like a game that sends no traffic.
+fn match_device(devices: Vec<Device>, name: &str) -> Result<Device, String> {
+    if let Some(d) = devices.iter().find(|d| d.name == name) {
+        return Ok(d.clone());
+    }
+
+    let needle = name.to_lowercase();
+    let hits: Vec<&Device> = devices
+        .iter()
+        .filter(|d| {
+            d.name.to_lowercase().contains(&needle)
+                || d.desc
+                    .as_deref()
+                    .is_some_and(|s| s.to_lowercase().contains(&needle))
+        })
+        .collect();
+
+    match hits.as_slice() {
+        [] => Err(format!("device {name} not found (try --list)")),
+        [d] => Ok((*d).clone()),
+        many => {
+            let list = many
+                .iter()
+                .map(|d| format!("\n    {}\t{}", d.name, d.desc.clone().unwrap_or_default()))
+                .collect::<String>();
+            Err(format!(
+                "device {name} is ambiguous, {} matches:{list}\n  narrow it, or pass the exact name",
+                many.len()
+            ))
+        }
+    }
+}
+
 fn list_devices() {
     for d in Device::list().unwrap_or_default() {
-        println!("{}\t{}", d.name, d.desc.unwrap_or_default());
+        // addresses disambiguate the Windows list, where several adapters share
+        // a description and only the bound IP says which one is the live link
+        let addrs = d
+            .addresses
+            .iter()
+            .map(|a| a.addr.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        println!("{}\t{}\t{}", d.name, d.desc.unwrap_or_default(), addrs);
     }
 }
 
@@ -792,5 +851,93 @@ fn handle_tcp(re: &mut Reassembler, dispatch: &mut Dispatcher, src: IpAddr, dst:
         };
         println!("\n[{key}] {hdr}");
         print!("{}", dump::dump(&d.body, reg, None, 1));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pcap::DeviceFlags;
+
+    /// Device names and descriptions as the three platforms really report them:
+    /// macOS/Linux short names, Windows `\Device\NPF_{GUID}` plus the adapter
+    /// description that is the only human-readable handle it offers.
+    fn devices() -> Vec<Device> {
+        [
+            ("en0", "Wi-Fi"),
+            ("eth0", ""),
+            (r"\Device\NPF_{A3307B35-BC43-4EB9-AEE9-945220A94001}", "Intel(R) Wi-Fi 6E AX211 160MHz"),
+            (r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}", "Realtek Gaming 2.5GbE Family Controller"),
+            (r"\Device\NPF_{DC279F37-0CC3-41A5-A89B-F41E75DF7D7F}", "Microsoft Wi-Fi Direct Virtual Adapter"),
+            (r"\Device\NPF_Loopback", "Adapter for loopback traffic capture"),
+        ]
+        .into_iter()
+        .map(|(name, desc)| Device {
+            name: name.to_string(),
+            desc: (!desc.is_empty()).then(|| desc.to_string()),
+            addresses: vec![],
+            flags: DeviceFlags::empty(),
+        })
+        .collect()
+    }
+
+    /// The unix path must not regress: an exact name resolves to itself even
+    /// though "en0" is also a substring of nothing else and "eth0" has no desc.
+    #[test]
+    fn exact_name_wins() {
+        assert_eq!(match_device(devices(), "en0").unwrap().name, "en0");
+        assert_eq!(match_device(devices(), "eth0").unwrap().name, "eth0");
+    }
+
+    /// Exact match takes precedence over a substring hit elsewhere. Here "en0"
+    /// is exact for the macOS device; nothing may outrank that.
+    #[test]
+    fn exact_beats_substring() {
+        let mut devs = devices();
+        devs.push(Device {
+            name: "bridge-en0-shadow".to_string(),
+            desc: Some("en0 mirror".to_string()),
+            addresses: vec![],
+            flags: DeviceFlags::empty(),
+        });
+        assert_eq!(match_device(devs, "en0").unwrap().name, "en0");
+    }
+
+    /// The Windows win: name the adapter, not the GUID.
+    #[test]
+    fn matches_windows_description() {
+        let d = match_device(devices(), "Realtek").unwrap();
+        assert_eq!(d.name, r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}");
+    }
+
+    #[test]
+    fn description_match_is_case_insensitive() {
+        let d = match_device(devices(), "realtek gaming").unwrap();
+        assert_eq!(d.name, r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}");
+    }
+
+    /// A GUID fragment is a name substring, so pasting part of one works.
+    #[test]
+    fn matches_name_substring() {
+        let d = match_device(devices(), "31AC96FC").unwrap();
+        assert_eq!(d.name, r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}");
+    }
+
+    /// "Wi-Fi" hits the Intel adapter and the Microsoft virtual one. Capturing
+    /// on the wrong one yields zero packets and looks like a dead game, so this
+    /// must report rather than guess.
+    #[test]
+    fn ambiguous_substring_errors_and_lists_candidates() {
+        let err = match_device(devices(), "Wi-Fi").unwrap_err();
+        assert!(err.contains("ambiguous"), "{err}");
+        assert!(err.contains("Intel(R) Wi-Fi 6E AX211 160MHz"), "{err}");
+        assert!(err.contains("Microsoft Wi-Fi Direct Virtual Adapter"), "{err}");
+    }
+
+    #[test]
+    fn unknown_device_errors() {
+        let err = match_device(devices(), "wlan9").unwrap_err();
+        assert!(err.contains("not found"), "{err}");
+        assert!(err.contains("--list"), "{err}");
     }
 }

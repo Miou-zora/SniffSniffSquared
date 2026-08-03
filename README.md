@@ -27,12 +27,25 @@ TCP :5555
 - **Rust stable** — `rustup default stable`.
 - **Dofus 3 running and logged in.** The sniffer only sees traffic that exists;
   with the game closed it will sit there capturing nothing.
+- **A packet capture driver.** libpcap on macOS and Linux, already present on
+  both. **On Windows install [Npcap](https://npcap.com/#download)** — the
+  capture path is the same libpcap API, but Windows ships no driver for it.
+  The default installer options are what you want; "WinPcap API-compatible
+  mode" is not required.
 - **Permission to capture.** On macOS that means being in `access_bpf`;
   otherwise prefix the capture command with `sudo`:
 
   ```sh
   id -Gn | tr ' ' '\n' | grep access_bpf   # prints access_bpf if you are
   ```
+
+  On Linux, either `sudo` or grant the binary the capability once:
+  `sudo setcap cap_net_raw,cap_net_admin=eip ./target/debug/SniffSniffSquared`.
+
+  On Windows, Npcap's driver loads at boot and its service does the privileged
+  work, so an ordinary terminal captures fine. If you chose *"Restrict Npcap
+  driver's access to Administrators only"* during setup, run the terminal as
+  Administrator instead.
 
 Optional: `pipx install frida-tools`, only for the runtime schema recovery in
 RUNBOOK part 3.
@@ -57,6 +70,27 @@ cargo build
 ./target/debug/SniffSniffSquared --list        # find your interface (usually en0)
 ./target/debug/SniffSniffSquared --dev en0 --all "tcp port 5555"
 ```
+
+`--list` prints `name`, description and bound addresses, one device per line.
+
+On **Windows** the same thing, from `sniffer\` in PowerShell:
+
+```powershell
+cargo build
+.\target\debug\SniffSniffSquared.exe --list
+.\target\debug\SniffSniffSquared.exe --dev Realtek --all "tcp port 5555"
+```
+
+Windows device names are `\Device\NPF_{31AC96FC-C2C5-...}` — a GUID nobody
+should have to type. So `--dev` also accepts any case-insensitive fragment of
+the **adapter description**, which is the readable half of `--list`:
+`--dev Realtek`, `--dev "Intel(R) Wi-Fi"`. An exact interface name still wins
+outright, so `--dev en0` on macOS and `--dev eth0` on Linux are unchanged.
+
+If a fragment matches more than one adapter the sniffer says so and lists the
+candidates rather than guessing — Windows offers several near-identical virtual
+adapters, and capturing on the wrong one is indistinguishable from a game that
+sends nothing. Narrow the fragment, or paste the exact name.
 
 `.env` supplies `DATABASE_URL`, so prices and the message archive are written
 automatically. To be explicit, or if you skipped `.env`:
@@ -102,7 +136,10 @@ docker compose down             # add -v to also delete the captured data
 | symptom | cause |
 |---|---|
 | no `framing locked` line | the game is not running, or the wrong `--dev` interface — check `--list` |
-| `Permission denied` opening the device | not in `access_bpf`; use `sudo` |
+| `Permission denied` opening the device | macOS/Linux: not in `access_bpf`; use `sudo`. Windows: Npcap installed Administrators-only — use an elevated terminal |
+| Windows: link error on `wpcap` / `Packet.lib` when building | Npcap is not installed. The crate links against its driver library — see [what you need](#1-what-you-need) |
+| Windows: `--list` prints nothing | the Npcap service is not running: `sc query npcap` |
+| `device X is ambiguous` | the `--dev` fragment matched several adapters; it lists them — narrow it or paste the exact name |
 | no `[db] connected` line, and no error either | `DATABASE_URL` never reached the process. An `.env` copied before this was fixed may have `BPF_FILTER` unquoted, which makes `dotenvy` silently drop every variable after it |
 | runs, but `prices` stays empty | you have not opened the marketplace, or a game update rotated the key — see [keymap.json](#keymapjson--what-to-edit-when-the-game-updates) |
 | `no proto/messages.json` | you are not running from `sniffer/` |

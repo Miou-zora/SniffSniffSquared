@@ -125,12 +125,20 @@ The Rust app lives in `sniffer/` and MUST be run from there — it resolves
 ```sh
 docker compose up -d                      # postgres + pgadmin, from repo root
 cd sniffer
-cargo build && cargo test                 # 19 tests
+cargo build && cargo test                 # 46 tests
 ./target/debug/SniffSniffSquared --dev en0 --all "tcp port 5555"
 ./target/debug/SniffSniffSquared --dev en0 --raw "tcp port 5555"
 ./target/debug/SniffSniffSquared --list
 docker exec dofus_db psql -U dofus -d dofus -c '\dt'
 ```
+
+Capture runs natively on all three platforms. **Windows needs [Npcap]
+(https://npcap.com/#download)** installed — nothing else differs, and no
+`cfg`-gated code exists. Because a Windows interface is named
+`\Device\NPF_{GUID}`, `--dev` falls back to a case-insensitive fragment of the
+adapter *description* when no exact name matches (`--dev Realtek`); exact names
+still win, so `en0`/`eth0` are untouched. An ambiguous fragment errors with the
+candidates listed rather than picking one.
 
 ## Traps that have already cost time
 
@@ -142,11 +150,12 @@ docker exec dofus_db psql -U dofus -d dofus -c '\dt'
   later) silently never loads and the sniffer runs with no DB and no error.
   Symptom: no `[db] connected` line and no failure message either.
 - **No sudo needed for capture** if the user is in `access_bpf` (they are).
-- **The compose `sniffer` service cannot capture on macOS.** Docker's "host"
-  network is the Linux VM, not the Mac: the container sees `eth0`/`docker0`,
-  never `en0`, and silently captures nothing. It is behind a `capture` profile
-  so it does not start by default. On macOS run the binary natively. The image
-  itself is fine — it builds, loads keymap + registry, and reaches Postgres.
+- **The compose `sniffer` service cannot capture on macOS or Windows.** Docker's
+  "host" network is the Linux VM, not your machine: the container sees
+  `eth0`/`docker0`, never `en0`, and silently captures nothing. It is behind a
+  `capture` profile so it does not start by default. On both, run the binary
+  natively. The image itself is fine — it builds, loads keymap + registry, and
+  reaches Postgres.
 - **Frida cannot attach to the shipped client.** Hardened runtime without
   `get-task-allow`; SIP blocks root too. Use `sniffer/tools/resign-debug-app.sh`,
   which re-signs a *copy*. Never modify the real install.

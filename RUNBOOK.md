@@ -225,8 +225,13 @@ The Rust app lives in `sniffer/`. **Run it from there** — it resolves
 ```sh
 cd sniffer
 cargo build
-cargo test          # 19 tests, all should pass
+cargo test          # 46 tests, all should pass
 ```
+
+> **Windows.** Install [Npcap](https://npcap.com/#download) first — it is what
+> provides libpcap there, and without it the build fails at link time on
+> `wpcap`. Nothing else differs: same crate, same code, no `cfg` gates. Use
+> `.\target\debug\SniffSniffSquared.exe` in the commands below.
 
 > **Trap.** `cargo test` does not refresh `target/debug/SniffSniffSquared`.
 > Always `cargo build` before capturing or you will be running a stale binary
@@ -255,6 +260,19 @@ Start the game, then, **from `sniffer/`**:
 
 ./target/debug/SniffSniffSquared --list      # find your interface
 ```
+
+`--list` prints name, description and bound addresses. `--dev` matches an exact
+interface name first; if none matches it falls back to a case-insensitive
+fragment of either, which is how you address a Windows adapter without typing
+`\Device\NPF_{31AC96FC-C2C5-...}`:
+
+```powershell
+.\target\debug\SniffSniffSquared.exe --dev Realtek --all "tcp port 5555"
+```
+
+A fragment matching several adapters is refused with the candidates printed —
+Windows lists near-identical virtual adapters and capturing on the wrong one is
+indistinguishable from a game sending nothing.
 
 Sanity check: within seconds you should see, once per direction,
 
