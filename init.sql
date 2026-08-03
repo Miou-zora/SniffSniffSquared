@@ -258,6 +258,26 @@ ALTER TABLE recipes ADD COLUMN IF NOT EXISTS job_id INT;
 
 CREATE INDEX IF NOT EXISTS idx_recipes_ingredient ON recipes (ingredient_id);
 
+-- Rune reference: game constants from docs/brisage-runes.json, plus the DofusDB
+-- ids that join them to captured data. Loaded by tools/import_runes.py, which
+-- also creates this table; declared here so the schema is readable in one place.
+--
+-- Declared BEFORE the views below because `item_effect_weights` joins it. A
+-- view's FROM/JOIN targets must already exist at CREATE time, and the postgres
+-- entrypoint runs this file with ON_ERROR_STOP=1 -- so with `runes` declared
+-- after, init aborted at the view and every object past that point, this table
+-- included, was silently never created.
+CREATE TABLE IF NOT EXISTS runes (
+    rune          TEXT PRIMARY KEY,   -- short name, e.g. 'Vi'
+    stat_fr       TEXT NOT NULL,
+    rune_weight   REAL NOT NULL,      -- game constant
+    stat_per_rune REAL NOT NULL,
+    item_id       BIGINT,             -- DofusDB item id
+    effect_id     BIGINT              -- joins to item_detail effects and the crush focus
+);
+
+CREATE INDEX IF NOT EXISTS idx_runes_effect ON runes (effect_id);
+
 -- Expected line weight per stat line of an item type, from the middle of its
 -- range. The formula is docs/brisage-model.md's `line_weight`, including the
 -- +1 every line carries -- dropping that term is what broke the focus model
@@ -291,17 +311,3 @@ SELECT i.item_id,
 FROM items i
 LEFT JOIN item_effect_weights w USING (item_id)
 GROUP BY i.item_id, i.name_fr, i.level;
-
--- Rune reference: game constants from docs/brisage-runes.json, plus the DofusDB
--- ids that join them to captured data. Loaded by tools/import_runes.py, which
--- also creates this table; declared here so the schema is readable in one place.
-CREATE TABLE IF NOT EXISTS runes (
-    rune          TEXT PRIMARY KEY,   -- short name, e.g. 'Vi'
-    stat_fr       TEXT NOT NULL,
-    rune_weight   REAL NOT NULL,      -- game constant
-    stat_per_rune REAL NOT NULL,
-    item_id       BIGINT,             -- DofusDB item id
-    effect_id     BIGINT              -- joins to item_detail effects and the crush focus
-);
-
-CREATE INDEX IF NOT EXISTS idx_runes_effect ON runes (effect_id);
