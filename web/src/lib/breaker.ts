@@ -595,6 +595,12 @@ export interface ItemMeta {
   type: string | null;
   /** DofusDB icon id — `iconUrl` in src/lib/icon.ts turns it into an image. */
   iconId: number | null;
+  /**
+   * DofusDB's item category (e.g. 6 = Consommable, 9 = Ressource, 2 = Arme).
+   * Coarser and more stable than `type`, which names the precise slot — this
+   * is what the opportunities dashboard filters equipment out with.
+   */
+  superTypeId: number | null;
   /** The template: what each line on this item type can roll between. */
   ranges: { effectId: number; min: number; max: number }[];
 }
@@ -658,16 +664,18 @@ export async function fetchItems(itemIds: number[]): Promise<Map<number, ItemMet
             level?: unknown;
             iconId?: unknown;
             name?: { fr?: unknown };
-            type?: { name?: { fr?: unknown } };
+            type?: { name?: { fr?: unknown }; superTypeId?: unknown };
           };
           const id = Number(it.id);
           if (!Number.isFinite(id)) continue;
           const iconId = Number(it.iconId);
+          const superTypeId = Number(it.type?.superTypeId);
           out.set(id, {
             name: typeof it.name?.fr === "string" ? it.name.fr : null,
             level: Number.isFinite(Number(it.level)) ? Number(it.level) : null,
             type: typeof it.type?.name?.fr === "string" ? it.type.name.fr : null,
             iconId: Number.isFinite(iconId) && iconId > 0 ? iconId : null,
+            superTypeId: Number.isFinite(superTypeId) ? superTypeId : null,
             ranges: effectRanges(raw),
           });
         }
@@ -696,15 +704,16 @@ async function remember(meta: Map<number, ItemMeta>): Promise<void> {
   for (const [itemId, m] of meta) {
     try {
       await query(
-        `INSERT INTO items (item_id, name_fr, level, type_fr, icon_id)
-         VALUES ($1,$2,$3,$4,$5)
+        `INSERT INTO items (item_id, name_fr, level, type_fr, icon_id, super_type_id)
+         VALUES ($1,$2,$3,$4,$5,$6)
          ON CONFLICT (item_id) DO UPDATE SET
            name_fr = COALESCE(EXCLUDED.name_fr, items.name_fr),
            level = COALESCE(EXCLUDED.level, items.level),
            type_fr = COALESCE(EXCLUDED.type_fr, items.type_fr),
            icon_id = COALESCE(EXCLUDED.icon_id, items.icon_id),
+           super_type_id = COALESCE(EXCLUDED.super_type_id, items.super_type_id),
            updated_at = now()`,
-        [itemId, m.name, m.level, m.type, m.iconId],
+        [itemId, m.name, m.level, m.type, m.iconId, m.superTypeId],
       );
       if (m.ranges.length === 0) continue;
       // Replaced wholesale, like the importer does: a template that loses a

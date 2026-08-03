@@ -74,6 +74,43 @@ function offered(ladder: Ladder): { size: number; price: number }[] {
   return worthwhile.reverse();
 }
 
+/**
+ * The best per-unit rate currently quoted, across whichever batch sizes are on
+ * sale — the price you would need to match (or beat) to actually sell one
+ * unit, and by the same logic the best deal a buyer already has.
+ *
+ * Independent of `offered`'s greedy-fill pruning: a seller cares about the
+ * single best rate on the ladder, not which sizes are worth mixing to buy.
+ */
+export function unitPrice(ladder: Ladder): number | null {
+  const quoted = [
+    { size: 1, price: ladder.b1 },
+    { size: 10, price: ladder.b10 },
+    { size: 100, price: ladder.b100 },
+    { size: 1000, price: ladder.b1000 },
+  ].filter((o) => o.price > 0);
+  if (quoted.length === 0) return null;
+  return Math.min(...quoted.map((o) => o.price / o.size));
+}
+
+/** What crafting one unit nets: the sell rate against what it cost to make. */
+export interface Margin {
+  /** `sell - cost`, in kamas. */
+  profitPerUnit: number;
+  /** `profitPerUnit / cost * 100`. */
+  marginPercent: number;
+}
+
+/**
+ * Profit and margin for one crafted unit. `cost` must be strictly positive —
+ * callers only reach this once both `cost` and `sell` are known prices, never
+ * with a null or a zero ingredient cost.
+ */
+export function margin(cost: number, sell: number): Margin {
+  const profitPerUnit = sell - cost;
+  return { profitPerUnit, marginPercent: (profitPerUnit / cost) * 100 };
+}
+
 function priceOf(picks: Pick[]): number {
   return picks.reduce((sum, p) => sum + p.count * p.price, 0);
 }
