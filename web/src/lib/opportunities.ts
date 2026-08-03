@@ -10,7 +10,7 @@
  */
 import { craftJobs, jobRecipes, rememberRecipes, type JobOption } from "@/lib/basket";
 import { fetchItems, latestLadders } from "@/lib/breaker";
-import { margin, planBuy, unitPrice } from "@/lib/craft";
+import { margin, unitPrice } from "@/lib/craft";
 import { query } from "@/lib/db";
 
 /**
@@ -121,11 +121,17 @@ export async function loadOpportunities(): Promise<{
     let ingredientCost: number | null = 0;
     for (const line of g.lines) {
       const ladder = ladders.get(line.itemId);
-      const plan = ladder ? planBuy(line.quantity, ladder) : null;
-      if (plan === null) {
+      // The best per-unit rate on the ladder, not the plan for buying exactly
+      // this recipe's small quantity: a craft usually needs 2-5 of a line,
+      // and planBuy at that volume almost never reaches the x10/x100 batches
+      // where the real discount lives. This assumes buying at the volume a
+      // profitable craft run actually happens at, same reasoning as
+      // `unitPrice` on the sell side below.
+      const rate = ladder ? unitPrice(ladder) : null;
+      if (rate === null) {
         ingredientCost = null;
       } else if (ingredientCost !== null) {
-        ingredientCost += plan.cost;
+        ingredientCost += rate * line.quantity;
       }
     }
 
