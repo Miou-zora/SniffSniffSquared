@@ -262,13 +262,29 @@ Start the game, then, **from `sniffer/`**:
 ```
 
 `--list` prints name, description and bound addresses. `--dev` matches an exact
-interface name first; if none matches it falls back to a case-insensitive
-fragment of either, which is how you address a Windows adapter without typing
-`\Device\NPF_{31AC96FC-C2C5-...}`:
+interface name first; if none matches it falls back to a bound IP address, or a
+case-insensitive fragment of the name or description — which is how you address
+a Windows adapter without typing `\Device\NPF_{31AC96FC-C2C5-...}`:
 
 ```powershell
-.\target\debug\SniffSniffSquared.exe --dev Realtek --all "tcp port 5555"
+.\target\debug\SniffSniffSquared.exe --dev 192.168.1.10 --all "tcp port 5555"
 ```
+
+Prefer the address. Which adapter carries the game is a fact about your network,
+not about the card's name, and the failure is silent: an unplugged NIC holds a
+`169.254.x.x` link-local address, opens and captures without complaint, and
+yields nothing — indistinguishable from a closed game or a rotated protocol.
+`disconnected_warning` flags exactly that case. To find the right address, ask
+the connection itself rather than guessing:
+
+```powershell
+Get-NetTCPConnection -OwningProcess (Get-Process Dofus).Id |
+    Where-Object State -eq 'Established' |
+    Select-Object LocalAddress, RemoteAddress, RemotePort
+```
+
+The row with `RemotePort 5555` gives you both the `LocalAddress` to pass to
+`--dev` and confirmation that the game is connected at all.
 
 A fragment matching several adapters is refused with the candidates printed —
 Windows lists near-identical virtual adapters and capturing on the wrong one is

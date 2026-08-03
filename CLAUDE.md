@@ -135,10 +135,16 @@ docker exec dofus_db psql -U dofus -d dofus -c '\dt'
 Capture runs natively on all three platforms. **Windows needs [Npcap]
 (https://npcap.com/#download)** installed — nothing else differs, and no
 `cfg`-gated code exists. Because a Windows interface is named
-`\Device\NPF_{GUID}`, `--dev` falls back to a case-insensitive fragment of the
-adapter *description* when no exact name matches (`--dev Realtek`); exact names
-still win, so `en0`/`eth0` are untouched. An ambiguous fragment errors with the
-candidates listed rather than picking one.
+`\Device\NPF_{GUID}`, `--dev` falls back to a bound IP address or a
+case-insensitive fragment of the name/description when no exact name matches
+(`--dev 192.168.1.10`); exact names still win, so `en0`/`eth0` are untouched. An
+ambiguous fragment errors with the candidates listed rather than picking one.
+
+**Select the adapter by address.** A box with both ethernet and Wi-Fi lists
+both, and the idle one captures cleanly while returning nothing — the same
+symptom as a closed game. `disconnected_warning` flags an interface holding only
+a link-local address (`169.254/16`, `fe80::/10`); loopback is exempt because
+`tools/replay.py` targets it deliberately.
 
 ## Traps that have already cost time
 

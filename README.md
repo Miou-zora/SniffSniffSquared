@@ -78,14 +78,26 @@ On **Windows** the same thing, from `sniffer\` in PowerShell:
 ```powershell
 cargo build
 .\target\debug\SniffSniffSquared.exe --list
-.\target\debug\SniffSniffSquared.exe --dev Realtek --all "tcp port 5555"
+.\target\debug\SniffSniffSquared.exe --dev 192.168.1.10 --all "tcp port 5555"
 ```
 
 Windows device names are `\Device\NPF_{31AC96FC-C2C5-...}` — a GUID nobody
-should have to type. So `--dev` also accepts any case-insensitive fragment of
-the **adapter description**, which is the readable half of `--list`:
-`--dev Realtek`, `--dev "Intel(R) Wi-Fi"`. An exact interface name still wins
-outright, so `--dev en0` on macOS and `--dev eth0` on Linux are unchanged.
+should have to type. So `--dev` also accepts a **bound IP address**, or any
+case-insensitive fragment of the **adapter description**; `--list` prints both.
+An exact interface name still wins outright, so `--dev en0` on macOS and
+`--dev eth0` on Linux are unchanged.
+
+**Pick the adapter by its address, not by its name.** Run `ipconfig`, take the
+IPv4 address of the interface you are actually online through, and pass that —
+`--dev 192.168.1.10`. A machine with both an ethernet port and Wi-Fi will list
+both, and a plausible-sounding description is no evidence the card is on the
+network: an unplugged NIC shows a `169.254.x.x` address, captures perfectly
+happily and returns nothing at all. The sniffer warns when you select one:
+
+```
+[!] \Device\NPF_{31AC...} has no routable address — it is probably not
+    connected, and will capture nothing.
+```
 
 If a fragment matches more than one adapter the sniffer says so and lists the
 candidates rather than guessing — Windows offers several near-identical virtual
@@ -136,6 +148,7 @@ docker compose down             # add -v to also delete the captured data
 | symptom | cause |
 |---|---|
 | no `framing locked` line | the game is not running, or the wrong `--dev` interface — check `--list` |
+| runs, prints `capturing on …`, then nothing at all | almost always the wrong adapter. Confirm the game really is connected and find the address to use: `Get-NetTCPConnection -OwningProcess (Get-Process Dofus).Id \| Where-Object State -eq 'Established'` — the `RemotePort 5555` row's `LocalAddress` is what to pass to `--dev`. A `[!] no routable address` warning means the one you picked is not on a network |
 | `Permission denied` opening the device | macOS/Linux: not in `access_bpf`; use `sudo`. Windows: Npcap installed Administrators-only — use an elevated terminal |
 | Windows: link error on `wpcap` / `Packet.lib` when building | Npcap is not installed. The crate links against its driver library — see [what you need](#1-what-you-need) |
 | Windows: `--list` prints nothing | the Npcap service is not running: `sc query npcap` |

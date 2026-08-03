@@ -669,12 +669,45 @@ fn pick_device(dev_arg: Option<String>) -> Device {
         let devices = Device::list().unwrap_or_default();
         // a mistyped interface is user error, not a bug — report it plainly
         // instead of a panic backtrace, which buries the candidate list
-        return match_device(devices, &name).unwrap_or_else(|e| {
+        let device = match_device(devices, &name).unwrap_or_else(|e| {
             eprintln!("[!] {e}");
             std::process::exit(1);
         });
+        if let Some(w) = disconnected_warning(&device) {
+            eprintln!("[!] {w}");
+        }
+        return device;
     }
     Device::lookup().expect("device lookup").expect("no default device")
+}
+
+/// Warn when the chosen adapter cannot plausibly carry the game's traffic.
+///
+/// An interface holding only a link-local address (169.254/16, fe80::/10) never
+/// completed DHCP — an unplugged NIC, typically. It opens and captures happily
+/// and returns nothing at all, which is indistinguishable from a game that is
+/// closed, the wrong BPF filter, or a rotated protocol. This cost a session:
+/// a machine with both an idle Realtek port and a live Wi-Fi card, capturing on
+/// the Realtek. Loopback keeps 127.0.0.1/::1 and is left alone, since
+/// `tools/replay.py` targets it deliberately.
+fn disconnected_warning(device: &Device) -> Option<String> {
+    let routable = device.addresses.iter().any(|a| match a.addr {
+        IpAddr::V4(v4) => !v4.is_link_local() && !v4.is_loopback(),
+        IpAddr::V6(v6) => !is_v6_link_local(&v6) && !v6.is_loopback(),
+    });
+    if routable || device.addresses.iter().any(|a| a.addr.is_loopback()) {
+        return None;
+    }
+    Some(format!(
+        "{} has no routable address — it is probably not connected, and will \
+         capture nothing. Check --list for the adapter holding your LAN IP.",
+        device.name
+    ))
+}
+
+/// `Ipv6Addr::is_unicast_link_local` is still unstable, so test fe80::/10 here.
+fn is_v6_link_local(addr: &std::net::Ipv6Addr) -> bool {
+    (addr.segments()[0] & 0xffc0) == 0xfe80
 }
 
 /// Resolve a user-supplied device string against the live device list.
@@ -685,6 +718,11 @@ fn pick_device(dev_arg: Option<String>) -> Device {
 /// which is what makes this usable on Windows, where the real name is
 /// `\Device\NPF_{A3307B35-BC43-...}` and nobody is typing a GUID by hand:
 /// `--dev Wi-Fi` or `--dev Realtek` finds it via the adapter description.
+///
+/// A bound address matches too, so `--dev 192.168.1.10` picks the adapter
+/// holding that IP. Descriptions are marketing names that say nothing about
+/// which card is actually on the network; the address is the part the user can
+/// check against `ipconfig`.
 ///
 /// An ambiguous substring is an error rather than a silent pick. Windows lists
 /// several near-identical virtual adapters, and quietly capturing on the wrong
@@ -702,6 +740,9 @@ fn match_device(devices: Vec<Device>, name: &str) -> Result<Device, String> {
                 || d.desc
                     .as_deref()
                     .is_some_and(|s| s.to_lowercase().contains(&needle))
+                || d.addresses
+                    .iter()
+                    .any(|a| a.addr.to_string().to_lowercase() == needle)
         })
         .collect();
 
@@ -857,28 +898,43 @@ fn handle_tcp(re: &mut Reassembler, dispatch: &mut Dispatcher, src: IpAddr, dst:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pcap::DeviceFlags;
+    use pcap::{Address, DeviceFlags};
 
-    /// Device names and descriptions as the three platforms really report them:
-    /// macOS/Linux short names, Windows `\Device\NPF_{GUID}` plus the adapter
-    /// description that is the only human-readable handle it offers.
+    fn addr(ip: &str) -> Address {
+        Address {
+            addr: ip.parse().expect("test address"),
+            netmask: None,
+            broadcast_addr: None,
+            dst_addr: None,
+        }
+    }
+
+    /// Device names, descriptions and addresses as the three platforms really
+    /// report them: macOS/Linux short names, Windows `\Device\NPF_{GUID}` plus
+    /// the adapter description that is the only human-readable handle it
+    /// offers. Transcribed from a real Windows 11 `--list`, where the Realtek
+    /// port sat unplugged on a link-local address while Wi-Fi carried the game.
     fn devices() -> Vec<Device> {
         [
-            ("en0", "Wi-Fi"),
-            ("eth0", ""),
-            (r"\Device\NPF_{A3307B35-BC43-4EB9-AEE9-945220A94001}", "Intel(R) Wi-Fi 6E AX211 160MHz"),
-            (r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}", "Realtek Gaming 2.5GbE Family Controller"),
-            (r"\Device\NPF_{DC279F37-0CC3-41A5-A89B-F41E75DF7D7F}", "Microsoft Wi-Fi Direct Virtual Adapter"),
-            (r"\Device\NPF_Loopback", "Adapter for loopback traffic capture"),
+            ("en0", "Wi-Fi", vec!["192.168.1.10"]),
+            ("eth0", "", vec!["10.0.0.5"]),
+            (r"\Device\NPF_{A3307B35-BC43-4EB9-AEE9-945220A94001}", "Intel(R) Wi-Fi 6E AX211 160MHz", vec!["192.168.1.10", "fe80::ff58:9607:2401:f390"]),
+            (r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}", "Realtek Gaming 2.5GbE Family Controller", vec!["169.254.46.67", "fe80::9286:4838:bf0d:64ce"]),
+            (r"\Device\NPF_{DC279F37-0CC3-41A5-A89B-F41E75DF7D7F}", "Microsoft Wi-Fi Direct Virtual Adapter", vec!["169.254.199.204"]),
+            (r"\Device\NPF_Loopback", "Adapter for loopback traffic capture", vec!["127.0.0.1", "::1"]),
         ]
         .into_iter()
-        .map(|(name, desc)| Device {
+        .map(|(name, desc, ips)| Device {
             name: name.to_string(),
             desc: (!desc.is_empty()).then(|| desc.to_string()),
-            addresses: vec![],
+            addresses: ips.into_iter().map(addr).collect(),
             flags: DeviceFlags::empty(),
         })
         .collect()
+    }
+
+    fn by_name(name: &str) -> Device {
+        devices().into_iter().find(|d| d.name == name).expect("fixture")
     }
 
     /// The unix path must not regress: an exact name resolves to itself even
@@ -939,5 +995,54 @@ mod tests {
         let err = match_device(devices(), "wlan9").unwrap_err();
         assert!(err.contains("not found"), "{err}");
         assert!(err.contains("--list"), "{err}");
+    }
+
+    /// Addressing the adapter by the IP `ipconfig` shows. "192.168.1.10" is on
+    /// both en0 and the Intel card, but those are the same machine's two
+    /// platform views of the fixture, so restrict to the Windows subset.
+    #[test]
+    fn matches_bound_address() {
+        let windows: Vec<Device> = devices()
+            .into_iter()
+            .filter(|d| d.name.starts_with(r"\Device"))
+            .collect();
+        let d = match_device(windows, "192.168.1.10").unwrap();
+        assert_eq!(d.name, r"\Device\NPF_{A3307B35-BC43-4EB9-AEE9-945220A94001}");
+    }
+
+    /// An address must match whole. A bare "192.168.1.1" is a different host
+    /// than "192.168.1.10" and must not be treated as a prefix of it.
+    #[test]
+    fn address_match_is_not_a_prefix() {
+        let windows: Vec<Device> = devices()
+            .into_iter()
+            .filter(|d| d.name.starts_with(r"\Device"))
+            .collect();
+        assert!(match_device(windows, "192.168.1.1").is_err());
+    }
+
+    /// The trap that cost a session: an unplugged NIC captures cleanly and
+    /// returns nothing, which reads as a closed game or a rotated protocol.
+    #[test]
+    fn link_local_only_adapter_is_flagged() {
+        let w = disconnected_warning(&by_name(
+            r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}",
+        ));
+        assert!(w.is_some_and(|w| w.contains("not connected")));
+    }
+
+    #[test]
+    fn connected_adapter_is_not_flagged() {
+        assert!(disconnected_warning(&by_name(
+            r"\Device\NPF_{A3307B35-BC43-4EB9-AEE9-945220A94001}"
+        ))
+        .is_none());
+        assert!(disconnected_warning(&by_name("en0")).is_none());
+    }
+
+    /// `tools/replay.py` targets loopback on purpose — it must stay quiet.
+    #[test]
+    fn loopback_is_not_flagged() {
+        assert!(disconnected_warning(&by_name(r"\Device\NPF_Loopback")).is_none());
     }
 }
