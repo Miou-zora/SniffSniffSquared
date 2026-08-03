@@ -225,12 +225,15 @@ The Rust app lives in `sniffer/`. **Run it from there** — it resolves
 ```sh
 cd sniffer
 cargo build
-cargo test          # 46 tests, all should pass
+cargo test          # 51 tests, all should pass
 ```
 
 > **Windows.** Install [Npcap](https://npcap.com/#download) first — it is what
-> provides libpcap there, and without it the build fails at link time on
-> `wpcap`. Nothing else differs: same crate, same code, no `cfg` gates. Use
+> provides libpcap there. Tick **WinPcap API-compatible Mode**, which puts
+> `wpcap.dll` in `System32` where the default DLL search order finds it;
+> otherwise it lands only in `System32\Npcap\` and is not found.
+> `Test-Path C:\Windows\System32\wpcap.dll` is the check. Nothing else
+> differs: same crate, same code, no `cfg` gates. Use
 > `.\target\debug\SniffSniffSquared.exe` in the commands below.
 
 > **Trap.** `cargo test` does not refresh `target/debug/SniffSniffSquared`.

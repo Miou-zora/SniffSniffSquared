@@ -125,16 +125,16 @@ The Rust app lives in `sniffer/` and MUST be run from there — it resolves
 ```sh
 docker compose up -d                      # postgres + pgadmin, from repo root
 cd sniffer
-cargo build && cargo test                 # 46 tests
+cargo build && cargo test                 # 51 tests
 ./target/debug/SniffSniffSquared --dev en0 --all "tcp port 5555"
 ./target/debug/SniffSniffSquared --dev en0 --raw "tcp port 5555"
 ./target/debug/SniffSniffSquared --list
 docker exec dofus_db psql -U dofus -d dofus -c '\dt'
 ```
 
-Capture runs natively on all three platforms. **Windows needs [Npcap]
-(https://npcap.com/#download)** installed — nothing else differs, and no
-`cfg`-gated code exists. Because a Windows interface is named
+Capture runs natively on all three platforms.
+**Windows needs [Npcap](https://npcap.com/#download)** installed — nothing else
+differs, and no `cfg`-gated code exists. Because a Windows interface is named
 `\Device\NPF_{GUID}`, `--dev` falls back to a bound IP address or a
 case-insensitive fragment of the name/description when no exact name matches
 (`--dev 192.168.1.10`); exact names still win, so `en0`/`eth0` are untouched. An

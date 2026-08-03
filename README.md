@@ -30,8 +30,10 @@ TCP :5555
 - **A packet capture driver.** libpcap on macOS and Linux, already present on
   both. **On Windows install [Npcap](https://npcap.com/#download)** — the
   capture path is the same libpcap API, but Windows ships no driver for it.
-  The default installer options are what you want; "WinPcap API-compatible
-  mode" is not required.
+  Tick **"Install Npcap in WinPcap API-compatible Mode"**: that is what puts
+  `wpcap.dll` in `System32`, where the default DLL search order finds it.
+  Without it the DLL lands only in `System32\Npcap\`, which is not searched.
+  (Verified on a machine with the option enabled.)
 - **Permission to capture.** On macOS that means being in `access_bpf`;
   otherwise prefix the capture command with `sudo`:
 
@@ -150,8 +152,8 @@ docker compose down             # add -v to also delete the captured data
 | no `framing locked` line | the game is not running, or the wrong `--dev` interface — check `--list` |
 | runs, prints `capturing on …`, then nothing at all | almost always the wrong adapter. Confirm the game really is connected and find the address to use: `Get-NetTCPConnection -OwningProcess (Get-Process Dofus).Id \| Where-Object State -eq 'Established'` — the `RemotePort 5555` row's `LocalAddress` is what to pass to `--dev`. A `[!] no routable address` warning means the one you picked is not on a network |
 | `Permission denied` opening the device | macOS/Linux: not in `access_bpf`; use `sudo`. Windows: Npcap installed Administrators-only — use an elevated terminal |
-| Windows: link error on `wpcap` / `Packet.lib` when building | Npcap is not installed. The crate links against its driver library — see [what you need](#1-what-you-need) |
-| Windows: `--list` prints nothing | the Npcap service is not running: `sc query npcap` |
+| Windows: build fails on `wpcap`, or the binary starts and immediately dies | Npcap missing, or installed without WinPcap API-compatible mode so `wpcap.dll` is not on the DLL search path. `Test-Path C:\Windows\System32\wpcap.dll` should be `True` — see [what you need](#1-what-you-need) |
+| Windows: `--list` prints nothing | the Npcap driver is not running: `Get-Service npcap` should say `Running`. Not `sc query npcap` — in PowerShell `sc` is an alias for `Set-Content` |
 | `device X is ambiguous` | the `--dev` fragment matched several adapters; it lists them — narrow it or paste the exact name |
 | no `[db] connected` line, and no error either | `DATABASE_URL` never reached the process. An `.env` copied before this was fixed may have `BPF_FILTER` unquoted, which makes `dotenvy` silently drop every variable after it |
 | runs, but `prices` stays empty | you have not opened the marketplace, or a game update rotated the key — see [keymap.json](#keymapjson--what-to-edit-when-the-game-updates) |
