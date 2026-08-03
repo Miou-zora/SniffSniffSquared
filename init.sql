@@ -200,6 +200,12 @@ CREATE TABLE IF NOT EXISTS items (
 -- above leaves an existing table alone, columns included.
 ALTER TABLE items ADD COLUMN IF NOT EXISTS icon_id BIGINT;
 
+-- DofusDB's item-super-type id (e.g. 6 = Consommable, 9 = Ressource, 2 = Arme).
+-- Coarser and far more stable than type_id/type_fr, which name the precise
+-- slot ("Épée") rather than the category — this is what lets a query ask "is
+-- this equipment" without an exhaustive, ever-growing name list.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS super_type_id SMALLINT;
+
 -- The stat ranges an item *type* can roll, from DofusDB. Filled by
 -- tools/import_items.py alongside `items`.
 --
