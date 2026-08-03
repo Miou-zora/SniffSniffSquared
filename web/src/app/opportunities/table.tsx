@@ -41,10 +41,12 @@ function Bound({
   value,
   onChange,
   placeholder,
+  label,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
+  label: string;
 }) {
   return (
     <input
@@ -54,7 +56,7 @@ function Bound({
       value={value}
       placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
-      aria-label={`level ${placeholder === "1" ? "from" : "to"}`}
+      aria-label={label}
       className="border-circuit-border focus:border-lime-pulse text-caption text-phosphor-white placeholder:text-deep-fern bg-ground-iron w-56 rounded-lg border px-8 py-8 tabular-nums outline-none"
     />
   );
@@ -193,9 +195,14 @@ export function OpportunitiesTable({
         </select>
         <span className="text-caption tracking-caption text-deep-fern flex items-center gap-8">
           level
-          <Bound value={from} onChange={setFrom} placeholder="1" />
+          <Bound
+            value={from}
+            onChange={setFrom}
+            placeholder="1"
+            label="filter level from"
+          />
           to
-          <Bound value={to} onChange={setTo} placeholder="200" />
+          <Bound value={to} onChange={setTo} placeholder="200" label="filter level to" />
         </span>
         <span className="text-caption tracking-caption text-deep-fern ml-8">
           {shown.length} shown
@@ -205,8 +212,20 @@ export function OpportunitiesTable({
       {job !== "" && (
         <p className="text-caption tracking-caption text-sage-40 mt-12 flex flex-wrap items-center gap-12">
           <span className="flex items-center gap-8">
-            from <Bound value={minLevel} onChange={setMinLevel} placeholder="1" />
-            to <Bound value={maxLevel} onChange={setMaxLevel} placeholder="200" />
+            from{" "}
+            <Bound
+              value={minLevel}
+              onChange={setMinLevel}
+              placeholder="1"
+              label="load band from level"
+            />
+            to{" "}
+            <Bound
+              value={maxLevel}
+              onChange={setMaxLevel}
+              placeholder="200"
+              label="load band to level"
+            />
           </span>
           <button
             type="button"
