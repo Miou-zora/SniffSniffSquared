@@ -43,6 +43,13 @@ export interface CraftIngredient {
   quantity: number;
   /** Null when nothing has been captured for this ingredient. */
   plan: BuyPlan | null;
+  /**
+   * The full batch ladder this ingredient was priced from — same source as
+   * `plan`, but every size rather than just the ones the plan picked. The UI
+   * hovers this to show what x1/x10/x100/x1000 actually cost, since the plan
+   * alone hides whether a bigger batch would have been cheaper per unit.
+   */
+  ladder: Ladder | null;
 }
 
 /**
@@ -577,6 +584,7 @@ async function craftEstimate(itemId: number): Promise<CraftEstimate | null> {
       name: l.name ?? `Item ${l.itemId}`,
       quantity: l.quantity,
       plan: ladder ? planBuy(l.quantity, ladder) : null,
+      ladder: ladder ?? null,
     };
   });
 

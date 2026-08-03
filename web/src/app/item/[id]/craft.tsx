@@ -1,3 +1,4 @@
+import { ItemPrice } from "@/app/item-price";
 import { describePlan } from "@/lib/craft";
 import type { CraftEstimate } from "@/lib/breaker";
 
@@ -35,8 +36,14 @@ export function CraftBreakdown({ estimate }: { estimate: CraftEstimate | null })
     return (
       <p className="text-body tracking-body text-sage-40 max-w-[74ch]">
         <span className="text-phosphor-white">No captured price</span> for{" "}
-        {unpriced.map((i) => i.name).join(", ")}. Open this item&apos;s craft panel in
-        game — the client prices every ingredient and the sniffer stores them.
+        {unpriced.map((i, n) => (
+          <span key={i.itemId}>
+            {n > 0 && ", "}
+            <ItemPrice name={i.name} ladder={i.ladder} itemId={i.itemId} />
+          </span>
+        ))}
+        . Open this item&apos;s craft panel in game — the client prices every ingredient
+        and the sniffer stores them.
         {via}
       </p>
     );
@@ -51,7 +58,7 @@ export function CraftBreakdown({ estimate }: { estimate: CraftEstimate | null })
       {estimate.ingredients.map((i, n) => (
         <span key={i.itemId}>
           {n > 0 && ", "}
-          {i.quantity}x {i.name}
+          {i.quantity}x <ItemPrice name={i.name} ladder={i.ladder} itemId={i.itemId} />
           <span
             className="text-deep-fern"
             title={
@@ -66,6 +73,10 @@ export function CraftBreakdown({ estimate }: { estimate: CraftEstimate | null })
         </span>
       ))}
       {via}
+      <span className="text-deep-fern block">
+        Hover an ingredient to see its full x1/x10/x100/x1000 ladder — the cheapest rate
+        is marked.
+      </span>
     </p>
   );
 }
