@@ -46,6 +46,7 @@ src/lib/catalogue.ts   the two joined, which is what /items renders
 src/lib/history.ts     one item's price over time, shown on its item page
 src/lib/kind.ts        is this the sort of item the crusher takes
 src/lib/basket.ts      the craft basket: recipes pooled into one buy (server)
+src/lib/recipes.ts     writing recipes down; both bulk loads and one-at-a-time
 src/app/projection.tsx the table — client, for the metric switch and n+x
 src/app/live.tsx       LISTEN/NOTIFY subscriber that refreshes the page
 ```
@@ -66,6 +67,16 @@ not then make sixty more requests to price them.
 **What you already own comes off the top.** Each pile row carries `have` from
 `inventory` and a `short` — the buy plan and the cost are for the shortfall, so
 a resource the bags already cover reads as settled and costs nothing.
+
+**Opening a craftable item registers its recipe.** `craftEstimate` falls back to
+DofusDB when `recipes` has no row, and now writes what it learns — with the
+`job_id`, which `/opportunities` requires since it lists what a job makes. Before
+this the page rendered the recipe and forgot it, so an item stayed off
+`/opportunities` however profitable it was, and the only way to get it there was
+a bulk job load. The write fires only while the row is missing, so the second
+view finds it stored and never reaches DofusDB again. `fetchItems` runs with it,
+because that filter also tests `super_type_id` and a recipe stored against an
+unnamed item is invisible in exactly the same way.
 
 **Coverage lists what the database knows, which is not what the game has.**
 `items` fills from what was browsed, held or imported, so a job can read as
