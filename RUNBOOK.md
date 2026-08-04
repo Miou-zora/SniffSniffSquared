@@ -225,7 +225,7 @@ The Rust app lives in `sniffer/`. **Run it from there** — it resolves
 ```sh
 cd sniffer
 cargo build
-cargo test          # 51 tests, all should pass
+cargo test          # 52 tests, all should pass
 ```
 
 > **Windows.** Install [Npcap](https://npcap.com/#download) first — it is what

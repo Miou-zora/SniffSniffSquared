@@ -125,7 +125,7 @@ The Rust app lives in `sniffer/` and MUST be run from there — it resolves
 ```sh
 docker compose up -d                      # postgres + pgadmin, from repo root
 cd sniffer
-cargo build && cargo test                 # 51 tests
+cargo build && cargo test                 # 52 tests
 ./target/debug/SniffSniffSquared --dev en0 --all "tcp port 5555"
 ./target/debug/SniffSniffSquared --dev en0 --raw "tcp port 5555"
 ./target/debug/SniffSniffSquared --list

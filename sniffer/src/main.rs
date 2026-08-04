@@ -690,7 +690,17 @@ fn pick_device(dev_arg: Option<String>) -> Device {
 /// a machine with both an idle Realtek port and a live Wi-Fi card, capturing on
 /// the Realtek. Loopback keeps 127.0.0.1/::1 and is left alone, since
 /// `tools/replay.py` targets it deliberately.
+///
+/// An interface holding *no* address is a different situation and is left alone
+/// too: bridges, taps and mirror ports carry traffic without owning an IP, and
+/// macOS lists a dozen of them (`bridge0`, `gif0`, `en1`..`en6`). Only a
+/// link-local address is evidence that DHCP was attempted and failed. Costs
+/// nothing on Windows, which self-assigns 169.254/16 rather than leaving an
+/// enabled adapter address-less.
 fn disconnected_warning(device: &Device) -> Option<String> {
+    if device.addresses.is_empty() {
+        return None;
+    }
     let routable = device.addresses.iter().any(|a| match a.addr {
         IpAddr::V4(v4) => !v4.is_link_local() && !v4.is_loopback(),
         IpAddr::V6(v6) => !is_v6_link_local(&v6) && !v6.is_loopback(),
@@ -1044,5 +1054,20 @@ mod tests {
     #[test]
     fn loopback_is_not_flagged() {
         assert!(disconnected_warning(&by_name(r"\Device\NPF_Loopback")).is_none());
+    }
+
+    /// A bridge or mirror port carries traffic while holding no address of its
+    /// own, and macOS lists a dozen such devices. Only link-local-only is
+    /// evidence of a failed DHCP, so no addresses at all must not warn — a
+    /// warning on a correct choice teaches the user to ignore the real one.
+    #[test]
+    fn address_less_adapter_is_not_flagged() {
+        let bridge = Device {
+            name: "bridge0".to_string(),
+            desc: None,
+            addresses: vec![],
+            flags: DeviceFlags::empty(),
+        };
+        assert!(disconnected_warning(&bridge).is_none());
     }
 }
