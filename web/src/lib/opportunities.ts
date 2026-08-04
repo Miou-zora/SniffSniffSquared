@@ -13,6 +13,16 @@ import { fetchItems, latestLadders } from "@/lib/breaker";
 import { margin, unitPrice } from "@/lib/craft";
 import { query } from "@/lib/db";
 import { NOT_STUFF_SUPER_TYPES } from "@/lib/kind";
+import { CHARACTER_SHARE, RECYCLE_BONUSES } from "@/lib/recycle";
+
+/**
+ * "Pépite" — the nugget as a tradeable item, so recycling has a kamas value.
+ *
+ * Verified: DofusDB 14635, `Pierre précieuse`, and the only item of that name
+ * with a captured ladder. The other four "pépite" items are a Sakaï fragment
+ * and three Dimensions Divines trinkets, none of which the recycler pays in.
+ */
+const NUGGET_ITEM_ID = 14635;
 
 /**
  * Runes have no super-type of their own — they fall under Ressource (9) — so
@@ -36,6 +46,15 @@ export interface OpportunityRow {
   /** Null whenever either side above is null. */
   profitPerUnit: number | null;
   marginPercent: number | null;
+  /**
+   * What one unit is worth recycled rather than sold: its nugget yield at the
+   * craft bonus, priced off the nugget's own ladder. Null when the yield or the
+   * nugget price is missing.
+   *
+   * The craft bonus applies to every row here by construction — this table is
+   * built from `recipes`, so each output is something you made.
+   */
+  recycleValue: number | null;
 }
 
 interface RecipeRow extends Record<string, unknown> {
@@ -59,6 +78,8 @@ interface RecipeRow extends Record<string, unknown> {
 export async function loadOpportunities(): Promise<{
   rows: OpportunityRow[];
   jobs: JobOption[];
+  /** The nugget's own per-unit rate, so the page can show what it priced with. */
+  nuggetPrice: number | null;
 }> {
   const [recipeRows, jobs] = await Promise.all([
     query<RecipeRow>(
@@ -100,12 +121,31 @@ export async function loadOpportunities(): Promise<{
     grouped.set(itemId, g);
   }
 
-  const allIds = new Set<number>();
+  const allIds = new Set<number>([NUGGET_ITEM_ID]);
   for (const g of grouped.values()) {
     allIds.add(g.itemId);
     for (const line of g.lines) allIds.add(line.itemId);
   }
-  const ladders = await latestLadders([...allIds]);
+  const outputIds = [...grouped.keys()];
+  const [ladders, yieldRows] = await Promise.all([
+    latestLadders([...allIds]),
+    // Only the outputs: an ingredient's own recycling value is not this
+    // question, and every output here is non-equipment already, which is the
+    // only case the yield model covers.
+    outputIds.length === 0
+      ? Promise.resolve([])
+      : query<{ item_id: string; recycle_nuggets: string | number | null }>(
+          `SELECT item_id, recycle_nuggets FROM items
+            WHERE item_id = ANY($1::bigint[]) AND recycle_nuggets IS NOT NULL`,
+          [outputIds],
+        ),
+  ]);
+
+  const nuggetLadder = ladders.get(NUGGET_ITEM_ID);
+  const nuggetPrice = nuggetLadder ? unitPrice(nuggetLadder) : null;
+  const perUnitYield = new Map(
+    yieldRows.map((r) => [Number(r.item_id), Number(r.recycle_nuggets)]),
+  );
 
   const rows: OpportunityRow[] = [...grouped.values()].map((g) => {
     let ingredientCost: number | null = 0;
@@ -133,6 +173,12 @@ export async function loadOpportunities(): Promise<{
         ? margin(ingredientCost, sellPrice)
         : null;
 
+    const base = perUnitYield.get(g.itemId);
+    const recycleValue =
+      base === undefined || !Number.isFinite(base) || nuggetPrice === null
+        ? null
+        : base * RECYCLE_BONUSES.craft * CHARACTER_SHARE * nuggetPrice;
+
     return {
       itemId: g.itemId,
       name: g.name,
@@ -144,10 +190,11 @@ export async function loadOpportunities(): Promise<{
       sellPrice,
       profitPerUnit: m?.profitPerUnit ?? null,
       marginPercent: m?.marginPercent ?? null,
+      recycleValue,
     };
   });
 
-  return { rows, jobs };
+  return { rows, jobs, nuggetPrice };
 }
 
 /**

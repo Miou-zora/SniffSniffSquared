@@ -25,16 +25,37 @@ function pct(v: number | null) {
 }
 
 type Key =
-  "name" | "level" | "ingredientCost" | "sellPrice" | "profitPerUnit" | "marginPercent";
+  | "name"
+  | "level"
+  | "ingredientCost"
+  | "sellPrice"
+  | "recycleValue"
+  | "profitPerUnit"
+  | "marginPercent";
 
 const LABELS: Record<Key, string> = {
   name: "item",
   level: "level",
   ingredientCost: "cost",
   sellPrice: "sell price",
+  recycleValue: "recycle",
   profitPerUnit: "profit/unit",
   marginPercent: "margin",
 };
+
+/**
+ * Which exit is worth more, or null when they cannot be compared.
+ *
+ * Drives nothing but emphasis: the winning figure goes white and the other
+ * stays muted, so the comparison reads across a row without a column of its own
+ * saying "sell" or "recycle" in words. A row missing either side has no answer
+ * and both stay muted.
+ */
+function betterExit(r: OpportunityRow): "sell" | "recycle" | null {
+  if (r.sellPrice === null || r.recycleValue === null) return null;
+  if (r.sellPrice === r.recycleValue) return null;
+  return r.sellPrice > r.recycleValue ? "sell" : "recycle";
+}
 
 /** A level bound. Empty means unbounded, mirroring the same input on /items. */
 function Bound({
@@ -240,7 +261,7 @@ export function OpportunitiesTable({
       )}
 
       <div className="border-circuit-border mt-16 overflow-x-auto rounded-2xl border">
-        <table className="w-full min-w-[900px] border-collapse text-left">
+        <table className="w-full min-w-[1040px] border-collapse text-left">
           <thead>
             <tr className="border-phosphor-blue-black text-caption tracking-caption text-deep-fern border-b uppercase">
               <Sortable column="name" sort={sort} onSort={toggle} first />
@@ -252,6 +273,7 @@ export function OpportunitiesTable({
                 align="right"
               />
               <Sortable column="sellPrice" sort={sort} onSort={toggle} align="right" />
+              <Sortable column="recycleValue" sort={sort} onSort={toggle} align="right" />
               <Sortable
                 column="profitPerUnit"
                 sort={sort}
@@ -305,8 +327,24 @@ export function OpportunitiesTable({
                 <td className="text-sage-40 py-12 pr-16 text-right tabular-nums">
                   {k(r.ingredientCost)}
                 </td>
-                <td className="text-sage-40 py-12 pr-16 text-right tabular-nums">
+                <td
+                  className={`py-12 pr-16 text-right tabular-nums ${
+                    betterExit(r) === "sell" ? "text-phosphor-white" : "text-sage-40"
+                  }`}
+                >
                   {k(r.sellPrice)}
+                </td>
+                <td
+                  className={`py-12 pr-16 text-right tabular-nums ${
+                    betterExit(r) === "recycle" ? "text-phosphor-white" : "text-sage-40"
+                  }`}
+                  title={
+                    r.recycleValue === null
+                      ? "No recycling yield stored, or no captured nugget price"
+                      : undefined
+                  }
+                >
+                  {k(r.recycleValue)}
                 </td>
                 <td
                   className={`py-12 pr-16 text-right tabular-nums ${

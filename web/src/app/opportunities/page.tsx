@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  * docs/superpowers/specs/2026-08-03-craft-opportunities-dashboard-design.md.
  */
 export default async function OpportunitiesPage() {
-  const { rows, jobs } = await loadOpportunities();
+  const { rows, jobs, nuggetPrice } = await loadOpportunities();
 
   return (
     <main className="mx-auto w-full max-w-[1400px] px-24 py-64">
@@ -25,7 +25,14 @@ export default async function OpportunitiesPage() {
         Consommables and resources only — equipment and runes are answered by the breaker
         and items pages instead. Cost is the ingredients off the batch ladder; sale price
         is the cheapest rate currently quoted for the item itself. No HDV sales tax is
-        factored in.
+        factored in.{" "}
+        <span className="text-deep-fern">
+          Recycle is the same unit valued as nuggets instead —{" "}
+          {nuggetPrice === null
+            ? "no nugget price captured yet, so the column is empty"
+            : `at ${Math.round(nuggetPrice).toLocaleString("fr-FR")} k a nugget`}
+          . Whichever of the two pays more is the one shown in white.
+        </span>
       </p>
 
       {rows.length === 0 ? (

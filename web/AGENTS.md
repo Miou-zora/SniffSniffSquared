@@ -101,6 +101,15 @@ explaining itself — equipment, a zero yield and an unknown item all come out a
 null, because a caveat about a number that is not shown takes more room than the
 number would have. The reasoning lives in `lib/recycle.ts`.
 
+**`/opportunities` prices the other exit.** Its `recycle` column is the same unit
+valued as nuggets — the stored yield at the craft bonus, times the nugget's own
+per-unit rate (`Pépite`, item 14635, off the same batch ladder everything else
+here is priced from). The craft bonus applies to every row by construction, since
+the table is built from `recipes`. Whichever of `sell price` and `recycle` pays
+more is rendered white and the other muted, so the comparison reads across the
+row without a column spelling out a verdict. All 348 outputs have a yield; the
+rows that cannot be compared are missing a captured _sell_ price, not a yield.
+
 **Opening a craftable item registers its recipe.** `craftEstimate` falls back to
 DofusDB when `recipes` has no row, and now writes what it learns — with the
 `job_id`, which `/opportunities` requires since it lists what a job makes. Before
