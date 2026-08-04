@@ -15,6 +15,7 @@
 import { fetchItems, fetchRecipe, latestLadders } from "@/lib/breaker";
 import { planBuy, type BuyPlan } from "@/lib/craft";
 import { query } from "@/lib/db";
+import { rememberRecipes } from "@/lib/recipes";
 
 /** One thing you mean to craft, and how many copies. */
 export interface BasketEntry {
@@ -156,6 +157,8 @@ export async function craftJobs(): Promise<JobOption[]> {
   }
 }
 
+export { rememberRecipes };
+
 /** One craftable a job makes, with the recipe that came back alongside it. */
 export interface JobRecipe {
   itemId: number;
@@ -236,38 +239,6 @@ export async function jobRecipes(
     if (data.length < PAGE) break;
   }
   return out;
-}
-
-/**
- * Keep the recipes that came back with the job query.
- *
- * Same table and same shape as tools/import_items.py writes, and replaced
- * wholesale for the same reason: an ingredient dropped between game versions
- * has to lose its row rather than linger next to the new one.
- */
-export async function rememberRecipes(recipes: JobRecipe[]): Promise<void> {
-  const withLines = recipes.filter((r) => r.ingredients.length > 0);
-  if (withLines.length === 0) return;
-  await query(`DELETE FROM recipes WHERE item_id = ANY($1::bigint[])`, [
-    withLines.map((r) => r.itemId),
-  ]);
-  const tuples: string[] = [];
-  const values: unknown[] = [];
-  for (const recipe of withLines) {
-    recipe.ingredients.forEach((ing, position) => {
-      const i = values.length;
-      tuples.push(`($${i + 1},$${i + 2},$${i + 3},$${i + 4},$${i + 5})`);
-      values.push(recipe.itemId, position, ing.itemId, ing.quantity, recipe.jobId);
-    });
-  }
-  await query(
-    `INSERT INTO recipes (item_id, position, ingredient_id, quantity, job_id)
-     VALUES ${tuples.join(",")}
-     ON CONFLICT (item_id, position) DO UPDATE SET
-       ingredient_id = EXCLUDED.ingredient_id, quantity = EXCLUDED.quantity,
-       job_id = EXCLUDED.job_id`,
-    values,
-  );
 }
 
 /**

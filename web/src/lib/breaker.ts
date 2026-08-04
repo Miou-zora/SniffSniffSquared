@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { rememberRecipes } from "@/lib/recipes";
 import type { RuneLadder } from "@/app/rune-price";
 import { planBuy, type BuyPlan, type Ladder } from "@/lib/craft";
 import {
@@ -561,6 +562,29 @@ async function craftEstimate(itemId: number): Promise<CraftEstimate | null> {
     if (live === null) return null;
     source = "dofusdb";
     lines = live.lines;
+    // Learn it, do not just show it. Until this wrote, opening a craftable the
+    // importer had not reached rendered its recipe and forgot it again, so the
+    // item never turned up on /opportunities however profitable it was — the
+    // page joins `recipes`, and there was no row. Now viewing an item is
+    // enough to register it.
+    //
+    // Safe to do on a read: it fires only while `recipes` has no row for this
+    // item, so the second render finds it stored and never reaches here. The
+    // job id has to come with it or the row is invisible to /opportunities,
+    // which lists what a job makes.
+    if (live.jobId !== null) {
+      await rememberRecipes([
+        {
+          itemId,
+          jobId: live.jobId,
+          ingredients: lines.map((l) => ({ itemId: l.itemId, quantity: l.quantity })),
+        },
+      ]);
+      // /opportunities also filters on super_type_id, which only `fetchItems`
+      // fills — a recipe stored against an item nobody has named would be
+      // dropped by that filter and look exactly like this bug all over again.
+      await fetchItems([itemId]);
+    }
     const names = await query<{ item_id: string; name_fr: string | null }>(
       `SELECT item_id, name_fr FROM items WHERE item_id = ANY($1::bigint[])`,
       [lines.map((l) => l.itemId)],
