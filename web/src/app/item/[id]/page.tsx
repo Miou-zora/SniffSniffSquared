@@ -4,11 +4,13 @@ import { notFound } from "next/navigation";
 import { PageHeader } from "@/app/header";
 import { CraftBreakdown } from "@/app/item/[id]/craft";
 import { PriceHistory } from "@/app/item/[id]/history";
+import { RecycleYieldPanel } from "@/app/item/[id]/recycle";
 import { ItemView } from "@/app/page";
 import { loadItem } from "@/lib/breaker";
 import { priceHistory } from "@/lib/history";
 import { iconUrl } from "@/lib/icon";
 import { isBreakableKind } from "@/lib/kind";
+import { recycleYield } from "@/lib/recycle";
 import { verdictFor } from "@/lib/verdict";
 
 // Prices and crushes land while you play, so this is never prerendered — the
@@ -33,7 +35,11 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
   const itemId = Number.parseInt(id, 10);
   if (!Number.isInteger(itemId) || itemId <= 0) notFound();
 
-  const [view, history] = await Promise.all([loadItem(itemId), priceHistory(itemId)]);
+  const [view, history, recycle] = await Promise.all([
+    loadItem(itemId),
+    priceHistory(itemId),
+    recycleYield(itemId),
+  ]);
 
   // Lines that map to runes, and a kind the crusher would actually take. Both
   // halves are needed: a rune is itself a stat line, so the first test alone
@@ -41,6 +47,12 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
   if (view !== null && view.weighted.length > 0 && isBreakableKind(view.item.type)) {
     return (
       <ItemView view={view} verdict={await verdictFor(view)}>
+        <section className="mt-48">
+          <h2 className="text-heading-sm tracking-heading-sm">What recycling pays</h2>
+          <div className="mt-12">
+            <RecycleYieldPanel yield={recycle} />
+          </div>
+        </section>
         {history !== null && (
           <section className="mt-48">
             <h2 className="text-heading-sm tracking-heading-sm">What a copy costs</h2>
@@ -78,6 +90,13 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
         <h2 className="text-heading-sm tracking-heading-sm">What it costs to craft</h2>
         <div className="mt-12">
           <CraftBreakdown estimate={view?.projection.craft ?? null} />
+        </div>
+      </section>
+
+      <section className="mt-32">
+        <h2 className="text-heading-sm tracking-heading-sm">What recycling pays</h2>
+        <div className="mt-12">
+          <RecycleYieldPanel yield={recycle} />
         </div>
       </section>
 

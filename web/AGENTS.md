@@ -45,6 +45,7 @@ src/lib/broken.ts      the catalogue: what is breakable, and what was measured
 src/lib/catalogue.ts   the two joined, which is what /items renders
 src/lib/history.ts     one item's price over time, shown on its item page
 src/lib/kind.ts        is this the sort of item the crusher takes
+src/lib/recycle.ts     what recycling an item pays in nuggets
 src/lib/basket.ts      the craft basket: recipes pooled into one buy (server)
 src/lib/recipes.ts     writing recipes down; both bulk loads and one-at-a-time
 src/app/projection.tsx the table — client, for the metric switch and n+x
@@ -67,6 +68,17 @@ not then make sixty more requests to price them.
 **What you already own comes off the top.** Each pile row carries `have` from
 `inventory` and a `short` — the buy plan and the cost are for the shortfall, so
 a resource the bags already cover reads as settled and costs nothing.
+
+**The recycling yield is read data, not captured data.** It never crosses the
+wire — the recycler message the sniffer sees is a placement, and the payout is
+computed by the client — so `src/lib/recycle.ts` reads the base constant from
+`items.recycle_nuggets` and falls back to DofusDB for an item the importer has
+not reached, like every other enrichment here. What it stores is the base for
+one unit; the zone/craft/boss multipliers and the character share are applied at
+render time, because none of them are properties of the item. `CHARACTER_SHARE`
+is the one figure measured rather than read out of the client: Rune Invo's base
+of 4.5 pays 2.70, which is 60%. If payouts stop matching, change that constant
+and the whole panel follows.
 
 **Opening a craftable item registers its recipe.** `craftEstimate` falls back to
 DofusDB when `recipes` has no row, and now writes what it learns — with the

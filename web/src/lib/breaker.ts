@@ -633,6 +633,12 @@ export interface ItemMeta {
    * is what the opportunities dashboard filters equipment out with.
    */
   superTypeId: number | null;
+  /**
+   * Base nuggets one unit yields when recycled, before bonuses and the
+   * character share. 0 means "not recyclable", which is a real answer; null
+   * means DofusDB did not say. See src/lib/recycle.ts.
+   */
+  recycleNuggets: number | null;
   /** The template: what each line on this item type can roll between. */
   ranges: { effectId: number; min: number; max: number }[];
 }
@@ -695,6 +701,7 @@ export async function fetchItems(itemIds: number[]): Promise<Map<number, ItemMet
             id?: unknown;
             level?: unknown;
             iconId?: unknown;
+            recyclingNuggets?: unknown;
             name?: { fr?: unknown };
             type?: { name?: { fr?: unknown }; superTypeId?: unknown };
           };
@@ -702,12 +709,19 @@ export async function fetchItems(itemIds: number[]): Promise<Map<number, ItemMet
           if (!Number.isFinite(id)) continue;
           const iconId = Number(it.iconId);
           const superTypeId = Number(it.type?.superTypeId);
+          // Tested for presence rather than truthiness: 0 is the answer for
+          // every item the recycler refuses, and `|| null` would erase it.
+          const nuggets = Number(it.recyclingNuggets);
           out.set(id, {
             name: typeof it.name?.fr === "string" ? it.name.fr : null,
             level: Number.isFinite(Number(it.level)) ? Number(it.level) : null,
             type: typeof it.type?.name?.fr === "string" ? it.type.name.fr : null,
             iconId: Number.isFinite(iconId) && iconId > 0 ? iconId : null,
             superTypeId: Number.isFinite(superTypeId) ? superTypeId : null,
+            recycleNuggets:
+              it.recyclingNuggets !== undefined && Number.isFinite(nuggets)
+                ? nuggets
+                : null,
             ranges: effectRanges(raw),
           });
         }
@@ -736,16 +750,18 @@ async function remember(meta: Map<number, ItemMeta>): Promise<void> {
   for (const [itemId, m] of meta) {
     try {
       await query(
-        `INSERT INTO items (item_id, name_fr, level, type_fr, icon_id, super_type_id)
-         VALUES ($1,$2,$3,$4,$5,$6)
+        `INSERT INTO items (item_id, name_fr, level, type_fr, icon_id, super_type_id,
+                            recycle_nuggets)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
          ON CONFLICT (item_id) DO UPDATE SET
            name_fr = COALESCE(EXCLUDED.name_fr, items.name_fr),
            level = COALESCE(EXCLUDED.level, items.level),
            type_fr = COALESCE(EXCLUDED.type_fr, items.type_fr),
            icon_id = COALESCE(EXCLUDED.icon_id, items.icon_id),
            super_type_id = COALESCE(EXCLUDED.super_type_id, items.super_type_id),
+           recycle_nuggets = COALESCE(EXCLUDED.recycle_nuggets, items.recycle_nuggets),
            updated_at = now()`,
-        [itemId, m.name, m.level, m.type, m.iconId, m.superTypeId],
+        [itemId, m.name, m.level, m.type, m.iconId, m.superTypeId, m.recycleNuggets],
       );
       if (m.ranges.length === 0) continue;
       // Replaced wholesale, like the importer does: a template that loses a
