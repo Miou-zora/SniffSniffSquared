@@ -129,9 +129,10 @@ services:
       DOFUS_DEV: ${DOFUS_DEV:-eth0}
       ARCHIVE_PACKETS: ${ARCHIVE_PACKETS:-1}
     volumes:
-      # editable without a rebuild — this is the file to change when a game
-      # update rotates the message keys (see README)
+      # editable without a rebuild — these are the files to change when a game
+      # update rotates the message keys or moves their field numbers (see README)
       - ./sniffer/keymap.json:/app/keymap.json:ro
+      - ./sniffer/schema.json:/app/schema.json:ro
     command: ["--all", "${BPF_FILTER:-tcp port 5555}"]
     depends_on:
       db:
@@ -142,9 +143,12 @@ services:
           path: ./sniffer/src
         - action: rebuild
           path: ./sniffer/Cargo.toml
-        # keymap.json is bind-mounted, so a rotated key needs only a restart
+        # both are bind-mounted, so a rotated key or a moved field number
+        # needs only a restart
         - action: restart
           path: ./sniffer/keymap.json
+        - action: restart
+          path: ./sniffer/schema.json
 
 volumes:
   db_data:
