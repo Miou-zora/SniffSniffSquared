@@ -102,13 +102,28 @@ null, because a caveat about a number that is not shown takes more room than the
 number would have. The reasoning lives in `lib/recycle.ts`.
 
 **`/opportunities` prices the other exit.** Its `recycle` column is the same unit
-valued as nuggets — the stored yield at the craft bonus, times the nugget's own
-per-unit rate (`Pépite`, item 14635, off the same batch ladder everything else
-here is priced from). The craft bonus applies to every row by construction, since
-the table is built from `recipes`. Whichever of `sell price` and `recycle` pays
-more is rendered white and the other muted, so the comparison reads across the
-row without a column spelling out a verdict. All 348 outputs have a yield; the
-rows that cannot be compared are missing a captured _sell_ price, not a yield.
+valued as nuggets — the stored yield times the nugget's own per-unit rate
+(`Pépite`, item 14635, off the same batch ladder everything else here is priced
+from). Whichever of `sell price` and `recycle` pays more is rendered white and
+the other muted, so the comparison reads across the row without a column
+spelling out a verdict. Rows that cannot be compared are missing a captured
+_sell_ price, not a yield.
+
+**It is no longer only a craft list, because the best recycles are not crafts.**
+A table built from `recipes` can only ever show what a job makes, and the items
+worth recycling are usually dropped or gathered — the top rows are Œil de
+Boufmouth de guerre and Écorce d'Abraknyde Vénérable, neither of which any job
+makes. So a second query adds every non-equipment item with a yield and a
+captured price that no recipe produces, runes included, which the craft list
+rules out by name and which have the highest average yield of any group here.
+Those rows carry `craftable: false`, no job, and no cost or margin — there is no
+recipe to cost. Chips pick the question, same as `/items`: `everything`,
+`craftable`, `recycle wins`.
+
+**The craft bonus rides on having a recipe**, so it is applied per row rather
+than to the whole table. That is the rule all three measurements fit: Rune Invo
+has no recipe and paid at x1, Multygely and the Essence both have one and paid at
+x1.5 and x1.5 × 3.
 
 **Opening a craftable item registers its recipe.** `craftEstimate` falls back to
 DofusDB when `recipes` has no row, and now writes what it learns — with the

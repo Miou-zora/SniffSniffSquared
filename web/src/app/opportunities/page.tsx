@@ -19,19 +19,20 @@ export default async function OpportunitiesPage() {
       <PageHeader current="/opportunities" />
 
       <h1 className="text-heading-lg tracking-heading-lg mt-24">
-        {rows.length} recipe{rows.length === 1 ? "" : "s"} known
+        {rows.length} item{rows.length === 1 ? "" : "s"} known
       </h1>
       <p className="text-body tracking-body text-sage-40 mt-12 max-w-[78ch]">
-        Consommables and resources only — equipment and runes are answered by the breaker
-        and items pages instead. Cost is the ingredients off the batch ladder; sale price
-        is the cheapest rate currently quoted for the item itself. No HDV sales tax is
-        factored in.{" "}
+        Consommables and resources — equipment is answered by the breaker and items pages
+        instead. Cost is the ingredients off the batch ladder; sale price is the cheapest
+        rate currently quoted for the item itself. No HDV sales tax is factored in.{" "}
         <span className="text-deep-fern">
           Recycle is the same unit valued as nuggets instead —{" "}
           {nuggetPrice === null
             ? "no nugget price captured yet, so the column is empty"
             : `at ${Math.round(nuggetPrice).toLocaleString("fr-FR")} k a nugget`}
-          . Whichever of the two pays more is the one shown in white.
+          . Whichever of the two pays more is the one shown in white. Rows a job does not
+          make — dropped resources, runes — are here for that column alone and carry no
+          cost or margin; the craftable chip hides them.
         </span>
       </p>
 

@@ -37,9 +37,15 @@ export interface OpportunityRow {
   name: string;
   level: number | null;
   iconId: number | null;
-  jobId: number;
+  /**
+   * False for a row that only exists because it is worth recycling — a dropped
+   * resource or a rune. Those carry no job, no cost and no margin, and the
+   * craft bonus does not apply to their yield.
+   */
+  craftable: boolean;
+  jobId: number | null;
   jobName: string | null;
-  /** Null when an ingredient has no captured price. */
+  /** Null when an ingredient has no captured price, and for a non-craftable. */
   ingredientCost: number | null;
   /** Null when the item itself has no captured price. */
   sellPrice: number | null;
@@ -51,8 +57,9 @@ export interface OpportunityRow {
    * craft bonus, priced off the nugget's own ladder. Null when the yield or the
    * nugget price is missing.
    *
-   * The craft bonus applies to every row here by construction — this table is
-   * built from `recipes`, so each output is something you made.
+   * The craft bonus is applied only when a recipe makes the item, which is the
+   * rule all three measurements fit: Rune Invo has none and paid at x1, while
+   * Multygely and the Essence both have one and paid at x1.5 and x1.5 x 3.
    */
   recycleValue: number | null;
 }
@@ -67,13 +74,27 @@ interface RecipeRow extends Record<string, unknown> {
   icon_id: string | null;
 }
 
+interface RecycleRow extends Record<string, unknown> {
+  item_id: string;
+  name_fr: string | null;
+  level: number | null;
+  icon_id: string | null;
+}
+
 /**
- * Every candidate recipe already known to the database: a job crafts it, its
- * output passes the not-stuff whitelist, and it is not a rune. Ingredient
- * lines are grouped per item, then priced in one batch pass.
+ * Every candidate recipe already known to the database, plus every other
+ * non-equipment item worth recycling.
  *
- * Reads only what `recipes`/`items` already hold — it does not call DofusDB.
- * `loadJobLevelBand` below is the action that goes and gets more.
+ * The second half is not an afterthought: a craft table only ever sees what a
+ * job makes, and the things actually worth recycling are usually dropped or
+ * gathered rather than crafted. Runes are the clearest case — five of them are
+ * priced and they average a base of 19.4, higher than any other group here —
+ * and the craft list excludes them by rule. So a row can now be a recycling
+ * opportunity without being a craft one, with the cost and margin columns empty
+ * because there is no recipe to cost.
+ *
+ * Reads only what `recipes`/`items`/`prices` already hold — it does not call
+ * DofusDB. `loadJobLevelBand` below is the action that goes and gets more.
  */
 export async function loadOpportunities(): Promise<{
   rows: OpportunityRow[];
@@ -81,7 +102,7 @@ export async function loadOpportunities(): Promise<{
   /** The nugget's own per-unit rate, so the page can show what it priced with. */
   nuggetPrice: number | null;
 }> {
-  const [recipeRows, jobs] = await Promise.all([
+  const [recipeRows, recycleRows, jobs] = await Promise.all([
     query<RecipeRow>(
       `SELECT r.item_id, r.ingredient_id, r.quantity, r.job_id,
               i.name_fr, i.level, i.icon_id
@@ -91,6 +112,21 @@ export async function loadOpportunities(): Promise<{
           AND i.super_type_id = ANY($1::smallint[])
           AND ${NOT_RUNE_SQL}
         ORDER BY r.item_id, r.position`,
+      [NOT_STUFF_SUPER_TYPES],
+    ),
+    // Everything else a recycler takes: no recipe makes it, so it can never
+    // reach the query above, but it has a yield and a captured price and the
+    // sell-or-recycle question applies to it exactly the same. Runes included
+    // deliberately — the craft list rules them out, and they are the best of
+    // the lot. A yield of 0 is left out: there is nothing to compare.
+    query<RecycleRow>(
+      `SELECT i.item_id, i.name_fr, i.level, i.icon_id
+         FROM items i
+        WHERE i.super_type_id = ANY($1::smallint[])
+          AND i.recycle_nuggets > 0
+          AND EXISTS (SELECT 1 FROM prices p WHERE p.item_id = i.item_id)
+          AND NOT EXISTS (SELECT 1 FROM recipes r
+                           WHERE r.item_id = i.item_id AND r.job_id IS NOT NULL)`,
       [NOT_STUFF_SUPER_TYPES],
     ),
     craftJobs(),
@@ -126,19 +162,19 @@ export async function loadOpportunities(): Promise<{
     allIds.add(g.itemId);
     for (const line of g.lines) allIds.add(line.itemId);
   }
-  const outputIds = [...grouped.keys()];
+  for (const r of recycleRows) allIds.add(Number(r.item_id));
+
+  // Both kinds of row, so one query covers the lot. An ingredient's own
+  // recycling value is not this question, but including it costs nothing and
+  // keeps the id list identical to the ladder lookup.
+  const subjectIds = [...allIds];
   const [ladders, yieldRows] = await Promise.all([
-    latestLadders([...allIds]),
-    // Only the outputs: an ingredient's own recycling value is not this
-    // question, and every output here is non-equipment already, which is the
-    // only case the yield model covers.
-    outputIds.length === 0
-      ? Promise.resolve([])
-      : query<{ item_id: string; recycle_nuggets: string | number | null }>(
-          `SELECT item_id, recycle_nuggets FROM items
-            WHERE item_id = ANY($1::bigint[]) AND recycle_nuggets IS NOT NULL`,
-          [outputIds],
-        ),
+    latestLadders(subjectIds),
+    query<{ item_id: string; recycle_nuggets: string | number | null }>(
+      `SELECT item_id, recycle_nuggets FROM items
+        WHERE item_id = ANY($1::bigint[]) AND recycle_nuggets IS NOT NULL`,
+      [subjectIds],
+    ),
   ]);
 
   const nuggetLadder = ladders.get(NUGGET_ITEM_ID);
@@ -173,28 +209,50 @@ export async function loadOpportunities(): Promise<{
         ? margin(ingredientCost, sellPrice)
         : null;
 
-    const base = perUnitYield.get(g.itemId);
-    const recycleValue =
-      base === undefined || !Number.isFinite(base) || nuggetPrice === null
-        ? null
-        : base * RECYCLE_BONUSES.craft * CHARACTER_SHARE * nuggetPrice;
-
     return {
       itemId: g.itemId,
       name: g.name,
       level: g.level,
       iconId: g.iconId,
+      craftable: true,
       jobId: g.jobId,
       jobName: jobName.get(g.jobId) ?? null,
       ingredientCost,
       sellPrice,
       profitPerUnit: m?.profitPerUnit ?? null,
       marginPercent: m?.marginPercent ?? null,
-      recycleValue,
+      recycleValue: valueRecycled(g.itemId, true),
     };
   });
 
+  for (const r of recycleRows) {
+    const itemId = Number(r.item_id);
+    const ladder = ladders.get(itemId);
+    rows.push({
+      itemId,
+      name: r.name_fr ?? `Item ${itemId}`,
+      level: r.level,
+      iconId: r.icon_id === null ? null : Number(r.icon_id),
+      craftable: false,
+      jobId: null,
+      jobName: null,
+      ingredientCost: null,
+      sellPrice: ladder ? unitPrice(ladder) : null,
+      profitPerUnit: null,
+      marginPercent: null,
+      recycleValue: valueRecycled(itemId, false),
+    });
+  }
+
   return { rows, jobs, nuggetPrice };
+
+  /** Kamas from recycling one unit. The craft bonus rides on having a recipe. */
+  function valueRecycled(itemId: number, craftable: boolean): number | null {
+    const base = perUnitYield.get(itemId);
+    if (base === undefined || !Number.isFinite(base) || nuggetPrice === null) return null;
+    const bonus = craftable ? RECYCLE_BONUSES.craft : 1;
+    return base * bonus * CHARACTER_SHARE * nuggetPrice;
+  }
 }
 
 /**

@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { RowLink } from "@/app/items/row";
 import type { JobOption } from "@/lib/basket";
@@ -55,6 +55,48 @@ function betterExit(r: OpportunityRow): "sell" | "recycle" | null {
   if (r.sellPrice === null || r.recycleValue === null) return null;
   if (r.sellPrice === r.recycleValue) return null;
   return r.sellPrice > r.recycleValue ? "sell" : "recycle";
+}
+
+/**
+ * The table answers two questions now and a chip picks which — same shape as
+ * `/items`, where "worth breaking" and "not broken yet" turned out to be one
+ * table read with different columns mattering.
+ *
+ * `craft` is the original list. `recycle` drops to rows where recycling beats
+ * selling, which is the only view where a dropped resource or a rune can
+ * outrank a craft — they have no cost or margin at all, so on the default view
+ * they sort to the bottom of the columns that made this page.
+ */
+const SCOPES = {
+  all: "everything",
+  craft: "craftable",
+  recycle: "recycle wins",
+} as const;
+type Scope = keyof typeof SCOPES;
+
+function Chip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={`text-caption tracking-caption focus-visible:ring-lime-pulse cursor-pointer rounded-lg border px-12 py-8 uppercase outline-none focus-visible:ring-2 ${
+        active
+          ? "border-lime-pulse text-lime-pulse"
+          : "border-circuit-border text-deep-fern hover:text-phosphor-white"
+      }`}
+    >
+      {children}
+    </button>
+  );
 }
 
 /** A level bound. Empty means unbounded, mirroring the same input on /items. */
@@ -131,6 +173,7 @@ export function OpportunitiesTable({
     key: "marginPercent",
     dir: "desc",
   });
+  const [scope, setScope] = useState<Scope>("all");
   const [job, setJob] = useState<number | "">("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -144,6 +187,8 @@ export function OpportunitiesTable({
     const lo = Number.parseInt(from, 10);
     const hi = Number.parseInt(to, 10);
     const filtered = rows.filter((r) => {
+      if (scope === "craft" && !r.craftable) return false;
+      if (scope === "recycle" && betterExit(r) !== "recycle") return false;
       if (job !== "" && r.jobId !== job) return false;
       if (Number.isInteger(lo) && (r.level ?? 0) < lo) return false;
       if (Number.isInteger(hi) && (r.level ?? 0) > hi) return false;
@@ -164,7 +209,7 @@ export function OpportunitiesTable({
           : String(x).localeCompare(String(y), "fr");
       return cmp === 0 ? a.name.localeCompare(b.name, "fr") : cmp * dir;
     });
-  }, [rows, sort, job, from, to]);
+  }, [rows, sort, scope, job, from, to]);
 
   const toggle = (key: Key) =>
     setSort((now) => ({
@@ -202,6 +247,11 @@ export function OpportunitiesTable({
   return (
     <>
       <div className="mt-24 flex flex-wrap items-center gap-8">
+        {(Object.keys(SCOPES) as Scope[]).map((s) => (
+          <Chip key={s} active={scope === s} onClick={() => setScope(s)}>
+            {SCOPES[s]}
+          </Chip>
+        ))}
         <select
           value={job}
           onChange={(e) => setJob(e.target.value === "" ? "" : Number(e.target.value))}
