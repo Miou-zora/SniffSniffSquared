@@ -20,6 +20,50 @@ services:
       timeout: 5s
       retries: 5
 
+  # Periodic pg_dump of the whole database into ./backups on the host.
+  #
+  # Starts by default, on purpose. The captured tables are observations of a
+  # live server and cannot be refetched: `item_stats` describes item instances
+  # the crush destroyed, so nothing else ever recorded them. A deleted volume
+  # takes the lot, which has already happened here once with nothing to restore
+  # from. A backup nobody has to remember to start is the only kind that helps.
+  #
+  # Same image as `db` so pg_dump's version always matches the server's; a
+  # newer server than the client refuses outright.
+  #
+  # The host directory survives `docker compose down -v` and a volume deleted
+  # in Docker Desktop, which is exactly the failure this is for.
+  db-backup:
+    image: postgres:16
+    container_name: dofus_db_backup
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      BACKUP_DIR: /backups
+      BACKUP_KEEP: ${BACKUP_KEEP:-24}
+    networks:
+      - db
+    volumes:
+      - ./backups:/backups
+      - ./tools/backup_db.sh:/tools/backup_db.sh:ro
+      - ./tools/restore_db.sh:/tools/restore_db.sh:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    # One dump immediately on start, then every BACKUP_INTERVAL seconds. Taking
+    # one at startup matters: bringing the stack up after a crash is exactly
+    # when you want a known-good copy before anything else touches the data.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          /tools/backup_db.sh || echo "[backup] run failed, will retry"
+          sleep "$${BACKUP_INTERVAL:-3600}"
+        done
+
   pgadmin:
     image: dpage/pgadmin4
     container_name: dofus_pgadmin
@@ -129,9 +173,10 @@ services:
       DOFUS_DEV: ${DOFUS_DEV:-eth0}
       ARCHIVE_PACKETS: ${ARCHIVE_PACKETS:-1}
     volumes:
-      # editable without a rebuild — this is the file to change when a game
-      # update rotates the message keys (see README)
+      # editable without a rebuild — these are the files to change when a game
+      # update rotates the message keys or moves their field numbers (see README)
       - ./sniffer/keymap.json:/app/keymap.json:ro
+      - ./sniffer/schema.json:/app/schema.json:ro
     command: ["--all", "${BPF_FILTER:-tcp port 5555}"]
     depends_on:
       db:
@@ -142,9 +187,12 @@ services:
           path: ./sniffer/src
         - action: rebuild
           path: ./sniffer/Cargo.toml
-        # keymap.json is bind-mounted, so a rotated key needs only a restart
+        # both are bind-mounted, so a rotated key or a moved field number
+        # needs only a restart
         - action: restart
           path: ./sniffer/keymap.json
+        - action: restart
+          path: ./sniffer/schema.json
 
 volumes:
   db_data:
