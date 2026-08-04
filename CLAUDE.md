@@ -48,6 +48,14 @@ explanation, the verified command sequence, and a "dead ends" list.
   bonuses and the character share. Measured, all at a 60% share: Rune Invo
   4.5 -> 2.70 no bonus, Multygely 0.5060 -> 0,46 at craft, Essence du Craqueleur
   Légendaire 0.2097 -> 0,57 at craft x boss.
+- **The model holds for consumables and resources and fails on equipment**, so
+  `web/` shows no figure for gear. A Gelano reads 13.6% over the prediction and a
+  Marteau Ridhe 2.5% over — same direction, different factor, so it is not one
+  missing multiplier. Stat quality was checked and is not it: the Marteau rolled
+  8.9% above its template weighted, four times the gap to close, and the Gelano's
+  only templated line is fixed at 1 and cannot roll high at all. Whatever the
+  factor is, it is not in the item data. Deliberately dropped rather than
+  guessed — do not fit a third parameter to five points.
 - **Messages are keyed by the `Any` type URL** (`type.ankama.com/kbt`), not by
   `Frame.Payload.id`. The `id` map is not used anywhere in `sniffer/src/`. Do not
   chase it.

@@ -20,6 +20,7 @@
  */
 import { fetchItems } from "@/lib/breaker";
 import { query } from "@/lib/db";
+import { NOT_STUFF_SUPER_TYPES } from "@/lib/kind";
 
 /**
  * The multipliers the client applies, from `RecycleUi` in the game assembly —
@@ -50,7 +51,30 @@ export const RECYCLE_BONUSES = {
  */
 export const CHARACTER_SHARE = 0.6;
 
-export interface RecycleYield {
+/**
+ * Why equipment gets no figure here.
+ *
+ * The decomposition lands within display rounding on every consumable and
+ * resource measured, and on both pieces of equipment it does not:
+ *
+ *   Rune Invo      own 4.5      x1    x0.6 =  2.7000  shown 2,70    exact
+ *   Multygely      leaf 0.50596 x1.5  x0.6 =  0.4554  shown 0,46    rounding
+ *   Essence CL     leaf 0.20971 x4.5  x0.6 =  0.5662  shown 0,57    rounding
+ *   Gelano         leaf 5.20199 x1.5  x0.6 =  4.68    shown 5,32    +13.6%
+ *   Marteau Ridhe  leaf 36.5241 x1.5  x0.6 = 32.87    shown 33,69   +2.5%
+ *
+ * Stat quality was the obvious candidate and does not fit: the Marteau rolled
+ * 8.9% above its template weighted, four times the gap it has to explain, and
+ * the Gelano's only templated line is fixed at 1 so it cannot roll high at all.
+ * Rather than print a number that is wrong by an unknown amount for gear, the
+ * panel says so. Whatever the missing factor is, it is not in the item data.
+ */
+export type RecycleYield =
+  /** Gear. Known to be modelled wrong, so no figure is offered. */
+  { kind: "equipment" } | RecycleAmount;
+
+export interface RecycleAmount {
+  kind: "amount";
   /** Nuggets per unit before bonuses and the split, as the game data holds it. */
   base: number;
   /** What one unit pays out at `CHARACTER_SHARE` with no bonus active. */
@@ -69,7 +93,8 @@ export interface RecycleYield {
 }
 
 /**
- * One item's recycling yield, or null when nothing is known about it.
+ * One item's recycling yield, `{ kind: "equipment" }` for gear the model does
+ * not cover, or null when nothing is known about it.
  *
  * Reads the stored constant first and falls back to DofusDB for an item the
  * importer has never reached — `fetchItems` writes what it learns, so the
@@ -90,11 +115,17 @@ export async function recycleYield(itemId: number): Promise<RecycleYield | null>
   const rows = await query<{
     recycle_nuggets: string | number | null;
     craftable: boolean;
+    equipment: boolean;
   }>(
     `SELECT (SELECT recycle_nuggets FROM items WHERE item_id = $1) AS recycle_nuggets,
-            EXISTS (SELECT 1 FROM recipes WHERE item_id = $1) AS craftable`,
-    [itemId],
+            EXISTS (SELECT 1 FROM recipes WHERE item_id = $1) AS craftable,
+            -- NOT NULL matters: an item nothing has named yet is unknown, not
+            -- equipment, and must fall through to the DofusDB lookup below.
+            NOT COALESCE((SELECT super_type_id = ANY($2::smallint[])
+                            FROM items WHERE item_id = $1), true) AS equipment`,
+    [itemId, NOT_STUFF_SUPER_TYPES],
   );
+  if (rows[0]?.equipment) return { kind: "equipment" };
 
   // `pg` hands back DOUBLE PRECISION as a number, but a string on some driver
   // versions; Number() covers both. The null check is not redundant with it —
@@ -113,6 +144,7 @@ export async function recycleYield(itemId: number): Promise<RecycleYield | null>
   }
 
   return {
+    kind: "amount",
     base,
     perUnit: base * CHARACTER_SHARE,
     perUnitCrafted: rows[0]?.craftable

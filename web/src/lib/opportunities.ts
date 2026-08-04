@@ -12,17 +12,7 @@ import { craftJobs, jobRecipes, rememberRecipes, type JobOption } from "@/lib/ba
 import { fetchItems, latestLadders } from "@/lib/breaker";
 import { margin, unitPrice } from "@/lib/craft";
 import { query } from "@/lib/db";
-
-/**
- * DofusDB `item.type.superTypeId` values that are NOT equipment: Consommable
- * (6), Ressource (9), Nourriture (16), Consommables de combat (70). A
- * whitelist rather than a deny-list of every weapon/armor slot, so a new
- * equipment category the game adds later costs nothing here — only a new
- * edible/usable category would need adding.
- *
- * Verified against https://api.dofusdb.fr/item-super-types.
- */
-const NOT_STUFF_SUPER_TYPES = [6, 9, 16, 70];
+import { NOT_STUFF_SUPER_TYPES } from "@/lib/kind";
 
 /**
  * Runes have no super-type of their own — they fall under Ressource (9) — so

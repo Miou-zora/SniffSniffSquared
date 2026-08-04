@@ -90,6 +90,15 @@ the second. `CHARACTER_SHARE` is the one figure measured rather than read out of
 the client: Rune Invo's base of 4.5 pays 2.70, which is 60%. If payouts stop
 matching, change that constant and the whole panel follows.
 
+**Equipment gets no figure at all**, gated on `NOT_STUFF_SUPER_TYPES` in
+`lib/kind.ts` — the same whitelist `/opportunities` filters on, which now lives
+there because two features draw the line for different reasons. The
+decomposition lands within display rounding on every consumable and resource
+measured and misses on both pieces of gear, by 13.6% and 2.5%: the same
+direction but not the same factor, so it is not one missing multiplier, and stat
+quality was tested and does not fit. A number wrong by an unknown amount is
+worse than none, so the panel says so instead.
+
 **Opening a craftable item registers its recipe.** `craftEstimate` falls back to
 DofusDB when `recipes` has no row, and now writes what it learns — with the
 `job_id`, which `/opportunities` requires since it lists what a job makes. Before

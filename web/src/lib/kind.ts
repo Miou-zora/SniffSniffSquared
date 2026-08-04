@@ -16,3 +16,16 @@ export function isBreakableKind(type: string | null): boolean {
   if (type === null) return true;
   return !type.startsWith("Rune") && type !== "Fers de Percepteur";
 }
+
+/**
+ * DofusDB `item.type.superTypeId` values that are NOT equipment: Consommable
+ * (6), Ressource (9), Nourriture (16), Consommables de combat (70). A whitelist
+ * rather than a deny-list of every weapon and armour slot, so an equipment
+ * category the game adds later costs nothing here — only a new edible or usable
+ * category would need adding.
+ *
+ * Verified against https://api.dofusdb.fr/item-super-types. Lives here rather
+ * than in the one page that first needed it, because `recycle.ts` draws the
+ * same line for a different reason and two copies would drift.
+ */
+export const NOT_STUFF_SUPER_TYPES = [6, 9, 16, 70];

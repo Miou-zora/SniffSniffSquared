@@ -25,6 +25,18 @@ export function RecycleYieldPanel({ yield: y }: { yield: RecycleYield | null }) 
     );
   }
 
+  if (y.kind === "equipment") {
+    return (
+      <p className="text-body tracking-body text-sage-40 max-w-[74ch]">
+        <span className="text-phosphor-white">Not modelled for equipment.</span> The
+        decomposition matches every consumable and resource measured, and misses on gear —
+        a Gelano by 13.6% and a Marteau Ridhe by 2.5%, in the same direction but not by
+        the same factor, and not by stat quality either. A number that is wrong by an
+        unknown amount is worse here than no number.
+      </p>
+    );
+  }
+
   if (y.base === 0) {
     return (
       <p className="text-body tracking-body text-sage-40 max-w-[74ch]">
