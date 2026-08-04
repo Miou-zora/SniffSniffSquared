@@ -347,7 +347,7 @@ async function recipesFor(
       id,
       recipe === null || recipe === undefined
         ? null
-        : recipe.map((l) => ({ itemId: l.itemId, quantity: l.quantity })),
+        : recipe.lines.map((l) => ({ itemId: l.itemId, quantity: l.quantity })),
     );
   });
   return out;
