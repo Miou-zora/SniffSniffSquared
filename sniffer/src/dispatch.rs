@@ -38,7 +38,10 @@ impl Dispatcher {
     /// Register a callback for a wire message key. Prefer resolving that key
     /// from a semantic name via `messages::keymap()`, since keys rotate per build.
     pub fn on(&mut self, key: &str, handler: impl FnMut(&Event) + 'static) {
-        self.handlers.entry(key.to_string()).or_default().push(Box::new(handler));
+        self.handlers
+            .entry(key.to_string())
+            .or_default()
+            .push(Box::new(handler));
     }
 
     /// Register a callback that fires for *every* message. Used to archive raw

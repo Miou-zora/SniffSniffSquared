@@ -17,7 +17,11 @@ pub struct FlowKey {
 
 impl std::fmt::Display for FlowKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{} -> {}:{}", self.src, self.sport, self.dst, self.dport)
+        write!(
+            f,
+            "{}:{} -> {}:{}",
+            self.src, self.sport, self.dst, self.dport
+        )
     }
 }
 
@@ -30,7 +34,12 @@ struct Stream {
 
 impl Stream {
     fn new() -> Self {
-        Stream { framer: Framer::new(), next_seq: None, pending: HashMap::new(), announced: false }
+        Stream {
+            framer: Framer::new(),
+            next_seq: None,
+            pending: HashMap::new(),
+            announced: false,
+        }
     }
 
     /// Return the locked layout string exactly once (first time after locking).
@@ -89,11 +98,16 @@ pub struct Reassembler {
 
 impl Reassembler {
     pub fn new() -> Self {
-        Reassembler { streams: HashMap::new() }
+        Reassembler {
+            streams: HashMap::new(),
+        }
     }
 
     pub fn push(&mut self, key: FlowKey, seq: u32, payload: &[u8]) -> Vec<Deframed> {
-        self.streams.entry(key).or_insert_with(Stream::new).accept(seq, payload)
+        self.streams
+            .entry(key)
+            .or_insert_with(Stream::new)
+            .accept(seq, payload)
     }
 
     /// First-time-only framing announcement for a flow.

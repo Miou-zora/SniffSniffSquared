@@ -26,7 +26,13 @@ pub struct Registry {
 
 /// Last dotted segment, generic backticks stripped (`kdh.kdg.kdf` -> `kdf`).
 pub fn leaf(token: &str) -> &str {
-    token.split('`').next().unwrap_or(token).rsplit('.').next().unwrap_or(token)
+    token
+        .split('`')
+        .next()
+        .unwrap_or(token)
+        .rsplit('.')
+        .next()
+        .unwrap_or(token)
 }
 
 impl Registry {
@@ -56,9 +62,17 @@ impl Registry {
             let idx = msgs.len();
             by_path.insert(path_key.clone(), idx);
             by_leaf.entry(leaf(path_key).to_string()).or_insert(idx);
-            msgs.push(Msg { obf: path_key.clone(), real, fields });
+            msgs.push(Msg {
+                obf: path_key.clone(),
+                real,
+                fields,
+            });
         }
-        Some(Registry { msgs, by_path, by_leaf })
+        Some(Registry {
+            msgs,
+            by_path,
+            by_leaf,
+        })
     }
 
     pub fn len(&self) -> usize {
