@@ -8,6 +8,11 @@
 //!   sudo ./SniffSniffSquared "tcp port 5555" # custom BPF filter
 //!   DOFUS_DEV=en0 sudo ./SniffSniffSquared
 //!   ./SniffSniffSquared --list               # list devices
+//!
+//! Runs on macOS, Linux and Windows — it is libpcap everywhere, Npcap
+//! providing it on Windows. `--dev` takes an exact interface name (`en0`,
+//! `eth0`) or, failing that, a fragment of the adapter description, because a
+//! Windows name is `\Device\NPF_{GUID}`. See `match_device`.
 
 mod dispatch;
 mod dump;
@@ -661,18 +666,123 @@ fn insert_price(
 fn pick_device(dev_arg: Option<String>) -> Device {
     // precedence: --dev flag, then DOFUS_DEV env, then default
     if let Some(name) = dev_arg.or_else(|| std::env::var("DOFUS_DEV").ok()) {
-        return Device::list()
-            .unwrap_or_default()
-            .into_iter()
-            .find(|d| d.name == name)
-            .unwrap_or_else(|| panic!("device {name} not found (try --list)"));
+        let devices = Device::list().unwrap_or_default();
+        // a mistyped interface is user error, not a bug — report it plainly
+        // instead of a panic backtrace, which buries the candidate list
+        let device = match_device(devices, &name).unwrap_or_else(|e| {
+            eprintln!("[!] {e}");
+            std::process::exit(1);
+        });
+        if let Some(w) = disconnected_warning(&device) {
+            eprintln!("[!] {w}");
+        }
+        return device;
     }
     Device::lookup().expect("device lookup").expect("no default device")
 }
 
+/// Warn when the chosen adapter cannot plausibly carry the game's traffic.
+///
+/// An interface holding only a link-local address (169.254/16, fe80::/10) never
+/// completed DHCP — an unplugged NIC, typically. It opens and captures happily
+/// and returns nothing at all, which is indistinguishable from a game that is
+/// closed, the wrong BPF filter, or a rotated protocol. This cost a session:
+/// a machine with both an idle Realtek port and a live Wi-Fi card, capturing on
+/// the Realtek. Loopback keeps 127.0.0.1/::1 and is left alone, since
+/// `tools/replay.py` targets it deliberately.
+///
+/// An interface holding *no* address is a different situation and is left alone
+/// too: bridges, taps and mirror ports carry traffic without owning an IP, and
+/// macOS lists a dozen of them (`bridge0`, `gif0`, `en1`..`en6`). Only a
+/// link-local address is evidence that DHCP was attempted and failed. Costs
+/// nothing on Windows, which self-assigns 169.254/16 rather than leaving an
+/// enabled adapter address-less.
+fn disconnected_warning(device: &Device) -> Option<String> {
+    if device.addresses.is_empty() {
+        return None;
+    }
+    let routable = device.addresses.iter().any(|a| match a.addr {
+        IpAddr::V4(v4) => !v4.is_link_local() && !v4.is_loopback(),
+        IpAddr::V6(v6) => !is_v6_link_local(&v6) && !v6.is_loopback(),
+    });
+    if routable || device.addresses.iter().any(|a| a.addr.is_loopback()) {
+        return None;
+    }
+    Some(format!(
+        "{} has no routable address — it is probably not connected, and will \
+         capture nothing. Check --list for the adapter holding your LAN IP.",
+        device.name
+    ))
+}
+
+/// `Ipv6Addr::is_unicast_link_local` is still unstable, so test fe80::/10 here.
+fn is_v6_link_local(addr: &std::net::Ipv6Addr) -> bool {
+    (addr.segments()[0] & 0xffc0) == 0xfe80
+}
+
+/// Resolve a user-supplied device string against the live device list.
+///
+/// Exact name first, so `en0`/`eth0` keep resolving to exactly themselves and
+/// can never be shadowed by a substring hit elsewhere in the list. Only if that
+/// misses do we try a case-insensitive substring of the name or description —
+/// which is what makes this usable on Windows, where the real name is
+/// `\Device\NPF_{A3307B35-BC43-...}` and nobody is typing a GUID by hand:
+/// `--dev Wi-Fi` or `--dev Realtek` finds it via the adapter description.
+///
+/// A bound address matches too, so `--dev 192.168.1.10` picks the adapter
+/// holding that IP. Descriptions are marketing names that say nothing about
+/// which card is actually on the network; the address is the part the user can
+/// check against `ipconfig`.
+///
+/// An ambiguous substring is an error rather than a silent pick. Windows lists
+/// several near-identical virtual adapters, and quietly capturing on the wrong
+/// one looks exactly like a game that sends no traffic.
+fn match_device(devices: Vec<Device>, name: &str) -> Result<Device, String> {
+    if let Some(d) = devices.iter().find(|d| d.name == name) {
+        return Ok(d.clone());
+    }
+
+    let needle = name.to_lowercase();
+    let hits: Vec<&Device> = devices
+        .iter()
+        .filter(|d| {
+            d.name.to_lowercase().contains(&needle)
+                || d.desc
+                    .as_deref()
+                    .is_some_and(|s| s.to_lowercase().contains(&needle))
+                || d.addresses
+                    .iter()
+                    .any(|a| a.addr.to_string().to_lowercase() == needle)
+        })
+        .collect();
+
+    match hits.as_slice() {
+        [] => Err(format!("device {name} not found (try --list)")),
+        [d] => Ok((*d).clone()),
+        many => {
+            let list = many
+                .iter()
+                .map(|d| format!("\n    {}\t{}", d.name, d.desc.clone().unwrap_or_default()))
+                .collect::<String>();
+            Err(format!(
+                "device {name} is ambiguous, {} matches:{list}\n  narrow it, or pass the exact name",
+                many.len()
+            ))
+        }
+    }
+}
+
 fn list_devices() {
     for d in Device::list().unwrap_or_default() {
-        println!("{}\t{}", d.name, d.desc.unwrap_or_default());
+        // addresses disambiguate the Windows list, where several adapters share
+        // a description and only the bound IP says which one is the live link
+        let addrs = d
+            .addresses
+            .iter()
+            .map(|a| a.addr.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        println!("{}\t{}\t{}", d.name, d.desc.unwrap_or_default(), addrs);
     }
 }
 
@@ -792,5 +902,172 @@ fn handle_tcp(re: &mut Reassembler, dispatch: &mut Dispatcher, src: IpAddr, dst:
         };
         println!("\n[{key}] {hdr}");
         print!("{}", dump::dump(&d.body, reg, None, 1));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pcap::{Address, DeviceFlags};
+
+    fn addr(ip: &str) -> Address {
+        Address {
+            addr: ip.parse().expect("test address"),
+            netmask: None,
+            broadcast_addr: None,
+            dst_addr: None,
+        }
+    }
+
+    /// Device names, descriptions and addresses as the three platforms really
+    /// report them: macOS/Linux short names, Windows `\Device\NPF_{GUID}` plus
+    /// the adapter description that is the only human-readable handle it
+    /// offers. Transcribed from a real Windows 11 `--list`, where the Realtek
+    /// port sat unplugged on a link-local address while Wi-Fi carried the game.
+    fn devices() -> Vec<Device> {
+        [
+            ("en0", "Wi-Fi", vec!["192.168.1.10"]),
+            ("eth0", "", vec!["10.0.0.5"]),
+            (r"\Device\NPF_{A3307B35-BC43-4EB9-AEE9-945220A94001}", "Intel(R) Wi-Fi 6E AX211 160MHz", vec!["192.168.1.10", "fe80::ff58:9607:2401:f390"]),
+            (r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}", "Realtek Gaming 2.5GbE Family Controller", vec!["169.254.46.67", "fe80::9286:4838:bf0d:64ce"]),
+            (r"\Device\NPF_{DC279F37-0CC3-41A5-A89B-F41E75DF7D7F}", "Microsoft Wi-Fi Direct Virtual Adapter", vec!["169.254.199.204"]),
+            (r"\Device\NPF_Loopback", "Adapter for loopback traffic capture", vec!["127.0.0.1", "::1"]),
+        ]
+        .into_iter()
+        .map(|(name, desc, ips)| Device {
+            name: name.to_string(),
+            desc: (!desc.is_empty()).then(|| desc.to_string()),
+            addresses: ips.into_iter().map(addr).collect(),
+            flags: DeviceFlags::empty(),
+        })
+        .collect()
+    }
+
+    fn by_name(name: &str) -> Device {
+        devices().into_iter().find(|d| d.name == name).expect("fixture")
+    }
+
+    /// The unix path must not regress: an exact name resolves to itself even
+    /// though "en0" is also a substring of nothing else and "eth0" has no desc.
+    #[test]
+    fn exact_name_wins() {
+        assert_eq!(match_device(devices(), "en0").unwrap().name, "en0");
+        assert_eq!(match_device(devices(), "eth0").unwrap().name, "eth0");
+    }
+
+    /// Exact match takes precedence over a substring hit elsewhere. Here "en0"
+    /// is exact for the macOS device; nothing may outrank that.
+    #[test]
+    fn exact_beats_substring() {
+        let mut devs = devices();
+        devs.push(Device {
+            name: "bridge-en0-shadow".to_string(),
+            desc: Some("en0 mirror".to_string()),
+            addresses: vec![],
+            flags: DeviceFlags::empty(),
+        });
+        assert_eq!(match_device(devs, "en0").unwrap().name, "en0");
+    }
+
+    /// The Windows win: name the adapter, not the GUID.
+    #[test]
+    fn matches_windows_description() {
+        let d = match_device(devices(), "Realtek").unwrap();
+        assert_eq!(d.name, r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}");
+    }
+
+    #[test]
+    fn description_match_is_case_insensitive() {
+        let d = match_device(devices(), "realtek gaming").unwrap();
+        assert_eq!(d.name, r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}");
+    }
+
+    /// A GUID fragment is a name substring, so pasting part of one works.
+    #[test]
+    fn matches_name_substring() {
+        let d = match_device(devices(), "31AC96FC").unwrap();
+        assert_eq!(d.name, r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}");
+    }
+
+    /// "Wi-Fi" hits the Intel adapter and the Microsoft virtual one. Capturing
+    /// on the wrong one yields zero packets and looks like a dead game, so this
+    /// must report rather than guess.
+    #[test]
+    fn ambiguous_substring_errors_and_lists_candidates() {
+        let err = match_device(devices(), "Wi-Fi").unwrap_err();
+        assert!(err.contains("ambiguous"), "{err}");
+        assert!(err.contains("Intel(R) Wi-Fi 6E AX211 160MHz"), "{err}");
+        assert!(err.contains("Microsoft Wi-Fi Direct Virtual Adapter"), "{err}");
+    }
+
+    #[test]
+    fn unknown_device_errors() {
+        let err = match_device(devices(), "wlan9").unwrap_err();
+        assert!(err.contains("not found"), "{err}");
+        assert!(err.contains("--list"), "{err}");
+    }
+
+    /// Addressing the adapter by the IP `ipconfig` shows. "192.168.1.10" is on
+    /// both en0 and the Intel card, but those are the same machine's two
+    /// platform views of the fixture, so restrict to the Windows subset.
+    #[test]
+    fn matches_bound_address() {
+        let windows: Vec<Device> = devices()
+            .into_iter()
+            .filter(|d| d.name.starts_with(r"\Device"))
+            .collect();
+        let d = match_device(windows, "192.168.1.10").unwrap();
+        assert_eq!(d.name, r"\Device\NPF_{A3307B35-BC43-4EB9-AEE9-945220A94001}");
+    }
+
+    /// An address must match whole. A bare "192.168.1.1" is a different host
+    /// than "192.168.1.10" and must not be treated as a prefix of it.
+    #[test]
+    fn address_match_is_not_a_prefix() {
+        let windows: Vec<Device> = devices()
+            .into_iter()
+            .filter(|d| d.name.starts_with(r"\Device"))
+            .collect();
+        assert!(match_device(windows, "192.168.1.1").is_err());
+    }
+
+    /// The trap that cost a session: an unplugged NIC captures cleanly and
+    /// returns nothing, which reads as a closed game or a rotated protocol.
+    #[test]
+    fn link_local_only_adapter_is_flagged() {
+        let w = disconnected_warning(&by_name(
+            r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}",
+        ));
+        assert!(w.is_some_and(|w| w.contains("not connected")));
+    }
+
+    #[test]
+    fn connected_adapter_is_not_flagged() {
+        assert!(disconnected_warning(&by_name(
+            r"\Device\NPF_{A3307B35-BC43-4EB9-AEE9-945220A94001}"
+        ))
+        .is_none());
+        assert!(disconnected_warning(&by_name("en0")).is_none());
+    }
+
+    /// `tools/replay.py` targets loopback on purpose — it must stay quiet.
+    #[test]
+    fn loopback_is_not_flagged() {
+        assert!(disconnected_warning(&by_name(r"\Device\NPF_Loopback")).is_none());
+    }
+
+    /// A bridge or mirror port carries traffic while holding no address of its
+    /// own, and macOS lists a dozen such devices. Only link-local-only is
+    /// evidence of a failed DHCP, so no addresses at all must not warn — a
+    /// warning on a correct choice teaches the user to ignore the real one.
+    #[test]
+    fn address_less_adapter_is_not_flagged() {
+        let bridge = Device {
+            name: "bridge0".to_string(),
+            desc: None,
+            addresses: vec![],
+            flags: DeviceFlags::empty(),
+        };
+        assert!(disconnected_warning(&bridge).is_none());
     }
 }

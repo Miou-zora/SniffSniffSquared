@@ -225,8 +225,16 @@ The Rust app lives in `sniffer/`. **Run it from there** — it resolves
 ```sh
 cd sniffer
 cargo build
-cargo test          # 19 tests, all should pass
+cargo test          # 52 tests, all should pass
 ```
+
+> **Windows.** Install [Npcap](https://npcap.com/#download) first — it is what
+> provides libpcap there. Tick **WinPcap API-compatible Mode**, which puts
+> `wpcap.dll` in `System32` where the default DLL search order finds it;
+> otherwise it lands only in `System32\Npcap\` and is not found.
+> `Test-Path C:\Windows\System32\wpcap.dll` is the check. Nothing else
+> differs: same crate, same code, no `cfg` gates. Use
+> `.\target\debug\SniffSniffSquared.exe` in the commands below.
 
 > **Trap.** `cargo test` does not refresh `target/debug/SniffSniffSquared`.
 > Always `cargo build` before capturing or you will be running a stale binary
@@ -255,6 +263,35 @@ Start the game, then, **from `sniffer/`**:
 
 ./target/debug/SniffSniffSquared --list      # find your interface
 ```
+
+`--list` prints name, description and bound addresses. `--dev` matches an exact
+interface name first; if none matches it falls back to a bound IP address, or a
+case-insensitive fragment of the name or description — which is how you address
+a Windows adapter without typing `\Device\NPF_{31AC96FC-C2C5-...}`:
+
+```powershell
+.\target\debug\SniffSniffSquared.exe --dev 192.168.1.10 --all "tcp port 5555"
+```
+
+Prefer the address. Which adapter carries the game is a fact about your network,
+not about the card's name, and the failure is silent: an unplugged NIC holds a
+`169.254.x.x` link-local address, opens and captures without complaint, and
+yields nothing — indistinguishable from a closed game or a rotated protocol.
+`disconnected_warning` flags exactly that case. To find the right address, ask
+the connection itself rather than guessing:
+
+```powershell
+Get-NetTCPConnection -OwningProcess (Get-Process Dofus).Id |
+    Where-Object State -eq 'Established' |
+    Select-Object LocalAddress, RemoteAddress, RemotePort
+```
+
+The row with `RemotePort 5555` gives you both the `LocalAddress` to pass to
+`--dev` and confirmation that the game is connected at all.
+
+A fragment matching several adapters is refused with the candidates printed —
+Windows lists near-identical virtual adapters and capturing on the wrong one is
+indistinguishable from a game sending nothing.
 
 Sanity check: within seconds you should see, once per direction,
 
