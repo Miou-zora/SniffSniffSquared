@@ -60,7 +60,11 @@ init.sql            schema both apps depend on (packets, prices, offers,
 docs/               observations.md — annotated real captures
                     brisage-model.md + brisage-runes.json — the kamas maths,
                     transcribed from Book 3.xlsx (kept at the repo root)
-tools/              import_runes.py   seeds `runes` from brisage-runes.json
+backups/            pg_dump output from the `db-backup` service; gitignored
+tools/              backup_db.sh      one compressed dump + pruning; the
+                                      `db-backup` service runs it on a loop
+                    restore_db.sh     put one back, --list to see them
+                    import_runes.py   seeds `runes` from brisage-runes.json
                     import_items.py   backfills `item_stats` from `packets`,
                                       names ids into `items` via DofusDB, and
                                       fills `recipes` (+ names their ingredients,
@@ -112,7 +116,27 @@ spread. **Item 779 sits at 50%** and its captured stats fall outside the
 template range entirely, so that id is not what the wire says it is — treat any
 conclusion resting on it as unsound.
 
-Compose services: `db`, `pgadmin`, `web` start by default; `web-dev` needs
+**The database is backed up automatically.** `db-backup` dumps the whole
+database to `./backups` on the host every `BACKUP_INTERVAL` seconds (default
+3600), keeps `BACKUP_KEEP` of them (default 24) and takes one immediately on
+start. On by default and no profile, because the captured tables cannot be
+refetched — `item_stats` describes instances the crush destroyed — and this
+volume has already been deleted once with nothing to restore from. The host
+directory survives `docker compose down -v` and a volume deleted in Docker
+Desktop, which is the failure it is for.
+
+```sh
+docker compose exec db-backup /tools/backup_db.sh     # one now
+docker compose exec db-backup /tools/restore_db.sh --list
+docker compose exec db-backup /tools/restore_db.sh    # newest; asks first
+```
+
+`backup_db.sh` writes under a temporary name and only renames after
+`pg_restore -l` parses the archive, so a dump killed half-written is never left
+looking like a good one. Restore verified end to end into a scratch database:
+16 966 packets, both views, all counts matching.
+
+Compose services: `db`, `db-backup`, `pgadmin`, `web` start by default; `web-dev` needs
 `--profile dev` (hot reload on 3001, via `docker compose watch`); `sniffer`
 needs `--profile capture` and only captures on Linux. `watch` does not reliably
 start a profile-gated service on its own — `up -d` it first. The production
