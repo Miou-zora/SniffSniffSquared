@@ -28,6 +28,34 @@ explanation, the verified command sequence, and a "dead ends" list.
   probes are written up in `RUNBOOK.md` part 1; do not re-run them. DofusDB is
   the source for both, in bulk via `tools/import_items.py` and at read time in
   `web/` for ids the importer has not reached.
+- **Recycling yield is one of those, and the search for it on the wire is
+  finished.** `kcr` is a seven-byte placement — field 1 a signed delta, field 2
+  an instance uid, all bytes consumed — and carries no third value; it is also
+  client->server, so it could not report a figure the client just computed. A
+  121-message recycler session decoded field by field holds no float or scaled
+  integer matching an observed payout, and across the whole archive `4.5`,
+  `2.70` and `0.46` never appear as f32 or f64. The number lives in the client's
+  asset bundle. Do not go looking for it in packets again.
+- **But `recyclingNuggets` is not the yield, for a craftable item.** The field
+  is 0 for all 4511 of them, on DofusDB *and* in the bundle it faithfully
+  mirrors — the client decomposes those into resources and sums instead, which
+  is why `RecycleUi.GetItemNuggets` takes a `Dictionary<int, int> resources`
+  rather than an item. Storing the raw field writes 0 for exactly the items a
+  craft dashboard cares about, and 0 reads as "not worth recycling" rather than
+  as "not computed". `tools/extract_nuggets.py` does the decomposition off the
+  bundles and fills `items.recycle_nuggets`; DofusDB is only ever allowed to
+  write a *non-zero* value into it. Then `web/src/lib/recycle.ts` applies the
+  bonuses and the character share. Measured, all at a 60% share: Rune Invo
+  4.5 -> 2.70 no bonus, Multygely 0.5060 -> 0,46 at craft, Essence du Craqueleur
+  Légendaire 0.2097 -> 0,57 at craft x boss.
+- **The model holds for consumables and resources and fails on equipment**, so
+  `web/` shows no figure for gear. A Gelano reads 13.6% over the prediction and a
+  Marteau Ridhe 2.5% over — same direction, different factor, so it is not one
+  missing multiplier. Stat quality was checked and is not it: the Marteau rolled
+  8.9% above its template weighted, four times the gap to close, and the Gelano's
+  only templated line is fixed at 1 and cannot roll high at all. Whatever the
+  factor is, it is not in the item data. Deliberately dropped rather than
+  guessed — do not fit a third parameter to five points.
 - **Messages are keyed by the `Any` type URL** (`type.ankama.com/kbt`), not by
   `Frame.Payload.id`. The `id` map is not used anywhere in `sniffer/src/`. Do not
   chase it.
@@ -69,6 +97,10 @@ tools/              backup_db.sh      one compressed dump + pruning; the
                                       names ids into `items` via DofusDB, and
                                       fills `recipes` (+ names their ingredients,
                                       which the wire has usually never seen)
+                    extract_nuggets.py fills `items.recycle_nuggets` from the
+                                      client's own bundles, decomposing every
+                                      craftable into resources (needs UnityPy;
+                                      reads the install, never writes to it)
                     check_brisage.py  runs the brisage model over every
                                       captured crush, predicted vs actual
                     backfill_offers.py parses marketplace listings out of

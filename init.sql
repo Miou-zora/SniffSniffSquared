@@ -206,6 +206,31 @@ ALTER TABLE items ADD COLUMN IF NOT EXISTS icon_id BIGINT;
 -- this equipment" without an exhaustive, ever-growing name list.
 ALTER TABLE items ADD COLUMN IF NOT EXISTS super_type_id SMALLINT;
 
+-- Nuggets ("pépites") one unit of this item yields when recycled.
+--
+-- A property of the item *type*, like icon_id and super_type_id, and static: it
+-- never crosses the wire. The recycler message the client sends (`kcr`) carries
+-- a delta and an instance uid and nothing else, and the whole packet archive
+-- holds no float matching an observed yield -- the client works the figure out
+-- on screen from its own data files.
+--
+-- NOT the same as DofusDB's `recyclingNuggets`, which is 0 for all 4511
+-- craftable items. The client does not read that field for those: it decomposes
+-- the item into resources and sums them, which is why RecycleUi.GetItemNuggets
+-- takes a `Dictionary<int, int> resources` rather than an item. So this column
+-- is the item's own value when it has one, and its recipe expanded to leaf
+-- resources when it does not. tools/extract_nuggets.py computes it from the
+-- client bundles; DofusDB can only supply the first case, and a zero from it
+-- must never overwrite a decomposed value.
+--
+-- This is the *base*, before the zone (x1.5), craft (x1.5) and boss (x3)
+-- bonuses and before the character/alliance split. Three measurements, all at a
+-- 60% character share: Rune Invo 4.5 -> 2.70 with no bonus, Multygely 0.5060 ->
+-- 0,46 at the craft bonus, Essence du Craqueleur Légendaire 0.2097 -> 0,57 at
+-- craft x boss. Storing the base rather than a payout keeps the row true
+-- wherever you stand -- web/src/lib/recycle.ts applies the rest.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS recycle_nuggets DOUBLE PRECISION;
+
 -- The stat ranges an item *type* can roll, from DofusDB. Filled by
 -- tools/import_items.py alongside `items`.
 --

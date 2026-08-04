@@ -45,6 +45,7 @@ src/lib/broken.ts      the catalogue: what is breakable, and what was measured
 src/lib/catalogue.ts   the two joined, which is what /items renders
 src/lib/history.ts     one item's price over time, shown on its item page
 src/lib/kind.ts        is this the sort of item the crusher takes
+src/lib/recycle.ts     what recycling an item pays in nuggets
 src/lib/basket.ts      the craft basket: recipes pooled into one buy (server)
 src/lib/recipes.ts     writing recipes down; both bulk loads and one-at-a-time
 src/app/projection.tsx the table — client, for the metric switch and n+x
@@ -67,6 +68,62 @@ not then make sixty more requests to price them.
 **What you already own comes off the top.** Each pile row carries `have` from
 `inventory` and a `short` — the buy plan and the cost are for the shortfall, so
 a resource the bags already cover reads as settled and costs nothing.
+
+**The recycling yield is read data, not captured data.** It never crosses the
+wire — the recycler message the sniffer sees is a placement, and the payout is
+computed by the client — so `src/lib/recycle.ts` reads the base from
+`items.recycle_nuggets`, which `tools/extract_nuggets.py` fills from the client's
+own bundles.
+
+**DofusDB is a weaker source here than usual, and the fallback knows it.** Its
+`recyclingNuggets` is 0 for every craftable item, because the client decomposes
+those into resources rather than reading the field. So a zero from DofusDB is
+discarded instead of stored: it would overwrite a decomposed value with a number
+that reads as "not worth recycling". The `remember` upsert guards the same way,
+with `NULLIF(EXCLUDED.recycle_nuggets, 0)`.
+
+What is stored is the base for one unit. The zone/craft/boss multipliers and the
+character share are applied at render time, because none of them are properties
+of the item — the one muted line at the foot of the item page leads with the
+craft-bonus figure for anything with a recipe, since that is what a craftable was
+measured paying. `CHARACTER_SHARE` is the one figure measured rather than read out of
+the client: Rune Invo's base of 4.5 pays 2.70, which is 60%. If payouts stop
+matching, change that constant and the whole panel follows.
+
+**Equipment gets no figure at all**, gated on `NOT_STUFF_SUPER_TYPES` in
+`lib/kind.ts` — the same whitelist `/opportunities` filters on, which now lives
+there because two features draw the line for different reasons. The
+decomposition lands within display rounding on every consumable and resource
+measured and misses on both pieces of gear, by 13.6% and 2.5%: the same
+direction but not the same factor, so it is not one missing multiplier, and stat
+quality was tested and does not fit. The panel renders nothing rather than
+explaining itself — equipment, a zero yield and an unknown item all come out as
+null, because a caveat about a number that is not shown takes more room than the
+number would have. The reasoning lives in `lib/recycle.ts`.
+
+**`/opportunities` prices the other exit.** Its `recycle` column is the same unit
+valued as nuggets — the stored yield times the nugget's own per-unit rate
+(`Pépite`, item 14635, off the same batch ladder everything else here is priced
+from). Whichever of `sell price` and `recycle` pays more is rendered white and
+the other muted, so the comparison reads across the row without a column
+spelling out a verdict. Rows that cannot be compared are missing a captured
+_sell_ price, not a yield.
+
+**It is no longer only a craft list, because the best recycles are not crafts.**
+A table built from `recipes` can only ever show what a job makes, and the items
+worth recycling are usually dropped or gathered — the top rows are Œil de
+Boufmouth de guerre and Écorce d'Abraknyde Vénérable, neither of which any job
+makes. So a second query adds every non-equipment item with a yield and a
+captured price that no recipe produces, runes included, which the craft list
+rules out by name and which have the highest average yield of any group here.
+Those rows carry `craftable: false`, no job, and no cost or margin — there is no
+recipe to cost. Chips pick the question, same as `/items`: `everything`,
+`craftable`, `recycle wins`.
+
+**The craft bonus rides on having a recipe**, so it is applied per row rather
+than to the whole table. That is the rule all three measurements fit: Rune Invo
+has no recipe and paid at x1, Multygely and the Essence both have one and paid at
+x1.5 and x1.5 × 3.
 
 **Opening a craftable item registers its recipe.** `craftEstimate` falls back to
 DofusDB when `recipes` has no row, and now writes what it learns — with the
