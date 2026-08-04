@@ -47,18 +47,13 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
   if (view !== null && view.weighted.length > 0 && isBreakableKind(view.item.type)) {
     return (
       <ItemView view={view} verdict={await verdictFor(view)}>
-        <section className="mt-48">
-          <h2 className="text-heading-sm tracking-heading-sm">What recycling pays</h2>
-          <div className="mt-12">
-            <RecycleYieldPanel yield={recycle} />
-          </div>
-        </section>
         {history !== null && (
           <section className="mt-48">
             <h2 className="text-heading-sm tracking-heading-sm">What a copy costs</h2>
             <PriceHistory view={history} />
           </section>
         )}
+        <RecycleYieldPanel yield={recycle} />
       </ItemView>
     );
   }
@@ -94,16 +89,11 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
       </section>
 
       <section className="mt-32">
-        <h2 className="text-heading-sm tracking-heading-sm">What recycling pays</h2>
-        <div className="mt-12">
-          <RecycleYieldPanel yield={recycle} />
-        </div>
-      </section>
-
-      <section className="mt-32">
         <h2 className="text-heading-sm tracking-heading-sm">Price history</h2>
         <PriceHistory view={history} />
       </section>
+
+      <RecycleYieldPanel yield={recycle} />
     </main>
   );
 }

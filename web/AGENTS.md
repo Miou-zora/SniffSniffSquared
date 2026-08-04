@@ -84,9 +84,9 @@ with `NULLIF(EXCLUDED.recycle_nuggets, 0)`.
 
 What is stored is the base for one unit. The zone/craft/boss multipliers and the
 character share are applied at render time, because none of them are properties
-of the item — and the panel prints the plain payout _and_ the craft-bonus one
-side by side for anything with a recipe, since a craftable was measured paying
-the second. `CHARACTER_SHARE` is the one figure measured rather than read out of
+of the item — the one muted line at the foot of the item page leads with the
+craft-bonus figure for anything with a recipe, since that is what a craftable was
+measured paying. `CHARACTER_SHARE` is the one figure measured rather than read out of
 the client: Rune Invo's base of 4.5 pays 2.70, which is 60%. If payouts stop
 matching, change that constant and the whole panel follows.
 
@@ -96,8 +96,10 @@ there because two features draw the line for different reasons. The
 decomposition lands within display rounding on every consumable and resource
 measured and misses on both pieces of gear, by 13.6% and 2.5%: the same
 direction but not the same factor, so it is not one missing multiplier, and stat
-quality was tested and does not fit. A number wrong by an unknown amount is
-worse than none, so the panel says so instead.
+quality was tested and does not fit. The panel renders nothing rather than
+explaining itself — equipment, a zero yield and an unknown item all come out as
+null, because a caveat about a number that is not shown takes more room than the
+number would have. The reasoning lives in `lib/recycle.ts`.
 
 **Opening a craftable item registers its recipe.** `craftEstimate` falls back to
 DofusDB when `recipes` has no row, and now writes what it learns — with the
