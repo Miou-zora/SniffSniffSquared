@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS items (
 );
 ALTER TABLE items ADD COLUMN IF NOT EXISTS icon_id BIGINT;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS super_type_id SMALLINT;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS recycle_nuggets DOUBLE PRECISION;
 CREATE TABLE IF NOT EXISTS item_effects (
     item_id   BIGINT NOT NULL,
     position  INT    NOT NULL,
@@ -283,7 +284,8 @@ def effect_ranges(item):
 
 
 def fetch_items(ids):
-    """({item_id: (name, level, type_id, type_name, icon_id, super_type_id)}, {item_id: ranges})."""
+    """({item_id: (name, level, type_id, type_name, icon_id, super_type_id, nuggets)},
+       {item_id: ranges})."""
     import requests
 
     found, ranges = {}, {}
@@ -310,6 +312,10 @@ def fetch_items(ids):
                 # ...). Coarser than type_id/type_fr and what web/'s
                 # opportunities dashboard filters equipment out with.
                 t.get("superTypeId"),
+                # Base nuggets per unit recycled, before bonuses and the
+                # character share. Static client data that never crosses the
+                # wire -- see the column comment in init.sql.
+                it.get("recyclingNuggets"),
             )
             ranges[iid] = effect_ranges(it)
     return found, ranges
@@ -408,11 +414,13 @@ def enrich(refresh, dry_run):
         return
 
     values = ",\n  ".join(
-        "(%d,%s,%s,%s,%s,%s,%s)" % (k, lit(n), lit(lv), lit(ti), lit(tn), lit(ic), lit(sti))
-        for k, (n, lv, ti, tn, ic, sti) in sorted(found.items())
+        "(%d,%s,%s,%s,%s,%s,%s,%s)"
+        % (k, lit(n), lit(lv), lit(ti), lit(tn), lit(ic), lit(sti), lit(nug))
+        for k, (n, lv, ti, tn, ic, sti, nug) in sorted(found.items())
     )
     psql(
-        "INSERT INTO items (item_id, name_fr, level, type_id, type_fr, icon_id, super_type_id)"
+        "INSERT INTO items (item_id, name_fr, level, type_id, type_fr, icon_id,"
+        " super_type_id, recycle_nuggets)"
         "\nVALUES\n  "
         + values
         + "\nON CONFLICT (item_id) DO UPDATE SET\n"
@@ -422,6 +430,9 @@ def enrich(refresh, dry_run):
           "  type_fr = COALESCE(EXCLUDED.type_fr, items.type_fr),\n"
           "  icon_id = COALESCE(EXCLUDED.icon_id, items.icon_id),\n"
           "  super_type_id = COALESCE(EXCLUDED.super_type_id, items.super_type_id),\n"
+          # 0 is a real answer here -- "this item cannot be recycled" -- so it
+          # must overwrite a stored value. COALESCE only guards the absent field.
+          "  recycle_nuggets = COALESCE(EXCLUDED.recycle_nuggets, items.recycle_nuggets),\n"
           "  updated_at = now();\n"
     )
 

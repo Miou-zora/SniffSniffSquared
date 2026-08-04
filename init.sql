@@ -206,6 +206,22 @@ ALTER TABLE items ADD COLUMN IF NOT EXISTS icon_id BIGINT;
 -- this equipment" without an exhaustive, ever-growing name list.
 ALTER TABLE items ADD COLUMN IF NOT EXISTS super_type_id SMALLINT;
 
+-- Nuggets ("pépites") one unit of this item yields when recycled, from DofusDB.
+--
+-- A property of the item *type*, like icon_id and super_type_id, and static:
+-- it never crosses the wire. The recycler message the client sends (`kcr`)
+-- carries a delta and an instance uid and nothing else, and the whole packet
+-- archive holds no float matching an observed yield -- the client computes the
+-- figure on screen from this constant. Verified against the client's own asset
+-- bundle: DofusDB serves the identical double, bit for bit.
+--
+-- This is the *base*, before the zone (x1.5), craft (x1.5) and boss (x3)
+-- bonuses, and before the split between your character and its alliance. Rune
+-- Invo is 4.5 here and paid out 2.70 observed, which is the 60% character
+-- share. Storing the base rather than the payout keeps the row true whatever
+-- your alliance or where you stand -- web/src/lib/recycle.ts applies the rest.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS recycle_nuggets DOUBLE PRECISION;
+
 -- The stat ranges an item *type* can roll, from DofusDB. Filled by
 -- tools/import_items.py alongside `items`.
 --
