@@ -1,0 +1,114 @@
+{
+  "_comment": "Shapes AND field numbers of every message interpret.rs parses. Both rotate between client builds -- the 2026-08-04 update moved a number in every message here except crush_slot. Edit this file and restart; no rebuild. Loaded from the working directory, so run the sniffer from sniffer/. Definitions whose name starts with _ are notes.",
+  "_build": "2026-08-04, re-identified end to end against known in-game actions. testdata/schema-2026-07-10.json is the previous build, kept so its captured fixtures still run.",
+  "_kinds": "varint | packed (length-delimited run of varints) | f32 (4 little-endian bytes) | message (needs `of`). `repeated: true` keeps every copy; without it the last wins, as protobuf does.",
+  "_rederive": "Dump the message with --all and read the tags against something checkable: an item whose DofusDB template you have, or a price visible in the HDV. RUNBOOK part 2 step 5.",
+
+  "stat_line": {
+    "_note": "One rolled line. Value comes before effect id on the wire, which reads backwards.",
+    "fields": [
+      { "n": 4, "name": "value", "kind": "varint" },
+      { "n": 11, "name": "effect", "kind": "varint" }
+    ]
+  },
+
+  "item_entry": {
+    "_note": "One item instance. Quantity is absent for a single copy, which is how equipment always arrives; the adapter reads that as 1.",
+    "fields": [
+      { "n": 1, "name": "item_id", "kind": "varint" },
+      { "n": 2, "name": "stat", "kind": "message", "of": "stat_line", "repeated": true },
+      { "n": 3, "name": "quantity", "kind": "varint" },
+      { "n": 4, "name": "uid", "kind": "varint" }
+    ]
+  },
+
+  "slot": {
+    "_note": "The envelope every entry-carrying message wraps an item_entry in.",
+    "fields": [{ "n": 5, "name": "entry", "kind": "message", "of": "item_entry" }]
+  },
+
+  "item_detail": {
+    "_note": "The server describing one instance, usually answering a crush_slot_put.",
+    "fields": [{ "n": 1, "name": "slot", "kind": "message", "of": "slot", "repeated": true }]
+  },
+
+  "inventory": {
+    "_note": "The whole bag as a snapshot, not a delta. Identified by uid: the item just bought appears in this listing and in no other container listing.",
+    "fields": [{ "n": 3, "name": "slot", "kind": "message", "of": "slot", "repeated": true }]
+  },
+
+  "inventory_add": {
+    "_note": "One stack arriving. Same envelope as item_detail on this build, at a different number.",
+    "fields": [{ "n": 3, "name": "slot", "kind": "message", "of": "slot", "repeated": true }]
+  },
+
+  "quantity_change": {
+    "fields": [
+      { "n": 2, "name": "uid", "kind": "varint" },
+      { "n": 3, "name": "quantity", "kind": "varint" }
+    ]
+  },
+
+  "inventory_quantity": {
+    "_note": "A stack resized. The quantity is the NEW size, not a delta.",
+    "fields": [
+      { "n": 3, "name": "change", "kind": "message", "of": "quantity_change" }
+    ]
+  },
+
+  "inventory_remove": {
+    "_note": "One instance has left the bag: crushed, sold or dropped.",
+    "fields": [{ "n": 1, "name": "uid", "kind": "varint" }]
+  },
+
+  "crush_slot": {
+    "_note": "Item into the breaker. Delta is SIGNED: -1 is taking one back out, and both directions are answered by an identical item_detail, so the sign is the only thing telling them apart.",
+    "fields": [
+      { "n": 1, "name": "delta", "kind": "varint" },
+      { "n": 2, "name": "uid", "kind": "varint" }
+    ]
+  },
+
+  "rune_yield": {
+    "fields": [
+      { "n": 1, "name": "rune_id", "kind": "varint" },
+      { "n": 2, "name": "count", "kind": "varint" }
+    ]
+  },
+
+  "crush_body": {
+    "_note": "Field 5 is a second f32 equal to field 4 in every sample seen; purpose unknown, so it is not read.",
+    "fields": [
+      { "n": 1, "name": "uid", "kind": "varint" },
+      { "n": 3, "name": "rune", "kind": "message", "of": "rune_yield", "repeated": true },
+      { "n": 4, "name": "yield", "kind": "f32" }
+    ]
+  },
+
+  "crush_result": {
+    "_note": "The item TYPE is not here. It arrives as an item_detail under the same uid, which main.rs caches.",
+    "fields": [
+      { "n": 1, "name": "body", "kind": "message", "of": "crush_body" }
+    ]
+  },
+
+  "price_offer": {
+    "_note": "A resource quotes one offer whose ladder is a real x1/x10/x100/x1000. Equipment quotes one offer PER COPY on sale, each a single asking price in the x1 slot plus the stats that copy rolled.",
+    "fields": [
+      { "n": 1, "name": "listing_id", "kind": "varint" },
+      { "n": 4, "name": "stat", "kind": "message", "of": "stat_line", "repeated": true },
+      { "n": 5, "name": "item_id", "kind": "varint" },
+      { "n": 6, "name": "ladder", "kind": "packed" },
+      { "n": 8, "name": "category", "kind": "varint" }
+    ]
+  },
+
+  "price_list": {
+    "_note": "A ladder entry of 0 means that batch size is not on sale. Only some offers repeat the item id inline; the outer copy fills the rest.",
+    "fields": [
+      { "n": 1, "name": "category", "kind": "varint" },
+      { "n": 2, "name": "item_id", "kind": "varint" },
+      { "n": 3, "name": "offer", "kind": "message", "of": "price_offer", "repeated": true }
+    ]
+  }
+}

@@ -1,9 +1,5 @@
 {
-  "_comment": "Semantic message name -> obfuscated Any wire key. These keys rotate between client builds; when a message stops decoding, re-identify it with tools/identify.py or tools/findvalue.py and change the key here. No rebuild needed. Entries override src/messages.rs DEFAULTS; anything omitted falls back to them. Keys beginning with _ are ignored.",
-  "price_list": "kea",
-  "chat_message": "ksv",
-  "crush_result": "kfy",
-  "item_detail": "kev",
-  "crush_request": "ker",
-  "crush_slot_put": "kch"
+  "_comment": "Semantic message name -> obfuscated Any wire key. These keys rotate between client builds; when a message stops decoding, re-identify it with tools/identify.py or tools/findvalue.py and put the new key here. No rebuild needed. Entries override src/messages.rs DEFAULTS; anything omitted falls back to them. Keys beginning with _ are ignored.",
+  "_build": "Empty on purpose: src/messages.rs DEFAULTS already matches the wire as of 2026-08-04, and its keys are covered by tests over real captured bytes. Duplicating them here would only invite the two to drift. Add entries the day the wire moves and the defaults do not.",
+  "_see_also": "layout.json, for the field numbers inside those messages -- they rotate on the same schedule."
 }

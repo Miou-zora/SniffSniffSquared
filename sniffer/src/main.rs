@@ -23,23 +23,24 @@ mod interpret;
 mod messages;
 mod pb;
 mod registry;
+mod schema;
 
 use dispatch::Dispatcher;
 use flow::{FlowKey, Reassembler};
-use registry::Registry;
 use pcap::{Capture, Device, Linktype};
+use pnet::packet::Packet;
 use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::ipv6::Ipv6Packet;
 use pnet::packet::tcp::TcpPacket;
-use pnet::packet::Packet;
+use registry::Registry;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 static RAW: AtomicBool = AtomicBool::new(false);
 static SHOW_ALL: AtomicBool = AtomicBool::new(false);
@@ -74,6 +75,15 @@ fn main() {
         messages::OVERRIDE_PATH,
         km.summary()
     );
+    // Shapes rotate with the keys, so say which file they came from too — a
+    // schema silently not loading looks exactly like a message that stopped
+    // being sent.
+    let sch = schema::schema();
+    println!(
+        "[*] message schema: {} definitions from {}",
+        sch.len(),
+        sch.source()
+    );
 
     let _ = REG.set(Registry::load("proto/messages.json"));
     match REG.get().and_then(|o| o.as_ref()) {
@@ -82,7 +92,11 @@ fn main() {
     }
 
     let device = pick_device(dev_arg);
-    let mode = if SHOW_ALL.load(Ordering::Relaxed) { "all frames" } else { "known only (--all for everything)" };
+    let mode = if SHOW_ALL.load(Ordering::Relaxed) {
+        "all frames"
+    } else {
+        "known only (--all for everything)"
+    };
     println!("[*] capturing on {} (filter: {bpf}) [{mode}]", device.name);
 
     let mut cap = Capture::from_device(device)
@@ -232,8 +246,7 @@ CREATE TRIGGER trg_crushes_notify AFTER INSERT ON crushes
     FOR EACH STATEMENT EXECUTE FUNCTION notify_breaker()";
 
 const CRUSH_INSERT: &str = "INSERT INTO crushes (item_id, yield_percent) VALUES ($1,$2)";
-const PLACEMENT_INSERT: &str =
-    "INSERT INTO crush_placements (item_id, uid) VALUES ($1,$2)";
+const PLACEMENT_INSERT: &str = "INSERT INTO crush_placements (item_id, uid) VALUES ($1,$2)";
 
 /// Mirrors `item_stats` and `items` in init.sql, for databases created before
 /// they existed. `items` is created but never written here — the sniffer takes
@@ -373,14 +386,18 @@ fn build_dispatch() -> Dispatcher {
     let mut detail_inventory_db = db_client_with(&with_notify(INVENTORY_DDL));
     if let Some(inventory_key) = messages::keymap().key("inventory") {
         d.on(inventory_key, move |e| {
-            let Some(items) = interpret::inventory(e.body) else { return };
+            let Some(items) = interpret::inventory(e.body) else {
+                return;
+            };
             // An empty listing is a real answer, but it is also what a parse
             // that quietly went wrong looks like, and acting on it would wipe
             // the table. A bag with nothing in it is not worth that risk.
             if items.is_empty() {
                 return;
             }
-            let Some(client) = inventory_db.as_mut() else { return };
+            let Some(client) = inventory_db.as_mut() else {
+                return;
+            };
             // One transaction: a half-applied snapshot would read as an
             // inventory that holds neither the old items nor all the new ones.
             let result = client.build_transaction().start().and_then(|mut tx| {
@@ -388,7 +405,11 @@ fn build_dispatch() -> Dispatcher {
                 for item in &items {
                     tx.execute(
                         INVENTORY_INSERT,
-                        &[&(item.uid as i64), &(item.item_id as i64), &(item.quantity as i64)],
+                        &[
+                            &(item.uid as i64),
+                            &(item.item_id as i64),
+                            &(item.quantity as i64),
+                        ],
                     )?;
                 }
                 tx.commit()
@@ -401,10 +422,15 @@ fn build_dispatch() -> Dispatcher {
     if let Some(add_key) = messages::keymap().key("inventory_add") {
         let mut add_db = db_client_with(&with_notify(INVENTORY_DDL));
         d.on(add_key, move |e| {
-            let Some(item) = interpret::inventory_add(e.body) else { return };
+            let Some(item) = interpret::inventory_add(e.body) else {
+                return;
+            };
             if let Some(client) = add_db.as_mut() {
-                let row: [&(dyn postgres::types::ToSql + Sync); 3] =
-                    [&(item.uid as i64), &(item.item_id as i64), &(item.quantity as i64)];
+                let row: [&(dyn postgres::types::ToSql + Sync); 3] = [
+                    &(item.uid as i64),
+                    &(item.item_id as i64),
+                    &(item.quantity as i64),
+                ];
                 if let Err(err) = client.execute(INVENTORY_INSERT, &row) {
                     eprintln!("[db] inventory add failed: {err}");
                 }
@@ -414,7 +440,9 @@ fn build_dispatch() -> Dispatcher {
     if let Some(qty_key) = messages::keymap().key("inventory_quantity") {
         let mut qty_db = db_client_with(&with_notify(INVENTORY_DDL));
         d.on(qty_key, move |e| {
-            let Some((uid, quantity)) = interpret::inventory_quantity(e.body) else { return };
+            let Some((uid, quantity)) = interpret::inventory_quantity(e.body) else {
+                return;
+            };
             if let Some(client) = qty_db.as_mut() {
                 // The new size, not a delta: a row that drifted out of step
                 // gets corrected here rather than compounding the drift. A
@@ -436,7 +464,9 @@ fn build_dispatch() -> Dispatcher {
     if let Some(gone_key) = messages::keymap().key("inventory_remove") {
         let mut gone_db = db_client_with(&with_notify(INVENTORY_DDL));
         d.on(gone_key, move |e| {
-            let Some(uid) = interpret::inventory_remove(e.body) else { return };
+            let Some(uid) = interpret::inventory_remove(e.body) else {
+                return;
+            };
             if let Some(client) = gone_db.as_mut() {
                 if let Err(err) =
                     client.execute("DELETE FROM inventory WHERE uid = $1", &[&(uid as i64)])
@@ -529,7 +559,10 @@ fn build_dispatch() -> Dispatcher {
     // Archive every message, interpreted or not. A second connection because
     // postgres::Client is not shareable, and this is the write we least want
     // to lose: it is what makes offline re-analysis possible without the game.
-    if std::env::var("ARCHIVE_PACKETS").map(|v| v != "0").unwrap_or(true) {
+    if std::env::var("ARCHIVE_PACKETS")
+        .map(|v| v != "0")
+        .unwrap_or(true)
+    {
         if let Some(mut client) = db_client_with(PACKETS_DDL) {
             println!("[db] archiving all messages -> table packets");
             let mut failed = 0usize;
@@ -578,7 +611,9 @@ fn insert_packet(
             .iter()
             .map(|p| {
                 serde_json::Value::Array(
-                    p.iter().map(|&v| serde_json::Value::from(v as i64)).collect(),
+                    p.iter()
+                        .map(|&v| serde_json::Value::from(v as i64))
+                        .collect(),
                 )
             })
             .collect(),
@@ -614,10 +649,7 @@ fn insert_crush(
 /// sending a stack to `offers` invents a listing for something with no
 /// individual identity, and quietly stops its ladder reaching the table every
 /// rune price and craft cost is read from.
-fn insert_price(
-    client: &mut postgres::Client,
-    e: &dispatch::Event,
-) -> Result<(), postgres::Error> {
+fn insert_price(client: &mut postgres::Client, e: &dispatch::Event) -> Result<(), postgres::Error> {
     let p = match interpret::price_list(e.body) {
         Some(p) => p,
         None => return Ok(()), // not a price message after all
@@ -678,7 +710,9 @@ fn pick_device(dev_arg: Option<String>) -> Device {
         }
         return device;
     }
-    Device::lookup().expect("device lookup").expect("no default device")
+    Device::lookup()
+        .expect("device lookup")
+        .expect("no default device")
 }
 
 /// Warn when the chosen adapter cannot plausibly carry the game's traffic.
@@ -815,14 +849,26 @@ fn handle_ip(re: &mut Reassembler, dispatch: &mut Dispatcher, ip: &[u8]) {
         4 => {
             if let Some(p) = Ipv4Packet::new(ip) {
                 if p.get_next_level_protocol() == IpNextHeaderProtocols::Tcp {
-                    handle_tcp(re, dispatch, IpAddr::V4(p.get_source()), IpAddr::V4(p.get_destination()), p.payload());
+                    handle_tcp(
+                        re,
+                        dispatch,
+                        IpAddr::V4(p.get_source()),
+                        IpAddr::V4(p.get_destination()),
+                        p.payload(),
+                    );
                 }
             }
         }
         6 => {
             if let Some(p) = Ipv6Packet::new(ip) {
                 if p.get_next_header() == IpNextHeaderProtocols::Tcp {
-                    handle_tcp(re, dispatch, IpAddr::V6(p.get_source()), IpAddr::V6(p.get_destination()), p.payload());
+                    handle_tcp(
+                        re,
+                        dispatch,
+                        IpAddr::V6(p.get_source()),
+                        IpAddr::V6(p.get_destination()),
+                        p.payload(),
+                    );
                 }
             }
         }
@@ -837,19 +883,36 @@ fn hexdump(b: &[u8]) -> String {
         let hex: String = chunk.iter().map(|x| format!("{x:02x} ")).collect();
         let ascii: String = chunk
             .iter()
-            .map(|&x| if (0x20..0x7f).contains(&x) { x as char } else { '.' })
+            .map(|&x| {
+                if (0x20..0x7f).contains(&x) {
+                    x as char
+                } else {
+                    '.'
+                }
+            })
             .collect();
         out.push_str(&format!("  {:04x}  {:<48}  {ascii}\n", i * 16, hex));
     }
     out
 }
 
-fn handle_tcp(re: &mut Reassembler, dispatch: &mut Dispatcher, src: IpAddr, dst: IpAddr, tcp_bytes: &[u8]) {
+fn handle_tcp(
+    re: &mut Reassembler,
+    dispatch: &mut Dispatcher,
+    src: IpAddr,
+    dst: IpAddr,
+    tcp_bytes: &[u8],
+) {
     let tcp = match TcpPacket::new(tcp_bytes) {
         Some(t) => t,
         None => return,
     };
-    let key = FlowKey { src, sport: tcp.get_source(), dst, dport: tcp.get_destination() };
+    let key = FlowKey {
+        src,
+        sport: tcp.get_source(),
+        dst,
+        dport: tcp.get_destination(),
+    };
     let seq = tcp.get_sequence();
     let payload = tcp.payload();
     if payload.is_empty() {
@@ -928,10 +991,26 @@ mod tests {
         [
             ("en0", "Wi-Fi", vec!["192.168.1.10"]),
             ("eth0", "", vec!["10.0.0.5"]),
-            (r"\Device\NPF_{A3307B35-BC43-4EB9-AEE9-945220A94001}", "Intel(R) Wi-Fi 6E AX211 160MHz", vec!["192.168.1.10", "fe80::ff58:9607:2401:f390"]),
-            (r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}", "Realtek Gaming 2.5GbE Family Controller", vec!["169.254.46.67", "fe80::9286:4838:bf0d:64ce"]),
-            (r"\Device\NPF_{DC279F37-0CC3-41A5-A89B-F41E75DF7D7F}", "Microsoft Wi-Fi Direct Virtual Adapter", vec!["169.254.199.204"]),
-            (r"\Device\NPF_Loopback", "Adapter for loopback traffic capture", vec!["127.0.0.1", "::1"]),
+            (
+                r"\Device\NPF_{A3307B35-BC43-4EB9-AEE9-945220A94001}",
+                "Intel(R) Wi-Fi 6E AX211 160MHz",
+                vec!["192.168.1.10", "fe80::ff58:9607:2401:f390"],
+            ),
+            (
+                r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}",
+                "Realtek Gaming 2.5GbE Family Controller",
+                vec!["169.254.46.67", "fe80::9286:4838:bf0d:64ce"],
+            ),
+            (
+                r"\Device\NPF_{DC279F37-0CC3-41A5-A89B-F41E75DF7D7F}",
+                "Microsoft Wi-Fi Direct Virtual Adapter",
+                vec!["169.254.199.204"],
+            ),
+            (
+                r"\Device\NPF_Loopback",
+                "Adapter for loopback traffic capture",
+                vec!["127.0.0.1", "::1"],
+            ),
         ]
         .into_iter()
         .map(|(name, desc, ips)| Device {
@@ -944,7 +1023,10 @@ mod tests {
     }
 
     fn by_name(name: &str) -> Device {
-        devices().into_iter().find(|d| d.name == name).expect("fixture")
+        devices()
+            .into_iter()
+            .find(|d| d.name == name)
+            .expect("fixture")
     }
 
     /// The unix path must not regress: an exact name resolves to itself even
@@ -973,20 +1055,29 @@ mod tests {
     #[test]
     fn matches_windows_description() {
         let d = match_device(devices(), "Realtek").unwrap();
-        assert_eq!(d.name, r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}");
+        assert_eq!(
+            d.name,
+            r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}"
+        );
     }
 
     #[test]
     fn description_match_is_case_insensitive() {
         let d = match_device(devices(), "realtek gaming").unwrap();
-        assert_eq!(d.name, r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}");
+        assert_eq!(
+            d.name,
+            r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}"
+        );
     }
 
     /// A GUID fragment is a name substring, so pasting part of one works.
     #[test]
     fn matches_name_substring() {
         let d = match_device(devices(), "31AC96FC").unwrap();
-        assert_eq!(d.name, r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}");
+        assert_eq!(
+            d.name,
+            r"\Device\NPF_{31AC96FC-C2C5-4413-956C-F0BA34878BC7}"
+        );
     }
 
     /// "Wi-Fi" hits the Intel adapter and the Microsoft virtual one. Capturing
@@ -997,7 +1088,10 @@ mod tests {
         let err = match_device(devices(), "Wi-Fi").unwrap_err();
         assert!(err.contains("ambiguous"), "{err}");
         assert!(err.contains("Intel(R) Wi-Fi 6E AX211 160MHz"), "{err}");
-        assert!(err.contains("Microsoft Wi-Fi Direct Virtual Adapter"), "{err}");
+        assert!(
+            err.contains("Microsoft Wi-Fi Direct Virtual Adapter"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1017,7 +1111,10 @@ mod tests {
             .filter(|d| d.name.starts_with(r"\Device"))
             .collect();
         let d = match_device(windows, "192.168.1.10").unwrap();
-        assert_eq!(d.name, r"\Device\NPF_{A3307B35-BC43-4EB9-AEE9-945220A94001}");
+        assert_eq!(
+            d.name,
+            r"\Device\NPF_{A3307B35-BC43-4EB9-AEE9-945220A94001}"
+        );
     }
 
     /// An address must match whole. A bare "192.168.1.1" is a different host
@@ -1043,10 +1140,12 @@ mod tests {
 
     #[test]
     fn connected_adapter_is_not_flagged() {
-        assert!(disconnected_warning(&by_name(
-            r"\Device\NPF_{A3307B35-BC43-4EB9-AEE9-945220A94001}"
-        ))
-        .is_none());
+        assert!(
+            disconnected_warning(&by_name(
+                r"\Device\NPF_{A3307B35-BC43-4EB9-AEE9-945220A94001}"
+            ))
+            .is_none()
+        );
         assert!(disconnected_warning(&by_name("en0")).is_none());
     }
 
