@@ -45,3 +45,7 @@ sniffer/reference/il2cpp-dump-20260710/script.json
 
 # Python bytecode (the ui-ux-pro-max skill writes it beside its scripts)
 __pycache__/
+
+# Database dumps written by the db-backup compose service (tools/backup_db.sh).
+# Real captured data, but reproducible from the volume — and large.
+backups/
