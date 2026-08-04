@@ -23,13 +23,41 @@ struct Layout {
 }
 
 const CANDIDATES: &[Layout] = &[
-    Layout { header: Header::Varint, includes_self: false, lead_skip: 0 },
-    Layout { header: Header::Varint, includes_self: false, lead_skip: 1 },
-    Layout { header: Header::U16Be, includes_self: false, lead_skip: 0 },
-    Layout { header: Header::U16Be, includes_self: false, lead_skip: 1 },
-    Layout { header: Header::U16Be, includes_self: true, lead_skip: 0 },
-    Layout { header: Header::U32Be, includes_self: false, lead_skip: 0 },
-    Layout { header: Header::U32Be, includes_self: false, lead_skip: 1 },
+    Layout {
+        header: Header::Varint,
+        includes_self: false,
+        lead_skip: 0,
+    },
+    Layout {
+        header: Header::Varint,
+        includes_self: false,
+        lead_skip: 1,
+    },
+    Layout {
+        header: Header::U16Be,
+        includes_self: false,
+        lead_skip: 0,
+    },
+    Layout {
+        header: Header::U16Be,
+        includes_self: false,
+        lead_skip: 1,
+    },
+    Layout {
+        header: Header::U16Be,
+        includes_self: true,
+        lead_skip: 0,
+    },
+    Layout {
+        header: Header::U32Be,
+        includes_self: false,
+        lead_skip: 0,
+    },
+    Layout {
+        header: Header::U32Be,
+        includes_self: false,
+        lead_skip: 1,
+    },
 ];
 
 /// One deframed frame: the raw body bytes plus a decoded Frame if it parsed.
@@ -45,11 +73,19 @@ pub struct Framer {
 
 impl Framer {
     pub fn new() -> Self {
-        Framer { buf: Vec::new(), layout: None }
+        Framer {
+            buf: Vec::new(),
+            layout: None,
+        }
     }
 
     pub fn locked(&self) -> Option<String> {
-        self.layout.map(|l| format!("{:?} includes_self={} lead_skip={}", l.header, l.includes_self, l.lead_skip))
+        self.layout.map(|l| {
+            format!(
+                "{:?} includes_self={} lead_skip={}",
+                l.header, l.includes_self, l.lead_skip
+            )
+        })
     }
 
     pub fn push(&mut self, data: &[u8]) -> Vec<Deframed> {
@@ -94,7 +130,10 @@ fn read_header(buf: &[u8], h: Header) -> Option<(usize, usize)> {
             if buf.len() < 4 {
                 return None;
             }
-            Some((4, u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize))
+            Some((
+                4,
+                u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize,
+            ))
         }
     }
 }
@@ -106,7 +145,11 @@ fn read_one(buf: &[u8], layout: Layout) -> Option<(usize, Vec<u8>)> {
     if raw_len == 0 || raw_len > 8 * 1024 * 1024 {
         return None;
     }
-    let payload_len = if layout.includes_self { raw_len.checked_sub(hlen)? } else { raw_len };
+    let payload_len = if layout.includes_self {
+        raw_len.checked_sub(hlen)?
+    } else {
+        raw_len
+    };
     let total = hlen + payload_len;
     if buf.len() < total {
         return None; // wait for more bytes

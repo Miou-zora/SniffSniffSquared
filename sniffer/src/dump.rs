@@ -9,8 +9,8 @@
 //!   contradicts the wire type actually present, the declaration is dropped for
 //!   that field and the mismatch is flagged.
 
-use crate::pb::{looks_like_message, looks_like_text, Reader, WireType};
-use crate::registry::{leaf, Msg, Registry};
+use crate::pb::{Reader, WireType, looks_like_message, looks_like_text};
+use crate::registry::{Msg, Registry, leaf};
 
 /// Tag appended to a field whose declared type contradicted the wire. Also
 /// counted per-`Any` to surface a mis-joined schema.
@@ -53,7 +53,14 @@ pub fn dump(buf: &[u8], reg: Option<&Registry>, schema: Option<&Msg>, indent: us
             }
         };
         let decl = schema.and_then(|s| s.fields.iter().find(|f| f.num == field));
-        out.push_str(&render_field(&mut r, field, wt, decl.map(|f| f.csharp.as_str()), reg, indent));
+        out.push_str(&render_field(
+            &mut r,
+            field,
+            wt,
+            decl.map(|f| f.csharp.as_str()),
+            reg,
+            indent,
+        ));
     }
     out
 }
@@ -71,7 +78,10 @@ fn render_field(
     // A schema that disagrees with the wire is worse than none: it pushes
     // strings through the packed-varint path and prints digit soup. Drop it for
     // this field and fall back to the heuristics, but say so.
-    let bad = declared.as_ref().map(|t| !wire_matches(t, wt)).unwrap_or(false);
+    let bad = declared
+        .as_ref()
+        .map(|t| !wire_matches(t, wt))
+        .unwrap_or(false);
     let note = if bad {
         format!("{MISMATCH}: declared {}>", csharp.unwrap_or_default())
     } else {
@@ -127,10 +137,17 @@ fn render_len(
     if let Some(t) = ty {
         match &t.base {
             Base::Bytes => {
-                return format!("{pad}{field}: bytes({}) {}{note}\n", b.len(), hex_trunc(b, 32))
+                return format!(
+                    "{pad}{field}: bytes({}) {}{note}\n",
+                    b.len(),
+                    hex_trunc(b, 32)
+                );
             }
             Base::Str => {
-                return format!("{pad}{field}: string {:?}{note}\n", String::from_utf8_lossy(b))
+                return format!(
+                    "{pad}{field}: string {:?}{note}\n",
+                    String::from_utf8_lossy(b)
+                );
             }
             Base::Scalar(s) if t.repeated => {
                 // Packed ints and a string are both length-delimited, so the
@@ -164,7 +181,11 @@ fn render_len(
     if let Some(s) = as_utf8(b) {
         return format!("{pad}{field}: string {s:?}{note}\n");
     }
-    format!("{pad}{field}: bytes({}) {}{note}\n", b.len(), hex_trunc(b, 32))
+    format!(
+        "{pad}{field}: bytes({}) {}{note}\n",
+        b.len(),
+        hex_trunc(b, 32)
+    )
 }
 
 /// Does the wire type actually present agree with the declared C# type?
@@ -292,16 +313,34 @@ struct TypeInfo {
 
 fn parse_type(csharp: &str) -> TypeInfo {
     let t = csharp.trim();
-    if let Some(inner) = t.strip_prefix("RepeatedField<").and_then(|s| s.strip_suffix('>')) {
-        return TypeInfo { repeated: true, base: parse_base(inner) };
+    if let Some(inner) = t
+        .strip_prefix("RepeatedField<")
+        .and_then(|s| s.strip_suffix('>'))
+    {
+        return TypeInfo {
+            repeated: true,
+            base: parse_base(inner),
+        };
     }
     if t.starts_with("MapField<") {
-        return TypeInfo { repeated: false, base: Base::Map };
+        return TypeInfo {
+            repeated: false,
+            base: Base::Map,
+        };
     }
-    if let Some(inner) = t.strip_prefix("Nullable<").and_then(|s| s.strip_suffix('>')) {
-        return TypeInfo { repeated: false, base: parse_base(inner) };
+    if let Some(inner) = t
+        .strip_prefix("Nullable<")
+        .and_then(|s| s.strip_suffix('>'))
+    {
+        return TypeInfo {
+            repeated: false,
+            base: parse_base(inner),
+        };
     }
-    TypeInfo { repeated: false, base: parse_base(t) }
+    TypeInfo {
+        repeated: false,
+        base: parse_base(t),
+    }
 }
 
 fn parse_base(t: &str) -> Base {
@@ -387,9 +426,15 @@ mod tests {
         let reg = Registry::load("proto/messages.json").expect("load registry");
         let out = dump(BODY, Some(&reg), None, 0);
         println!("{out}");
-        assert!(out.contains("type.ankama.com/kdh"), "should surface the Any url");
+        assert!(
+            out.contains("type.ankama.com/kdh"),
+            "should surface the Any url"
+        );
         // 0x61A4 = 24996 (matches the game's "61 A4")
-        assert!(out.contains("packed [394, 1989, 24996, 0]"), "should decode packed int64s:\n{out}");
+        assert!(
+            out.contains("packed [394, 1989, 24996, 0]"),
+            "should decode packed int64s:\n{out}"
+        );
     }
 
     use crate::registry::Field;
@@ -400,19 +445,27 @@ mod tests {
             real: None,
             fields: fields
                 .iter()
-                .map(|(num, csharp)| Field { num: *num, csharp: csharp.to_string() })
+                .map(|(num, csharp)| Field {
+                    num: *num,
+                    csharp: csharp.to_string(),
+                })
                 .collect(),
         }
     }
 
     // field 1 varint, sign-extended -20002 (10 bytes)
-    const NEG: &[u8] = &[0x08, 0xde, 0xe3, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01];
+    const NEG: &[u8] = &[
+        0x08, 0xde, 0xe3, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01,
+    ];
 
     #[test]
     fn signed_varint_reads_as_negative() {
         let s = schema(&[(1, "long")]);
         let out = dump(NEG, None, Some(&s), 0);
-        assert!(out.contains("1: varint -20002"), "declared long must read signed:\n{out}");
+        assert!(
+            out.contains("1: varint -20002"),
+            "declared long must read signed:\n{out}"
+        );
         // the same bytes under uint64 really are that huge number
         let u = schema(&[(1, "ulong")]);
         assert!(dump(NEG, None, Some(&u), 0).contains("varint 18446744073709531614"));
@@ -421,7 +474,10 @@ mod tests {
     #[test]
     fn schema_less_varint_surfaces_signed_reading() {
         let out = dump(NEG, None, None, 0);
-        assert!(out.contains("(-20002)"), "unknown field should hint the signed value:\n{out}");
+        assert!(
+            out.contains("(-20002)"),
+            "unknown field should hint the signed value:\n{out}"
+        );
     }
 
     #[test]
@@ -429,8 +485,14 @@ mod tests {
         // schema says string, wire carries a varint -> ignore the schema, flag it
         let s = schema(&[(1, "string")]);
         let out = dump(NEG, None, Some(&s), 0);
-        assert!(out.contains(MISMATCH), "contradiction must be flagged:\n{out}");
-        assert!(out.contains("(-20002)"), "should fall back to the heuristic:\n{out}");
+        assert!(
+            out.contains(MISMATCH),
+            "contradiction must be flagged:\n{out}"
+        );
+        assert!(
+            out.contains("(-20002)"),
+            "should fall back to the heuristic:\n{out}"
+        );
     }
 
     #[test]
@@ -441,12 +503,21 @@ mod tests {
         buf.extend_from_slice(b"chat text here");
         let s = schema(&[(1, "RepeatedField<long>")]);
         let out = dump(&buf, None, Some(&s), 0);
-        assert!(out.contains("\"chat text here\""), "text must survive as text:\n{out}");
-        assert!(out.contains(MISMATCH), "mis-joined packed field must be flagged:\n{out}");
+        assert!(
+            out.contains("\"chat text here\""),
+            "text must survive as text:\n{out}"
+        );
+        assert!(
+            out.contains(MISMATCH),
+            "mis-joined packed field must be flagged:\n{out}"
+        );
         // a genuine packed array of small ints must still decode as numbers
         let real = [0x0a, 0x04, 0x01, 0x02, 0x03, 0x04];
         let out = dump(&real, None, Some(&s), 0);
-        assert!(out.contains("packed [1, 2, 3, 4]"), "real packed data unaffected:\n{out}");
+        assert!(
+            out.contains("packed [1, 2, 3, 4]"),
+            "real packed data unaffected:\n{out}"
+        );
         assert!(!out.contains(MISMATCH));
     }
 
@@ -455,23 +526,32 @@ mod tests {
         let reg = Registry::load("proto/messages.json").expect("registry");
         // a well-joined message reports nothing
         let out = dump(BODY, Some(&reg), None, 0);
-        assert!(!out.contains("schema mismatch"), "this capture joins cleanly:\n{out}");
+        assert!(
+            !out.contains("schema mismatch"),
+            "this capture joins cleanly:\n{out}"
+        );
     }
 
-    // a real captured price_list message wrapped in its Any envelope
+    // A real captured price_list message wrapped in its Any envelope, 2026-08-04.
+    // Goes through the process-wide keymap and layout rather than an injected
+    // one, so it is the end-to-end check that `messages::DEFAULTS` and
+    // `layout::DEFAULTS` actually agree with the build on the wire.
     const PRICE_ANY: &[u8] = &[
-        0x0a, 0x13, 0x74, 0x79, 0x70, 0x65, 0x2e, 0x61, 0x6e, 0x6b, 0x61, 0x6d, 0x61, 0x2e,
-        0x63, 0x6f, 0x6d, 0x2f, 0x6b, 0x65, 0x61, 0x12, 0x19, 0x08, 0x6b, 0x12, 0x12, 0x08,
-        0xb1, 0x14, 0x2a, 0x08, 0x4b, 0xc6, 0x02, 0x84, 0x34, 0x9f, 0x8d, 0x06, 0x30, 0x6b,
-        0x38, 0xc2, 0x4e, 0x18, 0xb1, 0x14,
+        0x0a, 0x13, 0x74, 0x79, 0x70, 0x65, 0x2e, 0x61, 0x6e, 0x6b, 0x61, 0x6d, 0x61, 0x2e, 0x63,
+        0x6f, 0x6d, 0x2f, 0x6b, 0x62, 0x74, 0x12, 0x19, 0x08, 0x26, 0x10, 0xaf, 0x02, 0x1a, 0x12,
+        0x08, 0x9e, 0x08, 0x28, 0xaf, 0x02, 0x32, 0x08, 0x29, 0xb7, 0x03, 0x97, 0x1f, 0xb8, 0x91,
+        0x02, 0x40, 0x26,
     ];
 
     #[test]
     fn interpreted_message_is_surfaced() {
         let out = dump(PRICE_ANY, None, None, 0);
-        assert!(out.contains("type.ankama.com/kea"), "{out}");
-        assert!(out.contains("=> prices {"), "interpreter line missing:\n{out}");
-        assert!(out.contains("1000:99999"), "{out}");
+        assert!(out.contains("type.ankama.com/kbt"), "{out}");
+        assert!(
+            out.contains("=> prices {"),
+            "interpreter line missing:\n{out}"
+        );
+        assert!(out.contains("1000:35000"), "{out}");
     }
 
     #[test]
@@ -480,8 +560,8 @@ mod tests {
         // an Any with an unknown key -> not known
         // field1 "type.ankama.com/zzz", field2 empty
         let unknown = &[
-            0x0a, 0x13, 0x74, 0x79, 0x70, 0x65, 0x2e, 0x61, 0x6e, 0x6b, 0x61, 0x6d, 0x61, 0x2e, 0x63,
-            0x6f, 0x6d, 0x2f, 0x7a, 0x7a, 0x7a, 0x12, 0x00,
+            0x0a, 0x13, 0x74, 0x79, 0x70, 0x65, 0x2e, 0x61, 0x6e, 0x6b, 0x61, 0x6d, 0x61, 0x2e,
+            0x63, 0x6f, 0x6d, 0x2f, 0x7a, 0x7a, 0x7a, 0x12, 0x00,
         ];
         assert!(!has_known(unknown), "unknown Any key is not known");
     }

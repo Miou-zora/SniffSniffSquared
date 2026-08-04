@@ -28,26 +28,26 @@ use std::sync::OnceLock;
 /// the current build happens to spell it.
 pub const DEFAULTS: &[(&str, &str)] = &[
     // marketplace price ladder (x1 / x10 / x100 / x1000) — see interpret::price_list
-    ("price_list", "kea"),
+    ("price_list", "kbt"),
     // chat / trade-channel messages: author, timestamp, free text
-    ("chat_message", "ksv"),
+    ("chat_message", "kti"),
     // breaking an item into runes ("brisage") — see interpret::crush_result
-    ("crush_result", "kfy"),
+    ("crush_result", "kfp"),
     // item instance detail; supplies the uid -> type id the crush result lacks
-    ("item_detail", "kev"),
+    ("item_detail", "kfb"),
     // the client's "crush it" command — carries the focus, which the result does not
-    ("crush_request", "ker"),
+    ("crush_request", "kbj"),
     // putting an item into the breaker's slot; carries only the instance uid,
     // the type arrives in the item_detail that answers it
-    ("crush_slot_put", "kch"),
+    ("crush_slot_put", "kcr"),
     // the whole bag, as a snapshot — see interpret::inventory
-    ("inventory", "iss"),
+    ("inventory", "ivx"),
     // one instance has left the bag: crushed, sold, dropped
-    ("inventory_remove", "ivf"),
+    ("inventory_remove", "ium"),
     // a new stack has arrived in the bag — one slot, same shape as a listing's
-    ("inventory_add", "iun"),
+    ("inventory_add", "iua"),
     // an existing stack changed size: bought more, used some
-    ("inventory_quantity", "iul"),
+    ("inventory_quantity", "ivj"),
 ];
 
 /// Where an override file is looked for, relative to the working directory.
@@ -67,7 +67,11 @@ impl KeyMap {
             by_key.insert(key.clone(), name.clone());
             by_name.insert(name, key);
         }
-        KeyMap { by_key, by_name, overridden }
+        KeyMap {
+            by_key,
+            by_name,
+            overridden,
+        }
     }
 
     /// Built-in defaults, with `keymap.json` applied on top if present.
@@ -119,8 +123,11 @@ impl KeyMap {
 
     /// "price_list=kea chat_message=ksv", for startup logging.
     pub fn summary(&self) -> String {
-        let mut v: Vec<String> =
-            self.by_name.iter().map(|(n, k)| format!("{n}={k}")).collect();
+        let mut v: Vec<String> = self
+            .by_name
+            .iter()
+            .map(|(n, k)| format!("{n}={k}"))
+            .collect();
         v.sort();
         v.join(" ")
     }
@@ -140,15 +147,15 @@ mod tests {
     #[test]
     fn defaults_round_trip() {
         let m = KeyMap::load("/nonexistent");
-        assert_eq!(m.key("price_list"), Some("kea"));
-        assert_eq!(m.name("kea"), Some("price_list"));
+        assert_eq!(m.key("price_list"), Some("kbt"));
+        assert_eq!(m.name("kbt"), Some("price_list"));
         assert_eq!(m.name("nope"), None);
         assert_eq!(m.overridden(), 0);
     }
 
     #[test]
     fn override_file_repoints_a_key() {
-        // simulates a build rotating "price_list" from kea to zzz
+        // simulates a build rotating "price_list" off kbt, as 2026-08-04 did
         let dir = std::env::temp_dir().join("sniff_keymap_test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("keymap.json");
@@ -157,8 +164,12 @@ mod tests {
         let m = KeyMap::load(path.to_str().unwrap());
         assert_eq!(m.key("price_list"), Some("zzz"), "override wins");
         assert_eq!(m.name("zzz"), Some("price_list"));
-        assert_eq!(m.name("kea"), None, "old key no longer resolves");
-        assert_eq!(m.key("chat_message"), Some("ksv"), "untouched entry survives");
+        assert_eq!(m.name("kbt"), None, "old key no longer resolves");
+        assert_eq!(
+            m.key("chat_message"),
+            Some("kti"),
+            "untouched entry survives"
+        );
         assert_eq!(m.overridden(), 1);
         std::fs::remove_file(&path).ok();
     }
@@ -181,12 +192,12 @@ mod tests {
         let dir = std::env::temp_dir().join("sniff_keymap_test4");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("keymap.json");
-        std::fs::write(&path, r#"{"_comment":"notes","price_list":"kea"}"#).unwrap();
+        std::fs::write(&path, r#"{"_comment":"notes","price_list":"kbt"}"#).unwrap();
 
         let m = KeyMap::load(path.to_str().unwrap());
         assert_eq!(m.name("notes"), None, "the comment is not a message");
         assert_eq!(m.key("_comment"), None);
-        assert_eq!(m.key("price_list"), Some("kea"));
+        assert_eq!(m.key("price_list"), Some("kbt"));
         std::fs::remove_file(&path).ok();
     }
 
@@ -198,7 +209,7 @@ mod tests {
         std::fs::write(&path, "{ not json").unwrap();
 
         let m = KeyMap::load(path.to_str().unwrap());
-        assert_eq!(m.key("price_list"), Some("kea"), "still usable");
+        assert_eq!(m.key("price_list"), Some("kbt"), "still usable");
         std::fs::remove_file(&path).ok();
     }
 }

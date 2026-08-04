@@ -10,7 +10,8 @@
 
 use crate::messages;
 use crate::pb::{Reader, WireType};
-use crate::registry::{leaf, Registry};
+use crate::registry::{Registry, leaf};
+use crate::schema;
 
 /// Return a one-line understandable rendering for a known message, or None.
 ///
@@ -39,8 +40,12 @@ pub fn interpret(key: &str, body: &[u8]) -> Option<String> {
             format!("inventory {{ {} slots, {stacks} stacked }}", items.len())
         }),
         "inventory_remove" => inventory_remove(body).map(|uid| format!("gone {{ uid={uid} }}")),
-        "inventory_add" => inventory_add(body)
-            .map(|i| format!("picked up {{ uid={} item={} x{} }}", i.uid, i.item_id, i.quantity)),
+        "inventory_add" => inventory_add(body).map(|i| {
+            format!(
+                "picked up {{ uid={} item={} x{} }}",
+                i.uid, i.item_id, i.quantity
+            )
+        }),
         "inventory_quantity" => inventory_quantity(body)
             .map(|(uid, quantity)| format!("stack {{ uid={uid} now x{quantity} }}")),
         _ => None,
@@ -111,66 +116,19 @@ impl std::fmt::Display for CrushResult {
     }
 }
 
-fn read_f32(r: &mut Reader) -> Option<f32> {
-    let b = r.read_bytes(4)?;
-    Some(f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-}
-
 /// Parse a crush (brisage) result straight off the wire.
 pub fn crush_result(body: &[u8]) -> Option<CrushResult> {
-    let mut out = CrushResult { item_uid: 0, yield_fraction: 0.0, runes: Vec::new() };
-    let mut saw_yield = false;
-    let mut r = Reader::new(body);
-    while !r.eof() {
-        let (field, wt) = r.tag()?;
-        match (field, wt) {
-            (1, WireType::Len) => {
-                let inner = r.len_field()?;
-                let mut ir = Reader::new(inner);
-                while !ir.eof() {
-                    let (f, w) = ir.tag()?;
-                    match (f, w) {
-                        // repeated: one entry per rune type
-                        (1, WireType::Len) => {
-                            let e = ir.len_field()?;
-                            let mut er = Reader::new(e);
-                            let (mut rune, mut count) = (0u64, 0u64);
-                            while !er.eof() {
-                                let (ef, ew) = er.tag()?;
-                                match (ef, ew) {
-                                    (1, WireType::Varint) => rune = er.varint()?,
-                                    (2, WireType::Varint) => count = er.varint()?,
-                                    (_, ew) => {
-                                        if !er.skip(ew) {
-                                            return None;
-                                        }
-                                    }
-                                }
-                            }
-                            if rune != 0 {
-                                out.runes.push((rune, count));
-                            }
-                        }
-                        (2, WireType::I32) => {
-                            out.yield_fraction = read_f32(&mut ir)?;
-                            saw_yield = true;
-                        }
-                        (3, WireType::Varint) => out.item_uid = ir.varint()?,
-                        (_, w) => {
-                            if !ir.skip(w) {
-                                return None;
-                            }
-                        }
-                    }
-                }
-            }
-            (_, wt) => {
-                if !r.skip(wt) {
-                    return None;
-                }
-            }
-        }
-    }
+    crush_result_with(body, schema::schema())
+}
+
+pub fn crush_result_with(body: &[u8], sch: &schema::Schema) -> Option<CrushResult> {
+    let inner = sch.read("crush_result", body)?.msg("body")?.clone();
+    let runes = inner
+        .msgs("rune")
+        .into_iter()
+        .filter_map(|r| Some((r.uint("rune_id")?, r.uint("count").unwrap_or(0))))
+        .filter(|(id, _)| *id != 0)
+        .collect();
     // A crush that yielded nothing is still a crush, and its yield is the only
     // thing the table stores. Requiring runes threw away exactly the
     // observations worth having: a low coefficient on a small item rounds every
@@ -178,10 +136,12 @@ pub fn crush_result(body: &[u8]) -> Option<CrushResult> {
     // 36.2% on an Amulette Verrehor, which is a coefficient reading that
     // nothing else can supply. What makes it a crush is the instance and the
     // yield, not the loot.
-    if out.item_uid == 0 || !saw_yield {
-        return None;
-    }
-    Some(out)
+    let item_uid = inner.uint("uid").filter(|u| *u != 0)?;
+    Some(CrushResult {
+        item_uid,
+        yield_fraction: inner.f32("yield")?,
+        runes,
+    })
 }
 
 // ---- crush_slot_put: item placed into the breaker --------------------------
@@ -210,24 +170,16 @@ pub fn crush_slot_put(body: &[u8]) -> Option<u64> {
 /// The raw `(quantity delta, uid)`, negative delta meaning the item left the
 /// slot. Split out so the sign is testable independently of the filtering.
 pub fn crush_slot_change(body: &[u8]) -> Option<(i64, u64)> {
-    let mut r = Reader::new(body);
-    let (mut delta, mut uid) = (None, None);
-    while !r.eof() {
-        let (field, wt) = r.tag()?;
-        match (field, wt) {
-            (1, WireType::Varint) => delta = Some(r.varint()? as i64),
-            (2, WireType::Varint) => uid = Some(r.varint()?),
-            (_, wt) => {
-                if !r.skip(wt) {
-                    return None;
-                }
-            }
-        }
-    }
-    // A missing field 1 is protobuf's default of 0, but every sample carries it
+    crush_slot_change_with(body, schema::schema())
+}
+
+pub fn crush_slot_change_with(body: &[u8], sch: &schema::Schema) -> Option<(i64, u64)> {
+    let n = sch.read("crush_slot", body)?;
+    let uid = n.uint("uid")?;
+    // A missing delta is protobuf's default of 0, but every sample carries it
     // explicitly; treat its absence as "one, going in" rather than dropping the
     // message, since the uid is the part that matters.
-    Some((delta.unwrap_or(1), uid?))
+    Some((n.uint("delta").map_or(1, |d| d as i64), uid))
 }
 
 // ---- crush_request: the client's "crush it" command ------------------------
@@ -301,69 +253,50 @@ pub struct ItemDetail {
     pub stats: Vec<(u64, i64)>,
 }
 
-/// Extract `(instance uid, item type id)` if this message carries both.
-pub fn item_detail(body: &[u8]) -> Option<(u64, u64)> {
-    item_detail_full(body).map(|d| (d.uid, d.item_id))
-}
-
 /// The full description, stat lines included.
 pub fn item_detail_full(body: &[u8]) -> Option<ItemDetail> {
-    let mut r = Reader::new(body);
-    while !r.eof() {
-        let (field, wt) = r.tag()?;
-        if field == 2 && wt == WireType::Len {
-            let lvl2 = r.len_field()?;
-            let mut r2 = Reader::new(lvl2);
-            while !r2.eof() {
-                let (f2, w2) = r2.tag()?;
-                if f2 == 4 && w2 == WireType::Len {
-                    if let Some(detail) = item_entry(r2.len_field()?) {
-                        return Some(detail);
-                    }
-                } else if !r2.skip(w2) {
-                    return None;
-                }
-            }
-        } else if !r.skip(wt) {
-            return None;
-        }
-    }
-    None
+    item_detail_full_with(body, schema::schema())
+}
+
+pub fn item_detail_full_with(body: &[u8], sch: &schema::Schema) -> Option<ItemDetail> {
+    entries(&sch.read("item_detail", body)?).into_iter().next()
+}
+
+/// Every `item_entry` inside a message whose slots hold one each.
+///
+/// `item_detail`, `inventory` and `inventory_add` differ only in the field
+/// numbers of that envelope, which is exactly what `schema.json` describes, so
+/// all three read through here.
+fn entries(node: &schema::Node) -> Vec<ItemDetail> {
+    node.msgs("slot")
+        .into_iter()
+        .filter_map(|slot| item_entry(slot.msg("entry")?))
+        .collect()
 }
 
 /// One item entry: uid, type, how many, and what it rolled.
-///
-/// The same submessage appears inside `item_detail` (one item, under field 2/4)
-/// and inside every slot of the `inventory` listing (under field 1/4), so both
-/// read it here rather than growing two parsers that drift apart.
-fn item_entry(buf: &[u8]) -> Option<ItemDetail> {
-    let mut r = Reader::new(buf);
-    let (mut uid, mut item) = (0u64, 0u64);
-    // Absent for a single copy, which is how equipment always arrives.
-    let mut quantity = 1u64;
-    let mut stats = Vec::new();
-    while !r.eof() {
-        let (f, w) = r.tag()?;
-        match (f, w) {
-            (1, WireType::Varint) => uid = r.varint()?,
-            (3, WireType::Varint) => quantity = r.varint()?,
-            (4, WireType::Varint) => item = r.varint()?,
-            (5, WireType::Len) => {
-                // A malformed stat line should not discard the uid and type,
-                // which are what the crush needs.
-                match r.len_field().and_then(stat_line) {
-                    Some(line) => stats.push(line),
-                    None => break,
-                }
-            }
-            (_, w) => {
-                if !r.skip(w) {
-                    break;
-                }
-            }
-        }
+fn item_entry(node: &schema::Node) -> Option<ItemDetail> {
+    let uid = node.uint("uid")?;
+    let item_id = node.uint("item_id")?;
+    if uid == 0 || item_id == 0 {
+        return None;
     }
-    (uid != 0 && item != 0).then_some(ItemDetail { uid, item_id: item, quantity, stats })
+    Some(ItemDetail {
+        uid,
+        item_id,
+        // Absent for a single copy, which is how equipment always arrives.
+        quantity: node.uint("quantity").unwrap_or(1),
+        stats: node
+            .msgs("stat")
+            .into_iter()
+            .filter_map(stat_line)
+            .collect(),
+    })
+}
+
+/// `(effect id, value)` from one stat line. Value comes first on the wire.
+fn stat_line(node: &schema::Node) -> Option<(u64, i64)> {
+    Some((node.uint("effect")?, node.uint("value")? as i64))
 }
 
 // ---- inventory: what is actually in the bags --------------------------------
@@ -385,129 +318,67 @@ fn item_entry(buf: &[u8]) -> Option<ItemDetail> {
 
 /// Every item in an inventory listing. Empty is a real answer — an empty bag.
 pub fn inventory(body: &[u8]) -> Option<Vec<ItemDetail>> {
-    let mut r = Reader::new(body);
-    let mut out = Vec::new();
-    while !r.eof() {
-        let (field, wt) = r.tag()?;
-        if field == 1 && wt == WireType::Len {
-            let slot = r.len_field()?;
-            let mut r2 = Reader::new(slot);
-            while !r2.eof() {
-                let (f2, w2) = r2.tag()?;
-                if f2 == 4 && w2 == WireType::Len {
-                    // One unreadable slot costs that slot, not the listing —
-                    // and a listing that gave up would be read as an empty bag.
-                    if let Some(entry) = r2.len_field().and_then(item_entry) {
-                        out.push(entry);
-                    }
-                } else if !r2.skip(w2) {
-                    break;
-                }
-            }
-        } else if !r.skip(wt) {
-            return None;
-        }
-    }
-    Some(out)
+    inventory_with(body, schema::schema())
+}
+
+pub fn inventory_with(body: &[u8], sch: &schema::Schema) -> Option<Vec<ItemDetail>> {
+    Some(entries(&sch.read("inventory", body)?))
 }
 
 // ---- inventory_add: a new stack arrived -------------------------------------
 //
-// One slot, in the listing's own shape, so it reads with the same parser.
+// One entry in an envelope, read by `entries` like an `item_detail`. On the
+// 2026-07-10 build it arrived in the *listing's* shape instead; the envelope is
+// the same idea either way, and only `schema.json` says which numbers.
+//
 // Identified against a known purchase: nine Colonne Vertebrale bought one at a
-// time produced one of these for the first — uid 253751293, quantity 1, item
-// 2323 — and a quantity change for each of the eight after it.
+// time produced one of these for the first -- uid 253751293, quantity 1, item
+// 2323 -- and a quantity change for each of the eight after it. Re-confirmed on
+// 2026-08-04 against one Palmano bought from the HDV: uid 2447309, item 8872.
 
 /// The stack that just entered the bags.
 pub fn inventory_add(body: &[u8]) -> Option<ItemDetail> {
-    inventory(body)?.into_iter().next()
+    inventory_add_with(body, schema::schema())
+}
+
+pub fn inventory_add_with(body: &[u8], sch: &schema::Schema) -> Option<ItemDetail> {
+    entries(&sch.read("inventory_add", body)?)
+        .into_iter()
+        .next()
 }
 
 // ---- inventory_quantity: an existing stack changed size ---------------------
 //
-//   field 2  message  the stack as it was
-//       field 1  varint   the previous quantity
-//   field 4  message  the stack as it is now
-//       field 1  varint   the new quantity
-//       field 2  varint   instance uid
-//
-// From the same nine purchases: 1->2, 2->3, ... 8->9, all on uid 253751293,
-// ending at the nine that were bought. The previous quantity is on the wire and
-// is deliberately not returned — the new one is the answer, and a delta applied
+// From nine purchases: 1->2, 2->3, ... 8->9, all on uid 253751293, ending at
+// the nine that were bought. The previous quantity is on the wire and is
+// deliberately not returned -- the new one is the answer, and a delta applied
 // to a row that drifted would compound the drift instead of correcting it.
 
 /// `(instance uid, the new stack size)`.
 pub fn inventory_quantity(body: &[u8]) -> Option<(u64, u64)> {
-    let mut r = Reader::new(body);
-    while !r.eof() {
-        let (field, wt) = r.tag()?;
-        if field == 4 && wt == WireType::Len {
-            let now = r.len_field()?;
-            let mut r2 = Reader::new(now);
-            let (mut quantity, mut uid) = (0u64, 0u64);
-            while !r2.eof() {
-                let (f2, w2) = r2.tag()?;
-                match (f2, w2) {
-                    (1, WireType::Varint) => quantity = r2.varint()?,
-                    (2, WireType::Varint) => uid = r2.varint()?,
-                    (_, w2) => {
-                        if !r2.skip(w2) {
-                            break;
-                        }
-                    }
-                }
-            }
-            if uid != 0 {
-                return Some((uid, quantity));
-            }
-        } else if !r.skip(wt) {
-            return None;
-        }
-    }
-    None
+    inventory_quantity_with(body, schema::schema())
+}
+
+pub fn inventory_quantity_with(body: &[u8], sch: &schema::Schema) -> Option<(u64, u64)> {
+    let change = sch.read("inventory_quantity", body)?.msg("change")?.clone();
+    let uid = change.uint("uid").filter(|u| *u != 0)?;
+    Some((uid, change.uint("quantity").unwrap_or(0)))
 }
 
 // ---- inventory_remove: one instance is gone ---------------------------------
 //
-//   field 3  varint  the instance uid that left the bags
-//
 // Confirmed against every crush in the capture: the uid of the item placed in
-// the breaker arrives here 1 to 11 seconds after the crush destroyed it, 8 of 8.
+// the breaker arrives here 1 to 11 seconds after the crush destroyed it.
 
 /// The instance uid this message says has left the inventory.
 pub fn inventory_remove(body: &[u8]) -> Option<u64> {
-    let mut r = Reader::new(body);
-    while !r.eof() {
-        let (field, wt) = r.tag()?;
-        if field == 3 && wt == WireType::Varint {
-            let uid = r.varint()?;
-            if uid != 0 {
-                return Some(uid);
-            }
-        } else if !r.skip(wt) {
-            return None;
-        }
-    }
-    None
+    inventory_remove_with(body, schema::schema())
 }
 
-/// `(effect id, value)` from one repeated field-5 stat line.
-fn stat_line(body: &[u8]) -> Option<(u64, i64)> {
-    let mut r = Reader::new(body);
-    let (mut value, mut effect) = (None, None);
-    while !r.eof() {
-        let (field, wt) = r.tag()?;
-        match (field, wt) {
-            (8, WireType::Varint) => value = Some(r.varint()? as i64),
-            (9, WireType::Varint) => effect = Some(r.varint()?),
-            (_, wt) => {
-                if !r.skip(wt) {
-                    return None;
-                }
-            }
-        }
-    }
-    Some((effect?, value?))
+pub fn inventory_remove_with(body: &[u8], sch: &schema::Schema) -> Option<u64> {
+    sch.read("inventory_remove", body)?
+        .uint("uid")
+        .filter(|u| *u != 0)
 }
 
 // ---- price_list: marketplace price ladder ---------------------------------
@@ -586,20 +457,18 @@ pub struct PriceList {
     pub offers: Vec<Offer>,
 }
 
-impl PriceList {
-    /// The item every offer is about. Messages mix no item types in practice.
-    pub fn item_id(&self) -> u64 {
-        self.offers.first().map(|o| o.item_id).unwrap_or(0)
-    }
-}
-
 impl std::fmt::Display for PriceList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Some(first) = self.offers.first() else {
             return write!(f, "prices {{ empty }}");
         };
         if self.offers.len() > 1 || !first.stats.is_empty() {
-            let cheapest = self.offers.iter().map(|o| o.unit_price()).min().unwrap_or(0);
+            let cheapest = self
+                .offers
+                .iter()
+                .map(|o| o.unit_price())
+                .min()
+                .unwrap_or(0);
             return write!(
                 f,
                 "listings {{ item={} category={} offers={} cheapest={} }}",
@@ -628,60 +497,36 @@ impl std::fmt::Display for PriceList {
 
 /// Parse a price-list message straight off the wire.
 pub fn price_list(body: &[u8]) -> Option<PriceList> {
-    let mut out = PriceList { category: 0, offers: Vec::new() };
+    price_list_with(body, schema::schema())
+}
+
+pub fn price_list_with(body: &[u8], sch: &schema::Schema) -> Option<PriceList> {
+    let node = sch.read("price_list", body)?;
     // Only some offers repeat the item id inline; the outer copy fills the rest.
-    let mut outer_item = 0u64;
-    let mut r = Reader::new(body);
-    while !r.eof() {
-        let (field, wt) = r.tag()?;
-        match (field, wt) {
-            (1, WireType::Varint) => out.category = r.varint()?,
-            (3, WireType::Varint) => outer_item = r.varint()?,
-            (2, WireType::Len) => {
-                let inner = r.len_field()?;
-                let mut offer =
-                    Offer { item_id: 0, ladder: Vec::new(), listing_id: 0, stats: Vec::new() };
-                let mut ir = Reader::new(inner);
-                while !ir.eof() {
-                    let (f, w) = ir.tag()?;
-                    match (f, w) {
-                        (1, WireType::Varint) => offer.item_id = ir.varint()?,
-                        (4, WireType::Len) => {
-                            if let Some(stat) = stat_line(ir.len_field()?) {
-                                offer.stats.push(stat);
-                            }
-                        }
-                        (5, WireType::Len) => offer.ladder = packed(ir.len_field()?),
-                        (7, WireType::Varint) => offer.listing_id = ir.varint()?,
-                        (_, w) => {
-                            if !ir.skip(w) {
-                                return None;
-                            }
-                        }
-                    }
-                }
-                out.offers.push(offer);
-            }
-            (_, wt) => {
-                if !r.skip(wt) {
-                    return None;
-                }
-            }
-        }
-    }
-    for offer in &mut out.offers {
-        if offer.item_id == 0 {
-            offer.item_id = outer_item;
-        }
-    }
+    let outer_item = node.uint("item_id").unwrap_or(0);
+
+    let offers: Vec<Offer> = node
+        .msgs("offer")
+        .into_iter()
+        .map(|o| Offer {
+            item_id: o.uint("item_id").unwrap_or(outer_item),
+            ladder: o.list("ladder").unwrap_or_default(),
+            listing_id: o.uint("listing_id").unwrap_or(0),
+            stats: o.msgs("stat").into_iter().filter_map(stat_line).collect(),
+        })
+        .collect();
+
     // a price message with nothing priced in it is not one
-    if out.offers.iter().all(|o| o.ladder.is_empty()) {
+    if offers.iter().all(|o| o.ladder.is_empty()) {
         return None;
     }
+    let mut out = PriceList {
+        category: node.uint("category").unwrap_or(0),
+        offers,
+    };
     out.offers.retain(|o| !o.ladder.is_empty());
     Some(out)
 }
-
 
 /// Schema-guided decoded values for a message key: every varint (in traversal
 /// order) and every packed repeated-scalar array. Handlers receive this.
@@ -712,7 +557,10 @@ fn classify_len(csharp: Option<&str>) -> LenKind {
         Some(t) => t.trim(),
         None => return LenKind::Skip,
     };
-    if let Some(inner) = t.strip_prefix("RepeatedField<").and_then(|s| s.strip_suffix('>')) {
+    if let Some(inner) = t
+        .strip_prefix("RepeatedField<")
+        .and_then(|s| s.strip_suffix('>'))
+    {
         return if is_scalar(inner) {
             LenKind::PackedVarint
         } else if is_len_scalar(inner) {
@@ -799,55 +647,65 @@ fn packed(b: &[u8]) -> Vec<u64> {
 
 #[cfg(test)]
 mod tests {
+    /// The 2026-07-10 build. Its fixtures below are real bytes off that wire and
+    /// are the only surviving record of it, so they keep running -- against the
+    /// same parsers, through the schema file that exists precisely so a rotation
+    /// does not cost them.
+    fn old() -> schema::Schema {
+        let text = include_str!("../testdata/schema-2026-07-10.json");
+        schema::Schema::parse(text, "testdata/schema-2026-07-10.json").expect("valid")
+    }
+
+    /// The current build, read from the shipped file rather than the process
+    /// singleton so a test never depends on the working directory.
+    fn now() -> schema::Schema {
+        let text = include_str!("../schema.json");
+        schema::Schema::parse(text, "schema.json").expect("valid")
+    }
     use super::*;
 
     // Real captured price-list message, identified by known-plaintext search: the client
     // showed Carapace Verte at 1=75, 10=326, 100=6660, 1000=99999 and those
     // exact values appear here. Keep byte-exact.
     const PRICE_LIST: &[u8] = &[
-        0x08, 0x6b, 0x12, 0x12, 0x08, 0xb1, 0x14, 0x2a, 0x08, 0x4b, 0xc6, 0x02, 0x84, 0x34,
-        0x9f, 0x8d, 0x06, 0x30, 0x6b, 0x38, 0xc2, 0x4e, 0x18, 0xb1, 0x14,
+        0x08, 0x6b, 0x12, 0x12, 0x08, 0xb1, 0x14, 0x2a, 0x08, 0x4b, 0xc6, 0x02, 0x84, 0x34, 0x9f,
+        0x8d, 0x06, 0x30, 0x6b, 0x38, 0xc2, 0x4e, 0x18, 0xb1, 0x14,
     ];
 
     /// Real capture, packet #11319: the HDV listing panel for item 12502, two
     /// copies on sale at 9999 each with different rolls.
     const EQUIPMENT_LISTING: &[u8] = &[
-        0x08, 0x0a, 0x12, 0x30, 0x08, 0xd6, 0x61, 0x22, 0x04, 0x40, 0x1f, 0x48, 0x7d, 0x22,
-        0x04, 0x40, 0x10, 0x48, 0x7e, 0x22, 0x04, 0x40, 0x0b, 0x48, 0x7c, 0x22, 0x05, 0x40,
-        0x05, 0x48, 0xb2, 0x01, 0x22, 0x05, 0x40, 0x02, 0x48, 0xf0, 0x05, 0x2a, 0x05, 0x8f,
-        0x4e, 0x00, 0x00, 0x00, 0x30, 0x0a, 0x38, 0xf4, 0x9f, 0x02, 0x12, 0x30, 0x08, 0xd6,
-        0x61, 0x22, 0x04, 0x40, 0x27, 0x48, 0x7d, 0x22, 0x04, 0x40, 0x15, 0x48, 0x7e, 0x22,
-        0x04, 0x40, 0x0f, 0x48, 0x7c, 0x22, 0x05, 0x40, 0x05, 0x48, 0xb2, 0x01, 0x22, 0x05,
-        0x40, 0x02, 0x48, 0xf0, 0x05, 0x2a, 0x05, 0x8f, 0x4e, 0x00, 0x00, 0x00, 0x30, 0x0a,
-        0x38, 0xf5, 0x9f, 0x02, 0x18, 0xd6, 0x61,
+        0x08, 0x0a, 0x12, 0x30, 0x08, 0xd6, 0x61, 0x22, 0x04, 0x40, 0x1f, 0x48, 0x7d, 0x22, 0x04,
+        0x40, 0x10, 0x48, 0x7e, 0x22, 0x04, 0x40, 0x0b, 0x48, 0x7c, 0x22, 0x05, 0x40, 0x05, 0x48,
+        0xb2, 0x01, 0x22, 0x05, 0x40, 0x02, 0x48, 0xf0, 0x05, 0x2a, 0x05, 0x8f, 0x4e, 0x00, 0x00,
+        0x00, 0x30, 0x0a, 0x38, 0xf4, 0x9f, 0x02, 0x12, 0x30, 0x08, 0xd6, 0x61, 0x22, 0x04, 0x40,
+        0x27, 0x48, 0x7d, 0x22, 0x04, 0x40, 0x15, 0x48, 0x7e, 0x22, 0x04, 0x40, 0x0f, 0x48, 0x7c,
+        0x22, 0x05, 0x40, 0x05, 0x48, 0xb2, 0x01, 0x22, 0x05, 0x40, 0x02, 0x48, 0xf0, 0x05, 0x2a,
+        0x05, 0x8f, 0x4e, 0x00, 0x00, 0x00, 0x30, 0x0a, 0x38, 0xf5, 0x9f, 0x02, 0x18, 0xd6, 0x61,
     ];
-
 
     // Real captured crushes. The client showed, for the Arc Anum: 32%, and
     // 2+1+10+2+11+23+2+20 runes across 8 types. Keep byte-exact.
     const CRUSH_ARC: &[u8] = &[
-        0x0a, 0x47, 0x0a, 0x05, 0x08, 0xa1, 0x3a, 0x10, 0x02, 0x0a, 0x05, 0x08,
-        0xa4, 0x3a, 0x10, 0x01, 0x0a, 0x05, 0x08, 0xf3, 0x0b, 0x10, 0x0a, 0x0a,
-        0x05, 0x08, 0x91, 0x5b, 0x10, 0x02, 0x0a, 0x05, 0x08, 0x98, 0x3a, 0x10,
-        0x0b, 0x0a, 0x05, 0x08, 0xf2, 0x0b, 0x10, 0x17, 0x0a, 0x05, 0x08, 0x8b,
-        0x5b, 0x10, 0x02, 0x0a, 0x05, 0x08, 0xf4, 0x0b, 0x10, 0x14, 0x15, 0x00,
-        0xc9, 0xa4, 0x3e, 0x18, 0xd8, 0xe0, 0xa2, 0x3c, 0x25, 0x1a, 0xc9, 0xa4,
-        0x3e,
+        0x0a, 0x47, 0x0a, 0x05, 0x08, 0xa1, 0x3a, 0x10, 0x02, 0x0a, 0x05, 0x08, 0xa4, 0x3a, 0x10,
+        0x01, 0x0a, 0x05, 0x08, 0xf3, 0x0b, 0x10, 0x0a, 0x0a, 0x05, 0x08, 0x91, 0x5b, 0x10, 0x02,
+        0x0a, 0x05, 0x08, 0x98, 0x3a, 0x10, 0x0b, 0x0a, 0x05, 0x08, 0xf2, 0x0b, 0x10, 0x17, 0x0a,
+        0x05, 0x08, 0x8b, 0x5b, 0x10, 0x02, 0x0a, 0x05, 0x08, 0xf4, 0x0b, 0x10, 0x14, 0x15, 0x00,
+        0xc9, 0xa4, 0x3e, 0x18, 0xd8, 0xe0, 0xa2, 0x3c, 0x25, 0x1a, 0xc9, 0xa4, 0x3e,
     ];
 
     // Anneau Bsene: 48%, 32 Rune Vi (id 1523), crushed with focus set.
     const CRUSH_RING: &[u8] = &[
-        0x0a, 0x16, 0x0a, 0x05, 0x08, 0xf3, 0x0b, 0x10, 0x20, 0x15, 0x2a, 0xfd,
-        0xf4, 0x3e, 0x18, 0x82, 0xef, 0xa3, 0x3c, 0x25, 0x45, 0xfd, 0xf4, 0x3e,
+        0x0a, 0x16, 0x0a, 0x05, 0x08, 0xf3, 0x0b, 0x10, 0x20, 0x15, 0x2a, 0xfd, 0xf4, 0x3e, 0x18,
+        0x82, 0xef, 0xa3, 0x3c, 0x25, 0x45, 0xfd, 0xf4, 0x3e,
     ];
 
     // item_detail for the ring, mapping its instance uid to type id 7123.
     const ITEM_DETAIL_RING: &[u8] = &[
-        0x12, 0x36, 0x08, 0x3f, 0x22, 0x32, 0x08, 0x82, 0xef, 0xa3, 0x3c, 0x18,
-        0x01, 0x20, 0xd3, 0x37, 0x2a, 0x04, 0x40, 0x1c, 0x48, 0x7d, 0x2a, 0x04,
-        0x40, 0x02, 0x48, 0x70, 0x2a, 0x05, 0x40, 0x02, 0x48, 0xb2, 0x01, 0x2a,
-        0x05, 0x40, 0x02, 0x48, 0xd5, 0x01, 0x2a, 0x05, 0x40, 0x02, 0x48, 0xd3,
-        0x01, 0x2a, 0x05, 0x40, 0x01, 0x48, 0xb6, 0x01,
+        0x12, 0x36, 0x08, 0x3f, 0x22, 0x32, 0x08, 0x82, 0xef, 0xa3, 0x3c, 0x18, 0x01, 0x20, 0xd3,
+        0x37, 0x2a, 0x04, 0x40, 0x1c, 0x48, 0x7d, 0x2a, 0x04, 0x40, 0x02, 0x48, 0x70, 0x2a, 0x05,
+        0x40, 0x02, 0x48, 0xb2, 0x01, 0x2a, 0x05, 0x40, 0x02, 0x48, 0xd5, 0x01, 0x2a, 0x05, 0x40,
+        0x02, 0x48, 0xd3, 0x01, 0x2a, 0x05, 0x40, 0x01, 0x48, 0xb6, 0x01,
     ];
 
     // Real crush requests. Field 1 is the focus effect id and is absent when
@@ -898,33 +756,42 @@ mod tests {
 
     #[test]
     fn crush_decodes_many_rune_types() {
-        let c = crush_result(CRUSH_ARC).expect("parses");
+        let c = crush_result_with(CRUSH_ARC, &old()).expect("parses");
         assert_eq!(c.runes.len(), 8, "one entry per rune type");
         let total: u64 = c.runes.iter().map(|(_, n)| n).sum();
         assert_eq!(total, 71, "2+1+10+2+11+23+2+20 as shown in game");
         // Rune Vi was 10 of the 71
         assert!(c.runes.contains(&(1523, 10)), "{:?}", c.runes);
-        assert!((c.yield_fraction - 0.32185).abs() < 1e-4, "32%: {}", c.yield_fraction);
+        assert!(
+            (c.yield_fraction - 0.32185).abs() < 1e-4,
+            "32%: {}",
+            c.yield_fraction
+        );
         assert_eq!(c.item_uid, 126398552);
     }
 
     #[test]
     fn crush_decodes_single_rune_type() {
-        let c = crush_result(CRUSH_RING).expect("parses");
+        let c = crush_result_with(CRUSH_RING, &old()).expect("parses");
         assert_eq!(c.runes, vec![(1523, 32)], "32 Rune Vi");
-        assert!((c.yield_fraction - 0.47849).abs() < 1e-4, "48%: {}", c.yield_fraction);
+        assert!(
+            (c.yield_fraction - 0.47849).abs() < 1e-4,
+            "48%: {}",
+            c.yield_fraction
+        );
         assert_eq!(c.item_uid, 126416770);
     }
 
     #[test]
     fn item_detail_maps_uid_to_type() {
         // the same uid the ring crush reports, resolving to Anneau Bsene
-        assert_eq!(item_detail(ITEM_DETAIL_RING), Some((126416770, 7123)));
+        let d = item_detail_full_with(ITEM_DETAIL_RING, &old()).expect("ring decodes");
+        assert_eq!((d.uid, d.item_id), (126416770, 7123));
     }
 
     #[test]
     fn item_detail_reads_every_stat_line() {
-        let d = item_detail_full(ITEM_DETAIL_RING).expect("ring decodes");
+        let d = item_detail_full_with(ITEM_DETAIL_RING, &old()).expect("ring decodes");
         assert_eq!((d.uid, d.item_id), (126416770, 7123));
         // Anneau Bsene as the wire described it: Vitalite 28, Dommage 2,
         // Soin 2, Re Per Feu 2, Re Per Eau 2, Invocation 1.
@@ -941,15 +808,18 @@ mod tests {
         let head: &[u8] = &[
             0x12, 0x0c, 0x08, 0x3f, 0x22, 0x08, 0x08, 0x82, 0xef, 0xa3, 0x3c, 0x20, 0xd3, 0x37,
         ];
-        let d = item_detail_full(head).expect("head decodes");
+        let d = item_detail_full_with(head, &old()).expect("head decodes");
         assert_eq!((d.uid, d.item_id), (126416770, 7123));
         assert!(d.stats.is_empty());
     }
 
     #[test]
     fn crush_rejects_unrelated_messages() {
-        assert!(crush_result(PRICE_LIST).is_none(), "a price list is not a crush");
-        assert!(item_detail(PRICE_LIST).is_none());
+        assert!(
+            crush_result_with(PRICE_LIST, &old()).is_none(),
+            "a price list is not a crush"
+        );
+        assert!(item_detail_full_with(PRICE_LIST, &old()).is_none());
     }
 
     /// A real inventory listing, the smallest one in the capture. Identified by
@@ -965,7 +835,7 @@ mod tests {
 
     #[test]
     fn inventory_reads_every_slot() {
-        let items = inventory(INVENTORY).expect("parses");
+        let items = inventory_with(INVENTORY, &old()).expect("parses");
         assert_eq!(items.len(), 45, "one entry per occupied slot");
         let first = &items[0];
         assert_eq!((first.uid, first.item_id), (247103788, 9174));
@@ -975,42 +845,50 @@ mod tests {
 
     #[test]
     fn inventory_keeps_stack_sizes() {
-        let items = inventory(INVENTORY).expect("parses");
+        let items = inventory_with(INVENTORY, &old()).expect("parses");
         let stacked: Vec<_> = items.iter().filter(|i| i.quantity > 1).collect();
         assert_eq!(stacked.len(), 10, "the resources, as opposed to the gear");
         // 8 Moyenne pierre d'ame, the first stack in the listing.
         let stack = stacked[0];
-        assert_eq!((stack.uid, stack.item_id, stack.quantity), (247103796, 9687, 8));
+        assert_eq!(
+            (stack.uid, stack.item_id, stack.quantity),
+            (247103796, 9687, 8)
+        );
     }
 
     #[test]
     fn inventory_remove_reads_the_uid() {
-        assert_eq!(inventory_remove(GONE), Some(231070684));
+        assert_eq!(inventory_remove_with(GONE, &old()), Some(231070684));
     }
 
     /// Real capture, packets #99201 and #99209: the first of nine Colonne
     /// Vertebrale bought one at a time, and the change that followed it.
     /// Item 2323 at uid 253751293, going 1 -> 2 on the second purchase.
     const PICKED_UP: &[u8] = &[
-        0x0a, 0x14, 0x08, 0x3f, 0x22, 0x10, 0x08, 0xfd, 0xdf, 0xff, 0x78, 0x12, 0x04, 0x08,
-        0x01, 0x10, 0x01, 0x18, 0x01, 0x20, 0x93, 0x12,
+        0x0a, 0x14, 0x08, 0x3f, 0x22, 0x10, 0x08, 0xfd, 0xdf, 0xff, 0x78, 0x12, 0x04, 0x08, 0x01,
+        0x10, 0x01, 0x18, 0x01, 0x20, 0x93, 0x12,
     ];
     const RESTACKED: &[u8] = &[
-        0x12, 0x04, 0x08, 0x01, 0x10, 0x01, 0x22, 0x07, 0x08, 0x02, 0x10, 0xfd, 0xdf, 0xff,
-        0x78,
+        0x12, 0x04, 0x08, 0x01, 0x10, 0x01, 0x22, 0x07, 0x08, 0x02, 0x10, 0xfd, 0xdf, 0xff, 0x78,
     ];
 
     #[test]
     fn inventory_add_reads_the_new_stack() {
-        let item = inventory_add(PICKED_UP).expect("parses");
-        assert_eq!((item.uid, item.item_id, item.quantity), (253751293, 2323, 1));
+        let item = inventory_add_with(PICKED_UP, &old()).expect("parses");
+        assert_eq!(
+            (item.uid, item.item_id, item.quantity),
+            (253751293, 2323, 1)
+        );
     }
 
     #[test]
     fn inventory_quantity_reads_the_new_size() {
         // The wire carries the old size too; the new one is what is stored, so
         // a row that drifted is corrected rather than having a delta applied.
-        assert_eq!(inventory_quantity(RESTACKED), Some((253751293, 2)));
+        assert_eq!(
+            inventory_quantity_with(RESTACKED, &old()),
+            Some((253751293, 2))
+        );
     }
 
     #[test]
@@ -1018,30 +896,41 @@ mod tests {
         // A price list carries no item entry, so it reads as an empty bag --
         // which is exactly why main.rs refuses to apply an empty snapshot: an
         // empty listing and a listing that was never one look the same here.
-        assert_eq!(inventory(PRICE_LIST).map(|i| i.len()), Some(0));
+        assert_eq!(inventory_with(PRICE_LIST, &old()).map(|i| i.len()), Some(0));
         // `inventory_remove` is a bare uid, and a bare uid is a shape half the
         // protocol shares -- a price list's field 3 reads as one. Nothing tells
         // these two apart structurally; the wire key does, which is why this
         // parser is only ever handed a message that key already matched.
-        assert_eq!(inventory_remove(PRICE_LIST), Some(2609), "item id, not a uid");
+        assert_eq!(
+            inventory_remove_with(PRICE_LIST, &old()),
+            Some(2609),
+            "item id, not a uid"
+        );
     }
 
     #[test]
     fn item_detail_defaults_to_one_copy() {
-        let d = item_detail_full(ITEM_DETAIL_RING).expect("ring decodes");
+        let d = item_detail_full_with(ITEM_DETAIL_RING, &old()).expect("ring decodes");
         assert_eq!(d.quantity, 1, "no quantity on the wire means a single copy");
     }
 
     #[test]
     fn price_list_decodes_the_ladder() {
-        let p = price_list(PRICE_LIST).expect("parses");
-        assert_eq!(p.offers.len(), 1, "a resource quote is one stack, not listings");
+        let p = price_list_with(PRICE_LIST, &old()).expect("parses");
+        assert_eq!(
+            p.offers.len(),
+            1,
+            "a resource quote is one stack, not listings"
+        );
         let o = &p.offers[0];
         assert_eq!(o.ladder, vec![75, 326, 6660, 99999], "prices shown in game");
         assert_eq!(o.item_id, 2609);
         assert_eq!(p.category, 107);
         assert_eq!(o.listing_id, 10050);
-        assert!(o.stats.is_empty(), "a stack of resources has no rolled stats");
+        assert!(
+            o.stats.is_empty(),
+            "a stack of resources has no rolled stats"
+        );
         assert!(is_known_key(messages::keymap().key("price_list").unwrap()));
     }
 
@@ -1086,13 +975,13 @@ mod tests {
     /// which lost the only reading of that item's coefficient there will ever
     /// be — the instance is gone.
     const CRUSH_NO_RUNES: &[u8] = &[
-        0x0a, 0x0f, 0x15, 0x32, 0x58, 0xb9, 0x3e, 0x18, 0xdc, 0xc1, 0x82, 0x5b, 0x25,
-        0x48, 0x58, 0xb9, 0x3e,
+        0x0a, 0x0f, 0x15, 0x32, 0x58, 0xb9, 0x3e, 0x18, 0xdc, 0xc1, 0x82, 0x5b, 0x25, 0x48, 0x58,
+        0xb9, 0x3e,
     ];
 
     #[test]
     fn a_crush_that_yielded_nothing_is_still_a_crush() {
-        let c = crush_result(CRUSH_NO_RUNES).expect("parses");
+        let c = crush_result_with(CRUSH_NO_RUNES, &old()).expect("parses");
         assert_eq!(c.item_uid, 190882012);
         assert!(c.runes.is_empty(), "nothing rounded up to a whole rune");
         assert!(
@@ -1109,14 +998,18 @@ mod tests {
     /// market's, with both sets of rolled stats thrown away.
     #[test]
     fn price_list_keeps_every_offer_with_its_rolled_stats() {
-        let p = price_list(EQUIPMENT_LISTING).expect("parses");
+        let p = price_list_with(EQUIPMENT_LISTING, &old()).expect("parses");
         assert_eq!(p.category, 10);
         assert_eq!(p.offers.len(), 2, "one offer per copy on sale");
 
         let first = &p.offers[0];
         assert_eq!(first.item_id, 12502);
         assert_eq!(first.listing_id, 36852);
-        assert_eq!(first.unit_price(), 9999, "gear quotes one price, in the x1 slot");
+        assert_eq!(
+            first.unit_price(),
+            9999,
+            "gear quotes one price, in the x1 slot"
+        );
         assert_eq!(
             first.stats,
             vec![(125, 31), (126, 16), (124, 11), (178, 5), (752, 2)],
@@ -1134,7 +1027,7 @@ mod tests {
 
     #[test]
     fn price_list_renders_batches() {
-        let s = price_list(PRICE_LIST).unwrap().to_string();
+        let s = price_list_with(PRICE_LIST, &old()).unwrap().to_string();
         assert!(s.contains("1:75"), "{s}");
         assert!(s.contains("1000:99999"), "{s}");
         assert!(s.contains("item=2609"), "{s}");
@@ -1143,7 +1036,198 @@ mod tests {
     #[test]
     fn price_list_rejects_messages_without_a_ladder() {
         // a short `kea` ack carrying only ids — real capture, no prices in it
-        assert!(price_list(&[0x08, 0x77, 0x18, 0x8a, 0x0d]).is_none());
+        assert!(price_list_with(&[0x08, 0x77, 0x18, 0x8a, 0x0d], &old()).is_none());
+    }
+
+    // ---- 2026-08-04 build ---------------------------------------------------
+    //
+    // The client update that rotated every wire key moved field numbers too.
+    // These are real bytes captured while doing one known thing each, and they
+    // run through `now()` -- the shapes shipped in `schema.json` -- while
+    // the fixtures above still run through `old()`. Same parsers, two builds.
+
+    /// One rune's ladder. A rune quotes a full x1/x10/x100/x1000 *and* carries
+    /// its own stat line, which is why it is here rather than a plain resource.
+    const RUNE_LADDER: &[u8] = &[
+        0x08, 0x4e, 0x10, 0x89, 0x3a, 0x1a, 0x1a, 0x08, 0xec, 0x9f, 0x01, 0x22, 0x04, 0x20, 0x01,
+        0x58, 0x73, 0x28, 0x89, 0x3a, 0x32, 0x09, 0xf4, 0x11, 0xa4, 0xb7, 0x01, 0xa6, 0xa9, 0x0e,
+        0x00, 0x40, 0x4e,
+    ];
+
+    /// Five Palmano on sale, one offer each, every one with its rolled stats —
+    /// the equipment shape, where the ladder quotes a single asking price.
+    const PALMANO_ON_SALE: &[u8] = &[
+        0x08, 0x09, 0x10, 0xa8, 0x45, 0x1a, 0x24, 0x08, 0xf7, 0xdc, 0x01, 0x22, 0x04, 0x20, 0x37,
+        0x58, 0x7d, 0x22, 0x04, 0x20, 0x14, 0x58, 0x77, 0x22, 0x05, 0x20, 0x01, 0x58, 0xb6, 0x01,
+        0x28, 0xa8, 0x45, 0x32, 0x06, 0xb0, 0xea, 0x01, 0x00, 0x00, 0x00, 0x40, 0x09, 0x1a, 0x17,
+        0x08, 0xf8, 0xdc, 0x01, 0x22, 0x04, 0x20, 0x14, 0x58, 0x77, 0x28, 0xa8, 0x45, 0x32, 0x06,
+        0xb7, 0x94, 0x01, 0x00, 0x00, 0x00, 0x40, 0x09, 0x1a, 0x1e, 0x08, 0xf9, 0xdc, 0x01, 0x22,
+        0x05, 0x20, 0x2d, 0x58, 0xae, 0x01, 0x22, 0x04, 0x20, 0x26, 0x58, 0x77, 0x28, 0xa8, 0x45,
+        0x32, 0x06, 0xb8, 0x94, 0x01, 0x00, 0x00, 0x00, 0x40, 0x09, 0x1a, 0x25, 0x08, 0xfa, 0xdc,
+        0x01, 0x22, 0x05, 0x20, 0x70, 0x58, 0xae, 0x01, 0x22, 0x04, 0x20, 0x10, 0x58, 0x77, 0x22,
+        0x05, 0x20, 0x01, 0x58, 0xb6, 0x01, 0x28, 0xa8, 0x45, 0x32, 0x06, 0xe8, 0x84, 0x01, 0x00,
+        0x00, 0x00, 0x40, 0x09, 0x1a, 0x2b, 0x08, 0xfb, 0xdc, 0x01, 0x22, 0x05, 0x20, 0x73, 0x58,
+        0xae, 0x01, 0x22, 0x04, 0x20, 0x64, 0x58, 0x7d, 0x22, 0x04, 0x20, 0x12, 0x58, 0x77, 0x22,
+        0x05, 0x20, 0x01, 0x58, 0xb6, 0x01, 0x28, 0xa8, 0x45, 0x32, 0x06, 0xe8, 0xfb, 0x03, 0x00,
+        0x00, 0x00, 0x40, 0x09,
+    ];
+
+    /// The Palmano that was bought, described by the server: uid 2447309.
+    const PALMANO_DETAIL: &[u8] = &[
+        0x0a, 0x22, 0x08, 0x3f, 0x2a, 0x1e, 0x08, 0xa8, 0x45, 0x12, 0x05, 0x20, 0x70, 0x58, 0xae,
+        0x01, 0x12, 0x04, 0x20, 0x10, 0x58, 0x77, 0x12, 0x05, 0x20, 0x01, 0x58, 0xb6, 0x01, 0x18,
+        0x01, 0x20, 0xcd, 0xaf, 0x95, 0x01,
+    ];
+
+    /// The same uid arriving in the bag, one purchase.
+    const PALMANO_ARRIVED: &[u8] = &[
+        0x1a, 0x28, 0x08, 0x3f, 0x2a, 0x24, 0x08, 0xa8, 0x45, 0x12, 0x05, 0x20, 0x70, 0x58, 0xae,
+        0x01, 0x12, 0x04, 0x20, 0x10, 0x58, 0x77, 0x12, 0x05, 0x20, 0x01, 0x58, 0xb6, 0x01, 0x18,
+        0x01, 0x20, 0xcd, 0xaf, 0x95, 0x01, 0x2a, 0x04, 0x08, 0x01, 0x10, 0x01,
+    ];
+
+    const PALMANO_INTO_BREAKER: &[u8] = &[0x08, 0x01, 0x10, 0xcd, 0xaf, 0x95, 0x01];
+
+    /// What it broke into: Ini x20, Invo x2, Age x28 — Palmano's own three lines.
+    const PALMANO_CRUSHED: &[u8] = &[
+        0x0a, 0x24, 0x08, 0xcd, 0xaf, 0x95, 0x01, 0x1a, 0x05, 0x08, 0x98, 0x3a, 0x10, 0x14, 0x1a,
+        0x05, 0x08, 0x92, 0x3a, 0x10, 0x02, 0x1a, 0x05, 0x08, 0xf4, 0x0b, 0x10, 0x1c, 0x25, 0x8f,
+        0x1a, 0x14, 0x40, 0x2d, 0x90, 0x1a, 0x14, 0x40,
+    ];
+
+    const PALMANO_GONE: &[u8] = &[0x08, 0xcd, 0xaf, 0x95, 0x01];
+
+    /// A rune stack resized by the crush that had just produced runes.
+    const RUNES_RESTACKED: &[u8] = &[0x1a, 0x06, 0x10, 0x84, 0xbd, 0x6f, 0x18, 0x20];
+
+    /// The bag, 3.1 KB, captured immediately after the Palmano purchase — which
+    /// is how it was identified: this is the one listing carrying that uid.
+    const BAG: &[u8] = include_bytes!("../testdata/inventory-2026-08.bin");
+
+    #[test]
+    fn rune_ladder_decodes_on_the_current_build() {
+        let p = price_list_with(RUNE_LADDER, &now()).expect("parses");
+        assert_eq!(p.category, 78);
+        assert_eq!(p.offers.len(), 1);
+        let o = &p.offers[0];
+        assert_eq!(o.item_id, 7433);
+        assert_eq!(o.listing_id, 20460);
+        assert_eq!(
+            o.ladder,
+            vec![2292, 23460, 234662, 0],
+            "0 = nobody selling x1000"
+        );
+        assert_eq!(o.stats, vec![(115, 1)], "a rune carries its own bonus");
+    }
+
+    /// Equipment quotes one offer per copy on sale, each with what it rolled.
+    #[test]
+    fn equipment_listing_keeps_every_copy_on_the_current_build() {
+        let p = price_list_with(PALMANO_ON_SALE, &now()).expect("parses");
+        assert_eq!(p.category, 9);
+        assert_eq!(p.offers.len(), 5);
+        assert!(p.offers.iter().all(|o| o.item_id == 8872), "all Palmano");
+        let first = &p.offers[0];
+        assert_eq!(first.listing_id, 28279);
+        assert_eq!(
+            first.ladder,
+            vec![30000, 0, 0, 0],
+            "one asking price, not a ladder"
+        );
+        // 125 Vitalite, 119 Agilite, 182 Invocation
+        assert_eq!(first.stats, vec![(125, 55), (119, 20), (182, 1)]);
+        assert_eq!(p.offers[1].stats.len(), 1, "a copy that rolled one line");
+    }
+
+    /// Every value here is checkable against DofusDB's template for item 8872:
+    /// 174 Initiative 101-150, 119 Agilite 16-20, 182 Invocation 1-1.
+    #[test]
+    fn item_detail_decodes_on_the_current_build() {
+        let d = item_detail_full_with(PALMANO_DETAIL, &now()).expect("parses");
+        assert_eq!(d.uid, 2447309);
+        assert_eq!(d.item_id, 8872);
+        assert_eq!(d.quantity, 1);
+        assert_eq!(d.stats, vec![(174, 112), (119, 16), (182, 1)]);
+    }
+
+    #[test]
+    fn inventory_add_decodes_on_the_current_build() {
+        let d = inventory_add_with(PALMANO_ARRIVED, &now()).expect("parses");
+        assert_eq!((d.uid, d.item_id, d.quantity), (2447309, 8872, 1));
+    }
+
+    /// The one field number the 2026-08-04 rotation left alone.
+    #[test]
+    fn slot_put_is_unchanged_between_builds() {
+        assert_eq!(
+            crush_slot_change_with(PALMANO_INTO_BREAKER, &now()),
+            Some((1, 2447309))
+        );
+        assert_eq!(
+            crush_slot_change_with(PALMANO_INTO_BREAKER, &old()),
+            Some((1, 2447309))
+        );
+    }
+
+    #[test]
+    fn crush_decodes_on_the_current_build() {
+        let c = crush_result_with(PALMANO_CRUSHED, &now()).expect("parses");
+        assert_eq!(
+            c.item_uid, 2447309,
+            "the instance that went into the breaker"
+        );
+        // 7448 Ini, 7442 Invo, 1524 Age — the three lines Palmano rolls
+        assert_eq!(c.runes, vec![(7448, 20), (7442, 2), (1524, 28)]);
+        assert!(
+            (c.yield_fraction - 2.3141210).abs() < 1e-6,
+            "{}",
+            c.yield_fraction
+        );
+    }
+
+    #[test]
+    fn inventory_remove_decodes_on_the_current_build() {
+        assert_eq!(inventory_remove_with(PALMANO_GONE, &now()), Some(2447309));
+    }
+
+    #[test]
+    fn inventory_quantity_decodes_on_the_current_build() {
+        assert_eq!(
+            inventory_quantity_with(RUNES_RESTACKED, &now()),
+            Some((1826436, 32))
+        );
+    }
+
+    /// The purchased uid is in this listing, which is what says it is the bag
+    /// and not one of the other containers the server describes.
+    #[test]
+    fn inventory_decodes_on_the_current_build() {
+        let items = inventory_with(BAG, &now()).expect("parses");
+        assert!(items.len() > 20, "a real bag, {} slots", items.len());
+        let bought = items
+            .iter()
+            .find(|i| i.uid == 2447309)
+            .expect("the Palmano just bought");
+        assert_eq!(bought.item_id, 8872);
+        assert!(
+            items.iter().any(|i| i.quantity > 1),
+            "stacks keep their size"
+        );
+    }
+
+    /// A body from the other build must not half-parse into something plausible
+    /// — that is the failure the layout table exists to make impossible.
+    #[test]
+    fn a_body_from_the_other_build_is_rejected() {
+        assert!(
+            price_list_with(RUNE_LADDER, &old()).is_none(),
+            "new bytes, old numbers"
+        );
+        assert!(item_detail_full_with(PALMANO_DETAIL, &old()).is_none());
+        assert!(crush_result_with(PALMANO_CRUSHED, &old()).is_none());
+        assert!(
+            price_list_with(PRICE_LIST, &now()).is_none(),
+            "old bytes, new numbers"
+        );
     }
 }
-

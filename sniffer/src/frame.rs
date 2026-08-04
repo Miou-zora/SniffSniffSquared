@@ -17,10 +17,22 @@ pub struct Payload {
     pub data: Vec<u8>,
 }
 
+/// Nothing reads `correlation_id` or `status`: messages are keyed by the `Any`
+/// type URL, not by anything in the envelope (see CLAUDE.md). They are parsed
+/// and kept because they are part of the frame format and show up in `--raw`
+/// output, and dropping them would make the struct stop describing the wire.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum Frame {
-    Request { correlation_id: i64, payload: Payload },
-    Response { correlation_id: i64, status: i64, payload: Payload },
+    Request {
+        correlation_id: i64,
+        payload: Payload,
+    },
+    Response {
+        correlation_id: i64,
+        status: i64,
+        payload: Payload,
+    },
     Event(Payload),
 }
 
@@ -56,11 +68,18 @@ impl Frame {
         match field {
             1 => {
                 let (cid, pl) = parse_request(inner)?;
-                Some(Frame::Request { correlation_id: cid, payload: pl })
+                Some(Frame::Request {
+                    correlation_id: cid,
+                    payload: pl,
+                })
             }
             2 => {
                 let (cid, st, pl) = parse_response(inner)?;
-                Some(Frame::Response { correlation_id: cid, status: st, payload: pl })
+                Some(Frame::Response {
+                    correlation_id: cid,
+                    status: st,
+                    payload: pl,
+                })
             }
             3 => Some(Frame::Event(Payload::parse(inner)?)),
             _ => None,

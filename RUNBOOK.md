@@ -69,6 +69,7 @@ never uses.
 | `sniffer/src/dump.rs` | pretty-printer, `Any` unwrapping, schema-vs-wire checking |
 | `sniffer/src/interpret.rs` | per-message meaning, dispatched on semantic name |
 | `sniffer/src/messages.rs` | semantic name <-> wire key; the one place a rotated key changes |
+| `sniffer/src/schema.rs` | walks `schema.json` into a `Node`; message shapes live in data, not here |
 | `sniffer/src/dispatch.rs` | callbacks per message key |
 
 ### What is actually known
@@ -225,7 +226,7 @@ The Rust app lives in `sniffer/`. **Run it from there** — it resolves
 ```sh
 cd sniffer
 cargo build
-cargo test          # 52 tests, all should pass
+cargo test          # 74 tests, all should pass
 ```
 
 > **Windows.** Install [Npcap](https://npcap.com/#download) first — it is what
@@ -338,30 +339,59 @@ you work on a message type later without being in-game when it appears.
 The obfuscated wire keys change between client builds, so this is routine
 maintenance rather than a failure. Nothing in `sniffer/src/` refers to a message by its
 wire key: code says `price_list`, and `sniffer/src/messages.rs` is the only place that
-knows the current key is `kea`.
+knows the current key is `kbt`.
 
-**To repoint a message, edit `sniffer/keymap.json`. No rebuild:**
+**A rotation moves two things, and fixing only the first looks like it worked.**
+The 2026-08-04 update rotated every key *and* moved a protobuf field number in
+every message but `crush_slot_put`. Repoint the key alone and the sniffer names
+the message correctly, dumps it correctly, and stores nothing — the parser is
+reading field 5 where the ladder is now at field 6.
+
+**Keys go in `sniffer/keymap.json`, shapes and field numbers in
+`sniffer/schema.json`. Neither needs a rebuild** — both are read from the working
+directory at startup, which is one more reason to run the sniffer from `sniffer/`:
 
 ```json
-{
-  "price_list": "kea",
-  "chat_message": "ksv"
-}
+// keymap.json
+{ "price_list": "kbt", "chat_message": "kti" }
 ```
 
-Change the value to the new key, restart the sniffer, and confirm the startup
-line:
+```json
+// schema.json — the whole message, not just its numbers
+"price_offer": { "fields": [
+  { "n": 1, "name": "listing_id", "kind": "varint" },
+  { "n": 4, "name": "stat", "kind": "message", "of": "stat_line", "repeated": true },
+  { "n": 5, "name": "item_id", "kind": "varint" },
+  { "n": 6, "name": "ladder", "kind": "packed" }
+]}
+```
+
+Kinds are `varint`, `packed`, `f32` and `message` (which needs `of`).
+`repeated: true` keeps every copy; without it the last wins, as protobuf does.
+Restart the sniffer and confirm both startup lines:
 
 ```
-[*] message keymap: 3 entries (2 from keymap.json) — chat_message=ksv price_list=kea ...
+[*] message keymap: 10 entries (0 from keymap.json) — chat_message=kti ... price_list=kbt
+[*] message schema: 15 definitions from schema.json
 ```
 
-Entries in that file override the built-in `messages::DEFAULTS`; anything
-omitted falls back to them, and `_`-prefixed entries are treated as comments.
-Editing `DEFAULTS` instead is equivalent but needs a rebuild — do that when the
-new key is confirmed and worth committing.
+If that second line says `built-in` you are not in `sniffer/`, or the file was
+rejected — the reason is printed above it. `Schema::parse` refuses a dangling
+`of`, a reused field number and a reused field name, because each of those
+parses to something plausible instead of failing.
 
-To find the new key, use step 6.
+**What does *not* belong in the file: meaning.** "An empty ladder is not a price
+message", "quantity absent means one", "a negative delta is a removal" are
+decisions and stay in `interpret.rs`. The schema says where the bytes are; Rust
+says what they are worth.
+
+To find the new key, use step 6. To find a moved field number, dump the message
+with `--all` and read the tags against something checkable: an item whose stats
+you already know from DofusDB, or a price you can see in the HDV. One capture of
+a known item pins the whole message — a Palmano (8872, template 174 Initiative
+101-150, 119 Agilité 16-20, 182 Invocation 1-1) arrived as
+`{4: 112, 11: 174}, {4: 16, 11: 119}, {4: 1, 11: 182}`, which places value at 4
+and effect id at 11 with nothing left to guess.
 
 ### 6. Identifying a message
 
@@ -402,10 +432,14 @@ To wire a confirmed message in, in this order:
 3. **Persist it**, optionally, with a handler in `build_dispatch()`
    (`sniffer/src/main.rs`), registered via
    `messages::keymap().key("guild_info")` rather than a literal key.
-4. **Pin it** with a test over real captured bytes, as
-   `interpret::tests::price_list_decodes_the_ladder` does.
+4. **Describe its shape** in `sniffer/schema.json` under a definition of its
+   own, and read it through the `&Schema` the parser is handed rather than
+   walking bytes directly.
+5. **Pin it** with a test over real captured bytes, as
+   `interpret::tests::rune_ladder_decodes_on_the_current_build` does — passing an
+   explicit schema, so the test says which build the bytes came from.
 
-`price_list` is the worked example of all four steps.
+`price_list` is the worked example of all five steps.
 
 ### 7. Testing without the game
 

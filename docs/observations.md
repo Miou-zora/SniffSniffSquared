@@ -128,3 +128,102 @@ Useful as a keepalive/heartbeat signature when identifying flows.
 <- kdh  {3: 8161, 4: 104}
 -> kag  {2: 8161}
 ```
+
+## 2026-08-04: the client update that rotated everything
+
+Recorded because the previous entries in this file are all keyed to a build
+whose keys are gone, and because the *shape* of the rotation is the reusable
+part. Bytes below are real, from `packets`.
+
+### How much moved
+
+141 distinct keys in the 2026-08-03 session, 91 in the first session after the
+update, **19 shared**. The strongest single reading is the connection
+handshake, which is identical in kind every session:
+
+```
+AUG 3   ksv jri jri jri jri knh kmw jri jrj jri jrj iwa jri iwa jrj iwa jri jpp
+AUG 4   lqu hoy kqu mgq mgt hpd kqz krv mgz kqp kqp kvi jtg kvw kub jbf ipc kva
+```
+
+Nothing in common. The new build also emits `m*` and `h*` prefixes, which the
+old one never did.
+
+### A survivor that changed meaning
+
+`iun` was `inventory_add`. It is still on the wire and now means something else:
+
+```
+Aug 3  iun  24 B  0a16083f2212089c81b3a1011807209d3a2a05400148f201   an inventory slot
+Aug 4  iun   6 B  08ff02189c35                                       {1: 383, 3: 6812}
+```
+
+Field 3 is constant across samples and field 1 tracks what was just picked up or
+crushed — current and maximum pods. Left mapped, it would have written rows.
+
+### Re-identification, one action each
+
+Every mapping below came from one deliberate in-game action against the archive.
+
+```
+kdk  client  browse a category          kda  server  item ids in that category
+keh  client  ask prices for an item     kbt  server  the ladder      = price_list
+kbm  client  buy {listing, price, qty}  kgv  server  purchase confirmed
+kcr  client  put into breaker           kfb  server  item detail     = item_detail
+kbj  client  crush it                   kfp  server  the yield       = crush_result
+ktm  client  chat send                  kti  server  chat broadcast  = chat_message
+                                        ivx  server  the bag         = inventory
+                                        iua  server  a stack arrived = inventory_add
+                                        ivj  server  a stack resized = inventory_quantity
+                                        ium  server  a uid left      = inventory_remove
+```
+
+`kti` was free: the body carries `2026-08-04T10:42:38+02:00`, the author, and
+the typed text in plain ASCII. `ivx` used the same test as the previous build —
+the purchased Palmano's uid 2447309 appears in exactly one bag listing and in no
+other container listing.
+
+### The field numbers moved too
+
+This is the part that would have been missed. Repointing the keys alone makes
+every message name and dump correctly while storing nothing.
+
+`price_list`, measured on both builds:
+
+```
+                 2026-07-10        2026-08-04
+outer category   f1 varint         f1 varint      same
+outer item id    f3 varint         f2 varint
+outer offer      f2 Len            f3 Len
+offer item id    f1 varint         f5 varint
+offer stat line  f4 Len            f4 Len         same
+offer ladder     f5 Len packed     f6 Len packed
+offer listing    f7 varint         f1 varint
+```
+
+`crush_slot_put` is the only message whose numbers did not move at all.
+
+**No shape changed anywhere.** Same nesting depth, same wire types, same packed
+ladder, same repeated stat lines, same backwards value-then-effect-id order.
+Both are data now, in `sniffer/schema.json`: the shape *and* the numbers. What
+stayed in Rust is meaning — an empty ladder is not a price message, a missing
+quantity is one copy, a negative delta is a removal.
+
+### Reading a moved field without guessing
+
+Use an item whose template you already have. Palmano is 8872, and DofusDB gives
+174 Initiative 101-150, 119 Agilité 16-20, 182 Invocation 1-1. Its `kfb`:
+
+```
+0a22 083f 2a1e
+  08 a845                 item 8872
+  1205 20 70 58 ae01      {4: 112, 11: 174}   Initiative 112, in 101-150
+  1204 20 10 58 77        {4: 16,  11: 119}   Agilité 16,    in 16-20
+  1205 20 01 58 b601      {4: 1,   11: 182}   Invocation 1,  in 1-1
+  1801                    quantity 1
+  20 cdaf9501             uid 2447309
+```
+
+Three lines, three ranges, one arrangement that fits: value at 4, effect id at
+11. Then the crush of that same uid returns Ini x20, Invo x2, Age x28 — the same
+three effects, which confirms the read from the other end.

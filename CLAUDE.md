@@ -12,18 +12,23 @@ explanation, the verified command sequence, and a "dead ends" list.
 - **The traffic is NOT encrypted.** Plaintext protobuf on TCP 5555. If output
   looks like noise it is a decode bug or a mis-joined schema, never a cipher.
   Confirm with `--raw` — you will see `type.ankama.com/...` in ASCII.
-- **The obfuscated `Any` keys ROTATE between client builds.** `kdh`, `kag` and
-  `jqj` — the keys the older notes are written around — do not exist in the
-  current build at all; an 861-message capture contains none of them (`ksv`
-  survived). Any "key X means Y" mapping is only valid for the build it was
-  observed on. Re-identify with `sniffer/tools/identify.py` rather than trusting notes.
+- **The obfuscated `Any` keys ROTATE between client builds, and so do the field
+  numbers inside them.** Measured across the 2026-08-04 update: of 141 keys seen
+  before it and 91 after, 19 are shared, and the connection handshake — identical
+  every session — has not one token in common. All ten identified messages moved.
+  Any "key X means Y" mapping is only valid for the build it was observed on.
+  Re-identify with `sniffer/tools/identify.py` rather than trusting notes.
+- **A key that survives a rotation may now mean something else entirely.** `iun`
+  was `inventory_add`; it is still on the wire and now carries pods,
+  `{1: current weight, 3: max}`. A stale mapping that still resolves writes
+  nonsense, which is worse than one that fails.
 - **Static game data never crosses the wire.** Recipes and template stat
   ranges — anything a tooltip draws — live in the client's data files. The
   server is only asked what it alone knows, which is prices. Three negative
   probes are written up in `RUNBOOK.md` part 1; do not re-run them. DofusDB is
   the source for both, in bulk via `tools/import_items.py` and at read time in
   `web/` for ids the importer has not reached.
-- **Messages are keyed by the `Any` type URL** (`type.ankama.com/ksv`), not by
+- **Messages are keyed by the `Any` type URL** (`type.ankama.com/kbt`), not by
   `Frame.Payload.id`. The `id` map is not used anywhere in `sniffer/src/`. Do not
   chase it.
 - **Field names are unknown** for the game protocol. `sniffer/proto/messages.json`
@@ -41,7 +46,8 @@ explanation, the verified command sequence, and a "dead ends" list.
 ## Layout
 
 Monorepo. Shared infra at the root, one folder per app. **The Rust app must be
-run from `sniffer/`** (it resolves `keymap.json` and `proto/` relative to cwd).
+run from `sniffer/`** (it resolves `keymap.json`, `schema.json` and `proto/`
+relative to cwd).
 
 ```
 docker-compose.yml  postgres + pgadmin + web; `sniffer` service is Linux-only
@@ -73,6 +79,7 @@ sniffer/            the Rust capture app — RUN IT FROM THIS DIRECTORY
   src/                module table in RUNBOOK.md part 1
   proto/              messages.json (schema registry) + generated dofus3.proto
   keymap.json         wire-key overrides — edit when a build rotates keys
+  schema.json         message shapes + field numbers; rotates on the same schedule
   tools/              gen_proto.py, identify.py, findvalue.py,
                       parse_descriptors.py, replay.py, resign-debug-app.sh
   tools/frida/        runtime schema extraction: agent.ts, probe.ts, run.py
@@ -120,12 +127,13 @@ says to read `web/node_modules/next/dist/docs/` before writing code. Do that.
 ## Commands
 
 The Rust app lives in `sniffer/` and MUST be run from there — it resolves
-`keymap.json` and `proto/messages.json` relative to the working directory.
+`keymap.json`, `schema.json` and `proto/messages.json` relative to the working
+directory.
 
 ```sh
 docker compose up -d                      # postgres + pgadmin, from repo root
 cd sniffer
-cargo build && cargo test                 # 52 tests
+cargo build && cargo test                 # 74 tests
 ./target/debug/SniffSniffSquared --dev en0 --all "tcp port 5555"
 ./target/debug/SniffSniffSquared --dev en0 --raw "tcp port 5555"
 ./target/debug/SniffSniffSquared --list
@@ -244,28 +252,55 @@ name it in `messages::DEFAULTS`, parse it in `interpret.rs` matching on the
 `messages::keymap().key("...")`, and pin it with a test over real bytes.
 `price_list` is the worked example.
 
+**The message shapes are data too, in `sniffer/schema.json`.** Field numbers
+rotate with the keys — the 2026-08-04 update moved one in every message
+`interpret.rs` reads except `crush_slot_put` — so structure lives in JSON and
+`sniffer/src/schema.rs` walks it into a `Node`. Small adapters in `interpret.rs`
+turn a `Node` into the typed struct. **Meaning stays in Rust**: "an empty ladder
+is not a price message", "quantity absent means one", "a negative delta is a
+removal". Those are decisions, not structure.
+
+The file is loaded from the working directory, so editing it needs no rebuild;
+the same file is compiled in as a fallback for a sniffer started from the wrong
+directory. `sniffer/testdata/schema-2026-07-10.json` describes the previous build
+so its captured fixtures still run — same parsers, two schemas, real bytes from
+each. That two-build suite is the guard: a schema that is subtly wrong parses to
+something plausible rather than failing, which is the trap
+`sniffer/proto/messages.json` falls into. `Schema::parse` also rejects a dangling
+submessage reference, a reused field number and a reused field name at load,
+before a byte is read.
+
 | semantic name | key (this build) | meaning |
 |---|---|---|
-| `price_list` | `kea` | marketplace ladder x1/x10/x100/x1000 -> `prices` table |
-| `chat_message` | `ksv` | chat/trade channel |
-| `crush_result` | `kfy` | brisage yield -> `crushes` (item_id + yield only). Runes and focus parsed for display but NOT stored: runes derive from stats+coefficient, and focus does not change the coefficient |
-| `item_detail` | `kev` | uid -> item type id; cached to fill `crushes.item_id` |
-| `crush_request` | `ker` | the crush command; field 1 = focus effect id, absent if none. Display only |
-| `crush_slot_put` | `kch` | item put into the breaker -> `crush_placements`. Carries only the uid; the type comes from the `item_detail` that answers it |
-| `inventory` | `iss` | the whole bag as a snapshot -> `inventory` (replaces the table). Entries share `item_detail`'s shape, quantity at field 3 |
-| `inventory_add` | `iun` | a new stack arrived -> upserts a row. One slot, in the listing's shape |
-| `inventory_quantity` | `iul` | a stack changed size -> updates that row. Field 4 = `{1: new size, 2: uid}`, and it is the **new size, not a delta** |
-| `inventory_remove` | `ivf` | one instance has left the bag -> deletes that row. A bare uid at field 3 |
+| `price_list` | `kbt` | marketplace ladder x1/x10/x100/x1000 -> `prices` table |
+| `chat_message` | `kti` | chat/trade channel |
+| `crush_result` | `kfp` | brisage yield -> `crushes` (item_id + yield only). Runes and focus parsed for display but NOT stored: runes derive from stats+coefficient, and focus does not change the coefficient |
+| `item_detail` | `kfb` | uid -> item type id; cached to fill `crushes.item_id` |
+| `crush_request` | `kbj` | the crush command; field 1 = focus effect id, absent if none. Display only |
+| `crush_slot_put` | `kcr` | item put into the breaker -> `crush_placements`. Carries only the uid; the type comes from the `item_detail` that answers it |
+| `inventory` | `ivx` | the whole bag as a snapshot -> `inventory` (replaces the table). Entries share `item_detail`'s shape |
+| `inventory_add` | `iua` | a new stack arrived -> upserts a row. One entry, in `item_detail`'s envelope |
+| `inventory_quantity` | `ivj` | a stack changed size -> updates that row. It is the **new size, not a delta** |
+| `inventory_remove` | `ium` | one instance has left the bag -> deletes that row. A bare uid |
 | `price_list_legacy` | `kdh` | the 2026-07-10 price list; gone from the wire, kept for tests |
 
+Field numbers deliberately left out of that table — they are in
+`sniffer/schema.json`, which is the only place they belong now.
+
+**Every key above was re-identified on 2026-08-04** and the previous build's set
+(`kea ksv kfy kev ker kch iss iun iul ivf`) shares nothing with it. Watch for
+tokens that survive a rotation carrying a *different* message: `iun` is still on
+the wire and now means pods, `{1: current weight, 3: max}`. Left mapped to
+`inventory_add` it would have written nonsense rather than failing.
+
 `inventory` was identified without reading anything off the screen: every item
-ever put into the breaker (12 of 12, matched by instance uid) appears in the
-`iss` that preceded its placement, and none appear in `iso`, the other
-container listing. `ivf` followed from the same set — the crushed uid arrives
-there 1–11 s after each crush, 8 of 8. `iun`/`iul` came from one known
-purchase: nine Colonne Vertébrale bought one at a time, one `iun` then eight
-`iul` counting 1→9. Every check is a single query; redo them if a build
-rotates the keys. RUNBOOK part 3 has the shapes and the purchase sequence.
+ever put into the breaker (12 of 12, matched by instance uid) appeared in the
+listing that preceded its placement, and none appeared in the other container
+listing. Re-confirmed against one purchase on 2026-08-04: the bought Palmano's
+uid 2447309 appears in exactly one `ivx` and in no other listing. `ium` followed
+from the same set — the crushed uid arrives there seconds after each crush.
+Every check is a single query; redo them the next time a build rotates. RUNBOOK
+part 3 has the shapes and the purchase sequence.
 
 Next up (RUNBOOK part 3 items 5-6): identify `iuz` — 3 seen, 68-80 KB each,
 server-only, matched a full price ladder during known-plaintext search, so it

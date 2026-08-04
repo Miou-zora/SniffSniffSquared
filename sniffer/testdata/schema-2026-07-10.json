@@ -1,0 +1,100 @@
+{
+  "_comment": "The 2026-07-10 build. Not loaded at runtime -- nothing on the wire speaks it any more -- but the fixtures captured from it are the only record it existed, and a schema system that cannot describe a second build is not doing its job. interpret.rs runs every parser over this and over schema.json, same code, real bytes from each.",
+  "_diff": "Every message but crush_slot moved a field number. No SHAPE changed: same nesting, same wire types, same packed ladder, same repeated stat lines, same value-before-effect order. That is the whole argument for keeping shapes in data and meaning in Rust.",
+
+  "stat_line": {
+    "fields": [
+      { "n": 8, "name": "value", "kind": "varint" },
+      { "n": 9, "name": "effect", "kind": "varint" }
+    ]
+  },
+
+  "item_entry": {
+    "fields": [
+      { "n": 1, "name": "uid", "kind": "varint" },
+      { "n": 3, "name": "quantity", "kind": "varint" },
+      { "n": 4, "name": "item_id", "kind": "varint" },
+      { "n": 5, "name": "stat", "kind": "message", "of": "stat_line", "repeated": true }
+    ]
+  },
+
+  "slot": {
+    "fields": [{ "n": 4, "name": "entry", "kind": "message", "of": "item_entry" }]
+  },
+
+  "item_detail": {
+    "fields": [{ "n": 2, "name": "slot", "kind": "message", "of": "slot", "repeated": true }]
+  },
+
+  "inventory": {
+    "fields": [{ "n": 1, "name": "slot", "kind": "message", "of": "slot", "repeated": true }]
+  },
+
+  "inventory_add": {
+    "_note": "Arrived in the listing's own shape on this build, so its numbers are the listing's.",
+    "fields": [{ "n": 1, "name": "slot", "kind": "message", "of": "slot", "repeated": true }]
+  },
+
+  "quantity_change": {
+    "fields": [
+      { "n": 1, "name": "quantity", "kind": "varint" },
+      { "n": 2, "name": "uid", "kind": "varint" }
+    ]
+  },
+
+  "inventory_quantity": {
+    "fields": [
+      { "n": 4, "name": "change", "kind": "message", "of": "quantity_change" }
+    ]
+  },
+
+  "inventory_remove": {
+    "fields": [{ "n": 3, "name": "uid", "kind": "varint" }]
+  },
+
+  "crush_slot": {
+    "_note": "The one message the 2026-08-04 rotation left alone.",
+    "fields": [
+      { "n": 1, "name": "delta", "kind": "varint" },
+      { "n": 2, "name": "uid", "kind": "varint" }
+    ]
+  },
+
+  "rune_yield": {
+    "fields": [
+      { "n": 1, "name": "rune_id", "kind": "varint" },
+      { "n": 2, "name": "count", "kind": "varint" }
+    ]
+  },
+
+  "crush_body": {
+    "fields": [
+      { "n": 1, "name": "rune", "kind": "message", "of": "rune_yield", "repeated": true },
+      { "n": 2, "name": "yield", "kind": "f32" },
+      { "n": 3, "name": "uid", "kind": "varint" }
+    ]
+  },
+
+  "crush_result": {
+    "fields": [
+      { "n": 1, "name": "body", "kind": "message", "of": "crush_body" }
+    ]
+  },
+
+  "price_offer": {
+    "fields": [
+      { "n": 1, "name": "item_id", "kind": "varint" },
+      { "n": 4, "name": "stat", "kind": "message", "of": "stat_line", "repeated": true },
+      { "n": 5, "name": "ladder", "kind": "packed" },
+      { "n": 7, "name": "listing_id", "kind": "varint" }
+    ]
+  },
+
+  "price_list": {
+    "fields": [
+      { "n": 1, "name": "category", "kind": "varint" },
+      { "n": 2, "name": "offer", "kind": "message", "of": "price_offer", "repeated": true },
+      { "n": 3, "name": "item_id", "kind": "varint" }
+    ]
+  }
+}
