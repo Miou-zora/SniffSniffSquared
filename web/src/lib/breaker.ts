@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { rememberRecipes } from "@/lib/recipes";
 import type { RuneLadder } from "@/app/rune-price";
 import { planBuy, type BuyPlan, type Ladder } from "@/lib/craft";
 import {
@@ -560,7 +561,30 @@ async function craftEstimate(itemId: number): Promise<CraftEstimate | null> {
     const live = await fetchRecipe(itemId);
     if (live === null) return null;
     source = "dofusdb";
-    lines = live;
+    lines = live.lines;
+    // Learn it, do not just show it. Until this wrote, opening a craftable the
+    // importer had not reached rendered its recipe and forgot it again, so the
+    // item never turned up on /opportunities however profitable it was — the
+    // page joins `recipes`, and there was no row. Now viewing an item is
+    // enough to register it.
+    //
+    // Safe to do on a read: it fires only while `recipes` has no row for this
+    // item, so the second render finds it stored and never reaches here. The
+    // job id has to come with it or the row is invisible to /opportunities,
+    // which lists what a job makes.
+    if (live.jobId !== null) {
+      await rememberRecipes([
+        {
+          itemId,
+          jobId: live.jobId,
+          ingredients: lines.map((l) => ({ itemId: l.itemId, quantity: l.quantity })),
+        },
+      ]);
+      // /opportunities also filters on super_type_id, which only `fetchItems`
+      // fills — a recipe stored against an item nobody has named would be
+      // dropped by that filter and look exactly like this bug all over again.
+      await fetchItems([itemId]);
+    }
     const names = await query<{ item_id: string; name_fr: string | null }>(
       `SELECT item_id, name_fr FROM items WHERE item_id = ANY($1::bigint[])`,
       [lines.map((l) => l.itemId)],
@@ -758,9 +782,14 @@ async function fetchItemNames(itemIds: number[]): Promise<Map<number, string>> {
  * outage, a timeout or a shape we cannot read must all degrade to "no recipe"
  * rather than take the breaker view down with them.
  */
-export async function fetchRecipe(
-  itemId: number,
-): Promise<{ itemId: number; quantity: number; name: string | null }[] | null> {
+export interface LiveRecipe {
+  /** The job that crafts it. Null when DofusDB does not say, which keeps the
+   *  row out of /opportunities — that page only lists what a job makes. */
+  jobId: number | null;
+  lines: { itemId: number; quantity: number; name: string | null }[];
+}
+
+export async function fetchRecipe(itemId: number): Promise<LiveRecipe | null> {
   try {
     const res = await fetch(
       `https://api.dofusdb.fr/recipes?resultId=${itemId}&$limit=1`,
@@ -770,18 +799,29 @@ export async function fetchRecipe(
     const body: unknown = await res.json();
     const data = (body as { data?: unknown }).data;
     if (!Array.isArray(data) || data.length === 0) return null;
-    const first = data[0] as { ingredientIds?: unknown; quantities?: unknown };
+    const first = data[0] as {
+      ingredientIds?: unknown;
+      quantities?: unknown;
+      job?: { id?: unknown };
+      jobId?: unknown;
+    };
     const ids = first.ingredientIds;
     const quantities = first.quantities;
     if (!Array.isArray(ids) || !Array.isArray(quantities)) return null;
     // A mismatched pair is a recipe we cannot read rather than a partial one,
     // and half a recipe would price the item too cheaply.
     if (ids.length === 0 || ids.length !== quantities.length) return null;
-    return ids.map((id, i) => ({
-      itemId: Number(id),
-      quantity: Number(quantities[i]),
-      name: null,
-    }));
+    // Served either nested or flat depending on the endpoint's mood; both have
+    // been seen, so read whichever is there.
+    const job = Number(first.job?.id ?? first.jobId);
+    return {
+      jobId: Number.isFinite(job) && job > 0 ? job : null,
+      lines: ids.map((id, i) => ({
+        itemId: Number(id),
+        quantity: Number(quantities[i]),
+        name: null,
+      })),
+    };
   } catch {
     return null;
   }

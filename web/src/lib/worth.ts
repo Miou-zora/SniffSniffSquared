@@ -379,7 +379,7 @@ async function craftCosts(itemIds: number[]): Promise<Map<number, number>> {
     if (recipe === null) continue;
     byItem.set(
       id,
-      recipe.map((r) => ({ ingredientId: r.itemId, quantity: r.quantity })),
+      recipe.lines.map((r) => ({ ingredientId: r.itemId, quantity: r.quantity })),
     );
   }
   if (byItem.size === 0) return out;
