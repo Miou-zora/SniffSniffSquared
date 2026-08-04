@@ -5,12 +5,18 @@
  * there is nothing here for the sniffer to capture: the recycler message the
  * client sends (`kcr`) is a placement delta and an instance uid, seven bytes
  * fully accounted for, and the whole packet archive holds no float or scaled
- * integer matching an observed payout. The client reads a constant from its own
- * asset bundle and does the arithmetic on screen.
+ * integer matching an observed payout. The client works it out on screen from
+ * its own asset bundle.
  *
- * That constant is `items.recycle_nuggets`, from DofusDB — which serves the
- * identical double the client's bundle holds, checked bit for bit rather than
- * to a rounding. It is the *base* for one unit, before any of the below.
+ * It does not simply read the item's `recyclingNuggets` field, which is why the
+ * first attempt at this was wrong: that field is 0 for all 4511 craftable items,
+ * and `RecycleUi.GetItemNuggets` takes a `Dictionary<int, int> resources` rather
+ * than an item. A craftable is decomposed into resources and summed;
+ * `items.recycle_nuggets` holds the result, filled by tools/extract_nuggets.py
+ * straight from the client's data files. DofusDB mirrors the raw field
+ * faithfully — bit for bit — but the raw field is only half the answer.
+ *
+ * That column is the *base* for one unit, before any of the below.
  */
 import { fetchItems } from "@/lib/breaker";
 import { query } from "@/lib/db";
@@ -47,8 +53,19 @@ export const CHARACTER_SHARE = 0.6;
 export interface RecycleYield {
   /** Nuggets per unit before bonuses and the split, as the game data holds it. */
   base: number;
-  /** What one unit actually pays out at `CHARACTER_SHARE`, no bonus active. */
+  /** What one unit pays out at `CHARACTER_SHARE` with no bonus active. */
   perUnit: number;
+  /**
+   * The same at the x1.5 craft bonus, or null for an item no recipe makes.
+   *
+   * What a craftable item was measured paying: Multygely decomposes to 0.5060
+   * and showed 0,46, which is this figure and not `perUnit`. Shown alongside
+   * rather than instead, because whether the bonus keys off "this item has a
+   * recipe" or "you crafted this copy" has not been separated — and null rather
+   * than computed for the rest, since Rune Invo has no recipe and a craft bonus
+   * next to it is a number that can never occur.
+   */
+  perUnitCrafted: number | null;
 }
 
 /**
@@ -59,15 +76,23 @@ export interface RecycleYield {
  * second view of that item finds the row and asks nobody. Same lazy-enrichment
  * rule the rest of the app uses.
  *
- * A base of 0 is not "unknown" — it is what the game data holds, for roughly
- * nine items in ten — so it comes back as a yield of zero rather than null. Not
- * read as "the recycler refuses it": a level 114 hammer reads 0 the same as a
- * quest token does, and telling a real refusal from an absent figure would need
- * a probe that costs an item. The panel reports the source, not a verdict.
+ * DofusDB is a weaker source than the table here, not an equal one: it serves
+ * the raw `recyclingNuggets` field, which is 0 for every craftable item because
+ * the client decomposes those into resources instead of reading it. So a zero
+ * from DofusDB is discarded rather than stored — it would overwrite a
+ * decomposed value with a number that reads as "not worth recycling".
+ * tools/extract_nuggets.py is what fills those in.
  */
 export async function recycleYield(itemId: number): Promise<RecycleYield | null> {
-  const rows = await query<{ recycle_nuggets: string | number | null }>(
-    `SELECT recycle_nuggets FROM items WHERE item_id = $1`,
+  // Subqueries rather than a join, so the row comes back even for an item that
+  // `items` has never heard of — the DofusDB fallback below needs to run, and
+  // whether a recipe makes it is a separate fact from whether it is named.
+  const rows = await query<{
+    recycle_nuggets: string | number | null;
+    craftable: boolean;
+  }>(
+    `SELECT (SELECT recycle_nuggets FROM items WHERE item_id = $1) AS recycle_nuggets,
+            EXISTS (SELECT 1 FROM recipes WHERE item_id = $1) AS craftable`,
     [itemId],
   );
 
@@ -81,9 +106,17 @@ export async function recycleYield(itemId: number): Promise<RecycleYield | null>
   if (!Number.isFinite(base)) {
     const meta = await fetchItems([itemId]);
     const live = meta.get(itemId)?.recycleNuggets;
-    if (live === undefined || live === null) return null;
+    // A live 0 is not an answer — see the note above — so it stays unknown
+    // rather than becoming a stored zero.
+    if (live === undefined || live === null || live === 0) return null;
     base = live;
   }
 
-  return { base, perUnit: base * CHARACTER_SHARE };
+  return {
+    base,
+    perUnit: base * CHARACTER_SHARE,
+    perUnitCrafted: rows[0]?.craftable
+      ? base * RECYCLE_BONUSES.craft * CHARACTER_SHARE
+      : null,
+  };
 }

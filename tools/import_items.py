@@ -430,9 +430,12 @@ def enrich(refresh, dry_run):
           "  type_fr = COALESCE(EXCLUDED.type_fr, items.type_fr),\n"
           "  icon_id = COALESCE(EXCLUDED.icon_id, items.icon_id),\n"
           "  super_type_id = COALESCE(EXCLUDED.super_type_id, items.super_type_id),\n"
-          # 0 is a real answer here -- "this item cannot be recycled" -- so it
-          # must overwrite a stored value. COALESCE only guards the absent field.
-          "  recycle_nuggets = COALESCE(EXCLUDED.recycle_nuggets, items.recycle_nuggets),\n"
+          # NULLIF, not COALESCE alone: DofusDB serves 0 for every craftable
+          # item, because the client decomposes those into resources rather
+          # than reading the field, so a zero must never clobber the value
+          # tools/extract_nuggets.py computed.
+          "  recycle_nuggets = COALESCE(NULLIF(EXCLUDED.recycle_nuggets, 0),"
+          " items.recycle_nuggets),\n"
           "  updated_at = now();\n"
     )
 

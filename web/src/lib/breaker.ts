@@ -759,7 +759,11 @@ async function remember(meta: Map<number, ItemMeta>): Promise<void> {
            type_fr = COALESCE(EXCLUDED.type_fr, items.type_fr),
            icon_id = COALESCE(EXCLUDED.icon_id, items.icon_id),
            super_type_id = COALESCE(EXCLUDED.super_type_id, items.super_type_id),
-           recycle_nuggets = COALESCE(EXCLUDED.recycle_nuggets, items.recycle_nuggets),
+           -- NULLIF, not COALESCE alone: DofusDB serves 0 for every craftable
+           -- item because the client decomposes those instead of reading the
+           -- field, so a zero here must never clobber a decomposed value.
+           recycle_nuggets = COALESCE(NULLIF(EXCLUDED.recycle_nuggets, 0),
+                                      items.recycle_nuggets),
            updated_at = now()`,
         [itemId, m.name, m.level, m.type, m.iconId, m.superTypeId, m.recycleNuggets],
       );

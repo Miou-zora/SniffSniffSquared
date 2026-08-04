@@ -71,14 +71,24 @@ a resource the bags already cover reads as settled and costs nothing.
 
 **The recycling yield is read data, not captured data.** It never crosses the
 wire — the recycler message the sniffer sees is a placement, and the payout is
-computed by the client — so `src/lib/recycle.ts` reads the base constant from
-`items.recycle_nuggets` and falls back to DofusDB for an item the importer has
-not reached, like every other enrichment here. What it stores is the base for
-one unit; the zone/craft/boss multipliers and the character share are applied at
-render time, because none of them are properties of the item. `CHARACTER_SHARE`
-is the one figure measured rather than read out of the client: Rune Invo's base
-of 4.5 pays 2.70, which is 60%. If payouts stop matching, change that constant
-and the whole panel follows.
+computed by the client — so `src/lib/recycle.ts` reads the base from
+`items.recycle_nuggets`, which `tools/extract_nuggets.py` fills from the client's
+own bundles.
+
+**DofusDB is a weaker source here than usual, and the fallback knows it.** Its
+`recyclingNuggets` is 0 for every craftable item, because the client decomposes
+those into resources rather than reading the field. So a zero from DofusDB is
+discarded instead of stored: it would overwrite a decomposed value with a number
+that reads as "not worth recycling". The `remember` upsert guards the same way,
+with `NULLIF(EXCLUDED.recycle_nuggets, 0)`.
+
+What is stored is the base for one unit. The zone/craft/boss multipliers and the
+character share are applied at render time, because none of them are properties
+of the item — and the panel prints the plain payout _and_ the craft-bonus one
+side by side for anything with a recipe, since a craftable was measured paying
+the second. `CHARACTER_SHARE` is the one figure measured rather than read out of
+the client: Rune Invo's base of 4.5 pays 2.70, which is 60%. If payouts stop
+matching, change that constant and the whole panel follows.
 
 **Opening a craftable item registers its recipe.** `craftEstimate` falls back to
 DofusDB when `recipes` has no row, and now writes what it learns — with the

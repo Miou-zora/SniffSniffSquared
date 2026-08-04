@@ -35,9 +35,19 @@ explanation, the verified command sequence, and a "dead ends" list.
   121-message recycler session decoded field by field holds no float or scaled
   integer matching an observed payout, and across the whole archive `4.5`,
   `2.70` and `0.46` never appear as f32 or f64. The number lives in the client's
-  asset bundle, and DofusDB serves the identical double bit for bit — that is
-  `items.recycle_nuggets`, with `web/src/lib/recycle.ts` applying the bonuses
-  and the character share on top. Do not go looking for it in packets again.
+  asset bundle. Do not go looking for it in packets again.
+- **But `recyclingNuggets` is not the yield, for a craftable item.** The field
+  is 0 for all 4511 of them, on DofusDB *and* in the bundle it faithfully
+  mirrors — the client decomposes those into resources and sums instead, which
+  is why `RecycleUi.GetItemNuggets` takes a `Dictionary<int, int> resources`
+  rather than an item. Storing the raw field writes 0 for exactly the items a
+  craft dashboard cares about, and 0 reads as "not worth recycling" rather than
+  as "not computed". `tools/extract_nuggets.py` does the decomposition off the
+  bundles and fills `items.recycle_nuggets`; DofusDB is only ever allowed to
+  write a *non-zero* value into it. Then `web/src/lib/recycle.ts` applies the
+  bonuses and the character share. Measured, all at a 60% share: Rune Invo
+  4.5 -> 2.70 no bonus, Multygely 0.5060 -> 0,46 at craft, Essence du Craqueleur
+  Légendaire 0.2097 -> 0,57 at craft x boss.
 - **Messages are keyed by the `Any` type URL** (`type.ankama.com/kbt`), not by
   `Frame.Payload.id`. The `id` map is not used anywhere in `sniffer/src/`. Do not
   chase it.
@@ -79,6 +89,10 @@ tools/              backup_db.sh      one compressed dump + pruning; the
                                       names ids into `items` via DofusDB, and
                                       fills `recipes` (+ names their ingredients,
                                       which the wire has usually never seen)
+                    extract_nuggets.py fills `items.recycle_nuggets` from the
+                                      client's own bundles, decomposing every
+                                      craftable into resources (needs UnityPy;
+                                      reads the install, never writes to it)
                     check_brisage.py  runs the brisage model over every
                                       captured crush, predicted vs actual
                     backfill_offers.py parses marketplace listings out of

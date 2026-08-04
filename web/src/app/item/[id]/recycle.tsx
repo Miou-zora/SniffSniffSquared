@@ -7,16 +7,20 @@ const precise = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 4 });
 /**
  * What recycling this item pays.
  *
- * Leads with the payout rather than the base, because the payout is the figure
- * the game shows you and the one you would check this page against. The base
- * is next to it, since that is the number that stays true when your share or
- * your standing changes.
+ * Two figures rather than one, because the bonus that separates them is not a
+ * property of the item and cannot be resolved from stored data: the plain
+ * payout, and the same with the craft bonus, which is what every craftable item
+ * measured so far has actually paid. Picking one and printing it alone would be
+ * wrong half the time with nothing on screen to say so.
  */
 export function RecycleYieldPanel({ yield: y }: { yield: RecycleYield | null }) {
   if (y === null) {
     return (
       <p className="text-body tracking-body text-sage-40 max-w-[74ch]">
-        Nothing known about recycling this item — DofusDB was asked directly.
+        Nothing known about recycling this item. DofusDB serves 0 for anything craftable,
+        so that is not an answer either — run{" "}
+        <code className="text-deep-fern">tools/extract_nuggets.py</code>, which reads the
+        yield out of the client&apos;s own data files.
       </p>
     );
   }
@@ -24,10 +28,9 @@ export function RecycleYieldPanel({ yield: y }: { yield: RecycleYield | null }) 
   if (y.base === 0) {
     return (
       <p className="text-body tracking-body text-sage-40 max-w-[74ch]">
-        <span className="text-phosphor-white">No recycling value</span> in the game data.
-        Most of the catalogue reads this way — whether that means the recycler refuses the
-        item or that the figure is simply absent has not been established, so this is what
-        the source says rather than a verdict.
+        <span className="text-phosphor-white">No recycling value.</span> The item has none
+        of its own and no recipe to decompose, which is the case for 22 items in the
+        catalogue.
       </p>
     );
   }
@@ -37,17 +40,25 @@ export function RecycleYieldPanel({ yield: y }: { yield: RecycleYield | null }) 
   return (
     <p className="text-body tracking-body text-sage-40 max-w-[74ch]">
       <span className="text-phosphor-white tabular-nums">{fmt.format(y.perUnit)}</span>{" "}
-      nuggets per unit, at your {Math.round(CHARACTER_SHARE * 100)}% character share of a
-      base <span className="tabular-nums">{precise.format(y.base)}</span>.{" "}
-      <span className="tabular-nums">
-        {fmt.format(y.perUnit * 10)} for 10, {fmt.format(y.perUnit * 100)} for 100
-      </span>
-      .
+      nuggets per unit
+      {y.perUnitCrafted !== null && (
+        <>
+          , or{" "}
+          <span className="text-phosphor-white tabular-nums">
+            {fmt.format(y.perUnitCrafted)}
+          </span>{" "}
+          with the craft bonus
+        </>
+      )}{" "}
+      — at your {Math.round(CHARACTER_SHARE * 100)}% character share of a base{" "}
+      <span className="tabular-nums">{precise.format(y.base)}</span>.
       <span className="text-deep-fern block">
-        Before bonuses: x{RECYCLE_BONUSES.zone} in one of the item&apos;s favourite
-        subareas, x{RECYCLE_BONUSES.craft} for something you crafted yourself, x
-        {RECYCLE_BONUSES.boss} on boss loot. They multiply the base, so the whole readout
-        scales with them.
+        The base multiplies by {RECYCLE_BONUSES.zone} in one of the item&apos;s favourite
+        subareas, {RECYCLE_BONUSES.craft} for a craft, and {RECYCLE_BONUSES.boss} on boss
+        loot, and these combine. Measured: Rune Invo pays{" "}
+        <span className="tabular-nums">2,70</span> with none of them, Multygely{" "}
+        <span className="tabular-nums">0,46</span> at the craft bonus, and the Essence du
+        Craqueleur Légendaire <span className="tabular-nums">0,57</span> at craft x boss.
       </span>
     </p>
   );
