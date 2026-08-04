@@ -28,6 +28,16 @@ explanation, the verified command sequence, and a "dead ends" list.
   probes are written up in `RUNBOOK.md` part 1; do not re-run them. DofusDB is
   the source for both, in bulk via `tools/import_items.py` and at read time in
   `web/` for ids the importer has not reached.
+- **Recycling yield is one of those, and the search for it on the wire is
+  finished.** `kcr` is a seven-byte placement — field 1 a signed delta, field 2
+  an instance uid, all bytes consumed — and carries no third value; it is also
+  client->server, so it could not report a figure the client just computed. A
+  121-message recycler session decoded field by field holds no float or scaled
+  integer matching an observed payout, and across the whole archive `4.5`,
+  `2.70` and `0.46` never appear as f32 or f64. The number lives in the client's
+  asset bundle, and DofusDB serves the identical double bit for bit — that is
+  `items.recycle_nuggets`, with `web/src/lib/recycle.ts` applying the bonuses
+  and the character share on top. Do not go looking for it in packets again.
 - **Messages are keyed by the `Any` type URL** (`type.ankama.com/kbt`), not by
   `Frame.Payload.id`. The `id` map is not used anywhere in `sniffer/src/`. Do not
   chase it.
