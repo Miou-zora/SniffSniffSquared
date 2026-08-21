@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="SniffSniffSquared">
+  <!--
+    Favicon. A tab strip is light in light mode and dark in dark mode, so the
+    mark carries both palettes and switches itself; an SVG favicon honours
+    prefers-color-scheme in every browser that accepts one at all. Light is the
+    default so a browser that ignores the query still gets the legible pair.
+  -->
+  <style>
+    .ink  { fill: #12180f }
+    .acc  { fill: #35871f }
+    .back { fill: #35871f; opacity: .38 }
+    @media (prefers-color-scheme: dark) {
+      .ink  { fill: #ddffdc }
+      .acc  { fill: #7fee64 }
+      .back { fill: #7fee64; opacity: .45 }
+    }
+  </style>
+  <g class="back">
+    <rect x="7" y="7" width="10" height="10"/><rect x="18" y="7" width="10" height="10"/>
+    <rect x="29" y="7" width="10" height="10"/><rect x="40" y="7" width="10" height="10"/>
+    <rect x="51" y="7" width="10" height="10"/>
+    <rect x="7" y="18" width="10" height="10"/>
+    <rect x="7" y="29" width="10" height="10"/><rect x="18" y="29" width="10" height="10"/>
+    <rect x="29" y="29" width="10" height="10"/><rect x="40" y="29" width="10" height="10"/>
+    <rect x="51" y="29" width="10" height="10"/>
+    <rect x="51" y="40" width="10" height="10"/>
+    <rect x="7" y="51" width="10" height="10"/><rect x="18" y="51" width="10" height="10"/>
+    <rect x="29" y="51" width="10" height="10"/><rect x="40" y="51" width="10" height="10"/>
+    <rect x="51" y="51" width="10" height="10"/>
+  </g>
+  <g class="ink">
+    <rect x="4" y="4" width="10" height="10"/><rect x="15" y="4" width="10" height="10"/>
+    <rect x="26" y="4" width="10" height="10"/><rect x="37" y="4" width="10" height="10"/>
+    <rect x="4" y="15" width="10" height="10"/>
+    <rect x="4" y="26" width="10" height="10"/><rect x="15" y="26" width="10" height="10"/>
+    <rect x="37" y="26" width="10" height="10"/><rect x="48" y="26" width="10" height="10"/>
+    <rect x="48" y="37" width="10" height="10"/>
+    <rect x="15" y="48" width="10" height="10"/><rect x="26" y="48" width="10" height="10"/>
+    <rect x="37" y="48" width="10" height="10"/><rect x="48" y="48" width="10" height="10"/>
+  </g>
+  <g class="acc">
+    <rect x="48" y="4" width="10" height="10"/>
+    <rect x="26" y="26" width="10" height="10"/>
+    <rect x="4" y="48" width="10" height="10"/>
+  </g>
+</svg>

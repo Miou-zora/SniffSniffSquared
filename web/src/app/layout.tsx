@@ -21,6 +21,15 @@ const ui = Inter({
 export const metadata: Metadata = {
   title: "SniffSniffSquared",
   description: "Dofus 3 marketplace prices, captured off the wire",
+  // Declared rather than left to the app-directory file convention: the SVG
+  // carries both palettes and switches on prefers-color-scheme, and the .ico
+  // stays as the fallback for anything that will not take an SVG favicon.
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "any" },
+    ],
+  },
 };
 
 export default function RootLayout({

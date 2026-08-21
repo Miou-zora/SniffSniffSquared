@@ -1,6 +1,9 @@
 <div align="center">
 
-# SniffSniffSquared
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/logo/banner-dark.png">
+  <img src="docs/logo/banner-light.png" alt="SniffSniffSquared — passive protobuf sniffer for Dofus 3" width="820">
+</picture>
 
 **A passive network sniffer and protobuf decoder for the Dofus 3 game protocol —
 and the trading dashboard built on what it captures.**
