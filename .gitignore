@@ -1,6 +1,9 @@
 # Local secrets / env
 .env
 
+# Claude Code worktrees — full nested checkouts of this repo
+.claude/worktrees/
+
 # Node (frida tooling)
 node_modules/
 
