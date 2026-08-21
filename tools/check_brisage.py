@@ -35,7 +35,7 @@ def psql(sql):
     out = subprocess.run(
         ["docker", "exec", "dofus_db", "psql", "-U", "dofus", "-d", "dofus",
          "-t", "-A", "-F", "\t", "-c", sql],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
     )
     if out.returncode != 0:
         sys.exit("psql failed: " + out.stderr.strip())

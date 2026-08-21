@@ -43,7 +43,8 @@ def psql(sql, rows=False):
     args = ["docker", "exec", "-i", "dofus_db", "psql", "-U", "dofus", "-d", "dofus",
             "-v", "ON_ERROR_STOP=1"]
     args += ["-t", "-A", "-F", "\t", "-c", sql] if rows else ["-q", "-f", "-"]
-    out = subprocess.run(args, input=None if rows else sql, capture_output=True, text=True)
+    out = subprocess.run(args, input=None if rows else sql, capture_output=True,
+                         text=True, encoding="utf-8")
     if out.returncode != 0:
         sys.exit("psql failed:\n" + (out.stderr.strip() or out.stdout.strip()))
     if rows:

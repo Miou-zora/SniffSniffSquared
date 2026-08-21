@@ -109,6 +109,11 @@ tools/              backup_db.sh      one compressed dump + pruning; the
                                       rejected for yielding no runes
                     backfill_inventory.py replays the newest archived bag
                                       listing into `inventory`
+                    seed_sample.py    a demo database for `web/` with no client
+                                      and no capture: reference data real from
+                                      DofusDB, every observation fabricated.
+                                      Never touches `packets`. Not a capture —
+                                      do not measure the model against it
 RUNBOOK.md          the guide. Start here for anything protocol-related.
 
 sniffer/            the Rust capture app — RUN IT FROM THIS DIRECTORY
