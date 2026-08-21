@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { Live } from "@/app/live";
+import { Mark } from "@/app/mark";
 import { ItemSearch } from "@/app/search";
 
 /**
@@ -35,9 +36,12 @@ export function PageHeader({
     <div className="flex flex-wrap items-center justify-between gap-16">
       <Link
         href="/"
-        className="text-caption tracking-caption text-phosphor-white hover:text-lime-pulse font-display uppercase"
+        className="text-caption tracking-caption text-phosphor-white hover:text-lime-pulse font-display flex items-center gap-8 uppercase"
       >
-        Sniff<span className="text-lime-pulse">Sniff</span>Squared
+        <Mark />
+        <span>
+          Sniff<span className="text-lime-pulse">Sniff</span>Squared
+        </span>
       </Link>
       <div className="flex flex-wrap items-center justify-end gap-16">
         <nav className="flex flex-wrap items-center gap-16">

@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-labelledby="t d">
+  <title id="t">SniffSniffSquared</title>
+  <desc id="d">A five-by-five bitmap S with a body behind it, three cells lit on the diagonal.</desc>
+  <!--
+    The letter as a terminal draws one: five by five cells, rows 0/2/4 full bars,
+    row 1 hugging the left and row 3 the right. Every cell is drawn twice — once
+    three units back, once on the face — so the letter has a body. Cubed as
+    thickness rather than as a written exponent, and exactly three cells are lit,
+    stepping down the diagonal.
+
+    Pitch 11, cell 10, depth 3, origin 4. The four-unit margin is deliberate: the
+    mark has to sit inside an avatar and a favicon without touching the edge.
+  -->
+  <g fill="#7fee64" opacity="0.45">
+    <rect x="7" y="7" width="10" height="10"/><rect x="18" y="7" width="10" height="10"/>
+    <rect x="29" y="7" width="10" height="10"/><rect x="40" y="7" width="10" height="10"/>
+    <rect x="51" y="7" width="10" height="10"/>
+    <rect x="7" y="18" width="10" height="10"/>
+    <rect x="7" y="29" width="10" height="10"/><rect x="18" y="29" width="10" height="10"/>
+    <rect x="29" y="29" width="10" height="10"/><rect x="40" y="29" width="10" height="10"/>
+    <rect x="51" y="29" width="10" height="10"/>
+    <rect x="51" y="40" width="10" height="10"/>
+    <rect x="7" y="51" width="10" height="10"/><rect x="18" y="51" width="10" height="10"/>
+    <rect x="29" y="51" width="10" height="10"/><rect x="40" y="51" width="10" height="10"/>
+    <rect x="51" y="51" width="10" height="10"/>
+  </g>
+  <g fill="#ddffdc">
+    <rect x="4" y="4" width="10" height="10"/><rect x="15" y="4" width="10" height="10"/>
+    <rect x="26" y="4" width="10" height="10"/><rect x="37" y="4" width="10" height="10"/>
+    <rect x="4" y="15" width="10" height="10"/>
+    <rect x="4" y="26" width="10" height="10"/><rect x="15" y="26" width="10" height="10"/>
+    <rect x="37" y="26" width="10" height="10"/><rect x="48" y="26" width="10" height="10"/>
+    <rect x="48" y="37" width="10" height="10"/>
+    <rect x="15" y="48" width="10" height="10"/><rect x="26" y="48" width="10" height="10"/>
+    <rect x="37" y="48" width="10" height="10"/><rect x="48" y="48" width="10" height="10"/>
+  </g>
+  <g fill="#7fee64">
+    <rect x="48" y="4" width="10" height="10"/>
+    <rect x="26" y="26" width="10" height="10"/>
+    <rect x="4" y="48" width="10" height="10"/>
+  </g>
+</svg>
