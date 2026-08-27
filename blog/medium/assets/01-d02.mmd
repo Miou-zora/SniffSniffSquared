@@ -1,0 +1,6 @@
+flowchart TB
+    A["TCP stream, port 5555"] -->|contains| B["length-prefixed frame<br/>varint length, does not count itself"]
+    B -->|contains| C["Frame, from Ankama.SpinConnection<br/>oneof: Request, Response, Payload event"]
+    C -->|contains| D["google.protobuf.Any"]
+    D --> E["type_url = type.ankama.com/kbt<br/>THIS is the message identity"]
+    D --> F["value = the message body bytes"]

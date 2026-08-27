@@ -1,0 +1,9 @@
+flowchart TD
+    A["a one-byte header reading 9"] --> B{"does that 9 count<br/>the header itself?"}
+    B -- "no, the correct answer" --> C["consume 1 + 9 = 10 bytes"]
+    C --> D["the next read starts on a real header"]
+    D --> E["in sync, and stays that way"]
+    B -- "yes, a wrong guess" --> F["consume 1 + 9 - 1 = 9 bytes"]
+    F --> G["the next read starts on the<br/>last byte of frame 1's body"]
+    G --> H["that byte is read as a length.<br/>it is not one"]
+    H --> I["every following read is further off.<br/>no error, and it never recovers"]

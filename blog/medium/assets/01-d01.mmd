@@ -1,0 +1,11 @@
+flowchart LR
+    C["Dofus 3 client"] -->|"TCP 5555"| L["libpcap"]
+    L --> RA["TCP reassembly"]
+    subgraph THIS["this post"]
+        DF["deframing"]
+        DE["protobuf decode"]
+    end
+    RA --> DF
+    DF --> AN["Any unwrap"]
+    AN --> DE
+    DE --> DB[("Postgres")]
