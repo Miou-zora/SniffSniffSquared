@@ -1,0 +1,12 @@
+{
+  "name": "sniffsniffsquared-blog",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Authoring tooling for blog/ — renders mermaid diagrams to images for platforms that do not render mermaid (Medium). Not part of the sniffer or web build.",
+  "scripts": {
+    "mmdc": "mmdc"
+  },
+  "devDependencies": {
+    "@mermaid-js/mermaid-cli": "^11.4.2"
+  }
+}

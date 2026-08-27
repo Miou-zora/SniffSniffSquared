@@ -597,6 +597,7 @@ watched.
 | file | what it covers |
 |---|---|
 | **[RUNBOOK.md](RUNBOOK.md)** | **Start here for protocol work.** How the protocol works, a copy-pasteable command sequence, every trap, and what remains to be done. |
+| **[blog/](blog/)** | The same material as a narrative: six posts on how the protocol was read, the schema route that deadlocked, and what was deliberately ruled out. Explanatory rather than reference. |
 | [CLAUDE.md](CLAUDE.md) | Condensed orientation: ground truth, layout, conventions, traps. |
 | [web/AGENTS.md](web/AGENTS.md) | The front end: the data it reads, the decisions taken and why. |
 | [docs/observations.md](docs/observations.md) | Annotated real captures with byte-level analysis. |

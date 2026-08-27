@@ -1,0 +1,13 @@
+flowchart TD
+    S["first bytes of a new connection"] --> L["for each of the 7 layouts"]
+    L --> R["read one frame at the current offset"]
+    R --> V{"body at least 6 bytes<br/>AND fully parses as protobuf?"}
+    V -- no --> X["stop: score is the frames managed so far"]
+    V -- yes --> I["score + 1, advance the offset"]
+    I --> C{"tried 12 frames?"}
+    C -- no --> R
+    C -- yes --> X
+    X --> B{"score at least 3?"}
+    B -- no --> D["discard this layout"]
+    B -- yes --> K["keep it if it beats the current best"]
+    K --> LOCK["lock the winner for this direction"]

@@ -115,6 +115,16 @@ tools/              backup_db.sh      one compressed dump + pruning; the
                                       Never touches `packets`. Not a capture —
                                       do not measure the model against it
 RUNBOOK.md          the guide. Start here for anything protocol-related.
+blog/               a six-post narrative series over the same material —
+                    how the protocol was read, what was ruled out and why.
+                    Explanatory, not reference; RUNBOOK stays the reference.
+                    Every number in it traces to a file here, so a fact that
+                    changes needs the post updated too
+  medium/           generated Medium-ready copies (mermaid rendered to PNG,
+                    tables reflowed, links absolute). Produced by the
+                    `publisher` agent via `/blog-medium`; do not hand-edit.
+                    `pnpm install` here first — pulls a headless Chromium for
+                    mermaid-cli, into the gitignored node_modules
 
 sniffer/            the Rust capture app — RUN IT FROM THIS DIRECTORY
   src/                module table in RUNBOOK.md part 1
@@ -275,15 +285,29 @@ a link-local address (`169.254/16`, `fe80::/10`); loopback is exempt because
 | `verification-before-completion` | obra/superpowers | "it builds" has been claimed here when it did not |
 | `ui-ux-pro-max` | nextlevelbuilder/ui-ux-pro-max-skill | searchable local design database; pairs with `frontend-design` |
 | `writing-plans` / `brainstorming` | obra/superpowers | for multi-step work before touching code |
+| `svg-logo-designer` | rknall/claude-skills | the mark and the banners in `docs/logo/` |
+| `find-skills` | vercel-labs/skills | searches the skills registry, so "is there a skill for X" is answered rather than guessed |
+| `blog-writing-guide` | getsentry/skills | `blog/` is written to its engineering-deep-dive bar: open on the problem, numbers over adjectives, say what did not work |
+| `writing-guidelines` | vercel-labs/agent-skills | a prose linter for a review pass over `blog/` |
 
 `ui-ux-pro-max` is 1.8 MB, nearly all CSV reference data, and is the only skill
 here from outside anthropics/obra. Audited before committing: standard library
 only, no network, no `subprocess`/`eval`; its two file writes generate design
 docs. Re-check after `npx skills update`.
 
+**`writing-guidelines` is the one skill here that reaches the network at run
+time.** Its `SKILL.md` carries no rules; it fetches them from
+`raw.githubusercontent.com/vercel-labs/writing-guidelines` before each review. No
+code, no `subprocess`, nothing else surprising, but it means its behaviour is not
+pinned by `skills-lock.json` the way every other skill's is, and it fails offline.
+Two of its rules are deliberately ignored in `blog/`: it bans em dashes and
+hard-wrapped paragraphs, and every document in this repo uses both.
+
 Deliberately not installed: the marketing, SEO and video generation skills
 (`ad-creative`, `hyperframes*`, `paywalls`, `pricing`, `seo-audit`, `video`,
-`social`, ...). Nothing in this repo ships to an audience.
+`social`, ...). `blog/` is the only thing here written for an audience and it is
+explanatory, not promotional — the SEO and product-launch halves of
+`blog-writing-guide` are ignored for the same reason.
 
 ## Conventions
 
