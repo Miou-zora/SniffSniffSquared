@@ -7,6 +7,7 @@
     "mmdc": "mmdc"
   },
   "devDependencies": {
-    "@mermaid-js/mermaid-cli": "^11.4.2"
+    "@mermaid-js/mermaid-cli": "^11.4.2",
+    "puppeteer": "^25.9.0"
   }
 }

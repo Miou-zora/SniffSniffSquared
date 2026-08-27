@@ -11,6 +11,9 @@ importers:
       '@mermaid-js/mermaid-cli':
         specifier: ^11.4.2
         version: 11.16.0(puppeteer@25.9.0)(tailwindcss@4.3.3)
+      puppeteer:
+        specifier: ^25.9.0
+        version: 25.9.0
 
 packages:
 
