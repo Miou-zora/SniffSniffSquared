@@ -115,6 +115,11 @@ tools/              backup_db.sh      one compressed dump + pruning; the
                                       Never touches `packets`. Not a capture —
                                       do not measure the model against it
 RUNBOOK.md          the guide. Start here for anything protocol-related.
+blog/               a six-post narrative series over the same material —
+                    how the protocol was read, what was ruled out and why.
+                    Explanatory, not reference; RUNBOOK stays the reference.
+                    Every number in it traces to a file here, so a fact that
+                    changes needs the post updated too
 
 sniffer/            the Rust capture app — RUN IT FROM THIS DIRECTORY
   src/                module table in RUNBOOK.md part 1
@@ -290,10 +295,14 @@ time.** Its `SKILL.md` carries no rules; it fetches them from
 `raw.githubusercontent.com/vercel-labs/writing-guidelines` before each review. No
 code, no `subprocess`, nothing else surprising, but it means its behaviour is not
 pinned by `skills-lock.json` the way every other skill's is, and it fails offline.
+Two of its rules are deliberately ignored in `blog/`: it bans em dashes and
+hard-wrapped paragraphs, and every document in this repo uses both.
 
 Deliberately not installed: the marketing, SEO and video generation skills
 (`ad-creative`, `hyperframes*`, `paywalls`, `pricing`, `seo-audit`, `video`,
-`social`, ...). Nothing in this repo ships to an audience.
+`social`, ...). `blog/` is the only thing here written for an audience and it is
+explanatory, not promotional — the SEO and product-launch halves of
+`blog-writing-guide` are ignored for the same reason.
 
 ## Conventions
 
