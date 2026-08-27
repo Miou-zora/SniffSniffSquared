@@ -1,0 +1,102 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1500px; height: 750px; }
+  body {
+    background: #0a0d0b;
+    background-image:
+      radial-gradient(1200px 600px at 78% 18%, rgba(127,238,100,0.10), transparent 70%),
+      linear-gradient(180deg, #0b0f0c 0%, #080a09 100%);
+    font-family: Georgia, "Times New Roman", serif;
+    color: #ddffdc;
+    position: relative;
+    overflow: hidden;
+  }
+  .pad { position: absolute; inset: 72px 80px; }
+
+  .mark { display: flex; align-items: center; gap: 18px; }
+  .mark svg { width: 44px; height: 44px; display: block; }
+  .mark span {
+    font: 600 20px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    letter-spacing: 0.14em; color: #7fee64; text-transform: uppercase;
+  }
+
+  h1 {
+    position: absolute; left: 80px; top: 250px; width: 780px;
+    font-weight: 700; font-size: 76px; line-height: 1.06;
+    letter-spacing: -0.015em; color: #f2fff0;
+  }
+  .sub {
+    position: absolute; left: 80px; top: 430px; width: 720px;
+    font: 400 26px/1.4 Georgia, serif; color: #9fc79a;
+  }
+  .kicker {
+    position: absolute; left: 80px; bottom: 72px;
+    font: 400 17px/1 ui-monospace, Menlo, Consolas, monospace;
+    letter-spacing: 0.08em; color: #5f7d5b;
+  }
+
+  .dump {
+    position: absolute; right: 80px; top: 96px; width: 560px;
+    font: 400 19px/1.62 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: #3f5a3c; white-space: pre;
+    padding: 26px 28px;
+    border: 1px solid rgba(127,238,100,0.16);
+    border-radius: 10px;
+    background: rgba(127,238,100,0.03);
+  }
+  .dump .asc { color: #6a8a65; }
+  .dump .hit { color: #7fee64; }
+  .dump .hitbg { background: rgba(127,238,100,0.14); border-radius: 3px; }
+</style>
+
+<body>
+  <div class="pad">
+    <div class="mark">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">
+        <g fill="#7fee64" opacity="0.45">
+          <rect x="7" y="7" width="10" height="10"/><rect x="18" y="7" width="10" height="10"/>
+          <rect x="29" y="7" width="10" height="10"/><rect x="40" y="7" width="10" height="10"/>
+          <rect x="51" y="7" width="10" height="10"/>
+          <rect x="7" y="18" width="10" height="10"/>
+          <rect x="7" y="29" width="10" height="10"/><rect x="18" y="29" width="10" height="10"/>
+          <rect x="29" y="29" width="10" height="10"/><rect x="40" y="29" width="10" height="10"/>
+          <rect x="51" y="29" width="10" height="10"/>
+          <rect x="51" y="40" width="10" height="10"/>
+          <rect x="7" y="51" width="10" height="10"/><rect x="18" y="51" width="10" height="10"/>
+          <rect x="29" y="51" width="10" height="10"/><rect x="40" y="51" width="10" height="10"/>
+          <rect x="51" y="51" width="10" height="10"/>
+        </g>
+        <g fill="#ddffdc">
+          <rect x="4" y="4" width="10" height="10"/><rect x="15" y="4" width="10" height="10"/>
+          <rect x="26" y="4" width="10" height="10"/><rect x="37" y="4" width="10" height="10"/>
+          <rect x="4" y="15" width="10" height="10"/>
+          <rect x="4" y="26" width="10" height="10"/><rect x="15" y="26" width="10" height="10"/>
+          <rect x="37" y="26" width="10" height="10"/><rect x="48" y="26" width="10" height="10"/>
+          <rect x="48" y="37" width="10" height="10"/>
+          <rect x="15" y="48" width="10" height="10"/><rect x="26" y="48" width="10" height="10"/>
+          <rect x="37" y="48" width="10" height="10"/><rect x="48" y="48" width="10" height="10"/>
+        </g>
+        <g fill="#7fee64">
+          <rect x="48" y="4" width="10" height="10"/>
+          <rect x="26" y="26" width="10" height="10"/>
+          <rect x="4" y="48" width="10" height="10"/>
+        </g>
+      </svg>
+      <span>SniffSniffSquared</span>
+    </div>
+  </div>
+
+  <h1>The traffic was never encrypted</h1>
+  <div class="sub">A week spent hunting a cipher that was never there.</div>
+
+  <div class="dump">0000  29 22 27 08 ff ff ff ff  <span class="asc">)"'.....</span>
+0008  ff ff ff ff ff 01 12 1a  <span class="asc">........</span>
+0010  0a 13 <span class="hit">74 79 70 65 2e 61</span>  <span class="asc">..<span class="hitbg">type.a</span></span>
+0018  <span class="hit">6e 6b 61 6d 61 2e 63 6f</span>  <span class="asc"><span class="hitbg">nkama.co</span></span>
+0020  <span class="hit">6d 2f 6b 61 67</span> 12 03 10  <span class="asc"><span class="hitbg">m/kag</span>...</span>
+</div>
+
+  <div class="kicker">Notes from reverse-engineering a game protocol&nbsp;&nbsp;·&nbsp;&nbsp;post 1 of 6</div>
+</body>
