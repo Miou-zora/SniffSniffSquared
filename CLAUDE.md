@@ -120,6 +120,11 @@ blog/               a six-post narrative series over the same material —
                     Explanatory, not reference; RUNBOOK stays the reference.
                     Every number in it traces to a file here, so a fact that
                     changes needs the post updated too
+  medium/           generated Medium-ready copies (mermaid rendered to PNG,
+                    tables reflowed, links absolute). Produced by the
+                    `publisher` agent via `/blog-medium`; do not hand-edit.
+                    `pnpm install` here first — pulls a headless Chromium for
+                    mermaid-cli, into the gitignored node_modules
 
 sniffer/            the Rust capture app — RUN IT FROM THIS DIRECTORY
   src/                module table in RUNBOOK.md part 1

@@ -1,0 +1,12 @@
+{
+  "theme": "neutral",
+  "themeVariables": {
+    "fontFamily": "Georgia, 'Times New Roman', serif",
+    "fontSize": "16px"
+  },
+  "flowchart": {
+    "htmlLabels": true,
+    "curve": "basis",
+    "padding": 12
+  }
+}
