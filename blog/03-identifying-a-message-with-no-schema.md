@@ -101,9 +101,9 @@ action apiece:
 
 | the action | client sends | server answers | identified as |
 |---|---|---|---|
-| browse a marketplace category | `kdk` | `kda` — the item ids in it | |
+| browse a marketplace category | `kdk` | `kda` — the item ids in it | (unnamed) |
 | ask the price of one item | `keh` | `kbt` — the ladder | `price_list` |
-| buy a listing | `kbm` | `kgv` — purchase confirmed | |
+| buy a listing | `kbm` | `kgv` — purchase confirmed | (unnamed) |
 | put an item in the breaker | `kcr` | `kfb` — the item's detail | `item_detail` |
 | crush it | `kbj` | `kfp` — the yield | `crush_result` |
 | send a chat line | `ktm` | `kti` — the broadcast | `chat_message` |
@@ -111,6 +111,9 @@ action apiece:
 | (a stack arrives) | | `iua` | `inventory_add` |
 | (a stack changes size) | | `ivj` | `inventory_quantity` |
 | (an instance leaves) | | `ium` | `inventory_remove` |
+
+"(unnamed)" means the exchange was pinned down but never given a semantic name in
+`sniffer/src/messages.rs`, because nothing reads or stores it yet.
 
 `kti` was free. Its body carries an ISO timestamp, the author's name and the
 typed text in plain ASCII, so it identified itself the moment I looked at it.
@@ -213,7 +216,9 @@ instead of identity: pick an item whose template you already know from an
 external source, and let the ranges disambiguate the positions.
 
 Palmano is item 8872. DofusDB says it rolls Initiative 101-150, Agilité 16-20 and
-Invocation 1-1. Its `item_detail` on the wire:
+Invocation 1-1. I bought this copy off the marketplace and later put it through
+the breaker, and both moments are in the capture, which is what lets the same uid
+be checked twice. Its `item_detail` on the wire:
 
 ```
 0a22 083f 2a1e

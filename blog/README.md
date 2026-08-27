@@ -24,8 +24,8 @@ flowchart LR
     DD["DofusDB API"] -.->|"names, icons, recipes"| UI
 ```
 
-Every stage above is one post's subject, and the last two posts are about the
-things that are not stages at all:
+Every stage above is one post's subject, except post 05 — the number it is about
+never crossed the wire, so it has no stage to sit on:
 
 | stage | the question it raises | post |
 |---|---|---|
@@ -47,9 +47,10 @@ and its opening tells you what the earlier ones established.
    from a static dump, and the deframer that measures it at run time instead.
 
 2. **[The names rotate every patch, and one of them lied about it](02-the-names-rotate-every-patch.md)**
-   A client update took 141 message keys down to 19 survivors. One survivor kept
-   its name and changed its meaning, which is worse than one that breaks. What
-   rotates becomes data; what does not stays code.
+   A client update left 141 keys seen before it and 91 seen after with only 19 in
+   both lists. One of those 19 kept its name and changed its meaning, which is
+   worse than one that breaks. What rotates becomes data; what does not stays
+   code.
 
 3. **[Identifying a message when you have no schema, no source and no names](03-identifying-a-message-with-no-schema.md)**
    Known-plaintext search, action correlation, and the strongest of the three:
