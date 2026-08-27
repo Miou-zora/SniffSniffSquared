@@ -275,11 +275,21 @@ a link-local address (`169.254/16`, `fe80::/10`); loopback is exempt because
 | `verification-before-completion` | obra/superpowers | "it builds" has been claimed here when it did not |
 | `ui-ux-pro-max` | nextlevelbuilder/ui-ux-pro-max-skill | searchable local design database; pairs with `frontend-design` |
 | `writing-plans` / `brainstorming` | obra/superpowers | for multi-step work before touching code |
+| `svg-logo-designer` | rknall/claude-skills | the mark and the banners in `docs/logo/` |
+| `find-skills` | vercel-labs/skills | searches the skills registry, so "is there a skill for X" is answered rather than guessed |
+| `blog-writing-guide` | getsentry/skills | `blog/` is written to its engineering-deep-dive bar: open on the problem, numbers over adjectives, say what did not work |
+| `writing-guidelines` | vercel-labs/agent-skills | a prose linter for a review pass over `blog/` |
 
 `ui-ux-pro-max` is 1.8 MB, nearly all CSV reference data, and is the only skill
 here from outside anthropics/obra. Audited before committing: standard library
 only, no network, no `subprocess`/`eval`; its two file writes generate design
 docs. Re-check after `npx skills update`.
+
+**`writing-guidelines` is the one skill here that reaches the network at run
+time.** Its `SKILL.md` carries no rules; it fetches them from
+`raw.githubusercontent.com/vercel-labs/writing-guidelines` before each review. No
+code, no `subprocess`, nothing else surprising, but it means its behaviour is not
+pinned by `skills-lock.json` the way every other skill's is, and it fails offline.
 
 Deliberately not installed: the marketing, SEO and video generation skills
 (`ad-creative`, `hyperframes*`, `paywalls`, `pricing`, `seo-audit`, `video`,
