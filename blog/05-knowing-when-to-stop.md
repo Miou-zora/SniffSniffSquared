@@ -24,20 +24,27 @@ engineering. Get it wrong in one direction and you abandon something reachable.
 Get it wrong in the other and you spend a week searching a haystack that
 contains no needle.
 
-The number here is the recycling yield: what the game pays you for turning an
-item into nuggets. I searched for it on the wire, found it was not there, and
+The number here is the recycling yield: how many nuggets the game hands you for
+one unit of an item. I searched for it on the wire, found it was not there, and
 then found two further places the search could have gone wrong even after that.
 
 ## The thing I was looking for
 
-Recycling converts an item into nuggets, which are a currency. The client shows
-you what a unit will pay before you commit. My dashboard wants that figure so it
-can compare recycling something against selling it, which for 94 of 373 known
-items turns out to be the better exit.
+Recycling converts an item into nuggets. A nugget is not a currency, it is an
+ordinary tradeable item with an id and a marketplace price like anything else,
+which is the part that makes any of this worth computing: a yield of 2.70
+nuggets is only an amount of kamas once you multiply it by what a nugget is
+going for.
 
-The obvious plan: find the message where the server tells the client the payout,
-decode it, store it. I had already done exactly this for marketplace prices,
-crush yields and bag contents.
+So the comparison the dashboard wants has two halves. What does this item sell
+for, and what does its recycling yield sell for, both priced off the same
+captured batch ladder. For 94 of 373 known items the second is the better exit.
+
+The price half was already solved: the nugget is `Pépite`, DofusDB item 14635,
+and its ladder arrives in `prices` like any other resource's. The yield half is
+the number the client shows you before you commit, and the obvious plan for that
+was to find the message where the server sends it, decode it, store it. I had
+done exactly that for marketplace prices, crush yields and bag contents.
 
 ## Stop one: it is not on the wire, and here is the proof
 
