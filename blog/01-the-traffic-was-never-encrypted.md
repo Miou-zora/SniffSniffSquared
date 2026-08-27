@@ -7,8 +7,8 @@
 > decoding, into Postgres. It is passive. Nothing is injected, the client is
 > never modified, and the game cannot tell it is there.
 >
-> **Where this sits.** First post. It assumes nothing except that you have seen
-> a hexdump before.
+> **Where this sits.** First post. It assumes you know what TCP and protobuf are
+> and have seen a hexdump before.
 >
 > **What it answers.** Is the traffic encrypted, and if it is not, why did it
 > look like it was for a week? Then the one part of the frame format that could
@@ -141,7 +141,9 @@ not finished decoding it yet".
 Everything above was recoverable by reading. One parameter was not.
 
 The connection layer prefixes every frame with a length header, and the static
-IL2CPP dump does not pin down three things about it:
+IL2CPP dump — the client's own compiled metadata, read out of the installed game
+rather than off the wire, and the subject of post 04 — does not pin down three
+things about it:
 
 - how wide the header is (a varint, two bytes, four bytes),
 - whether the length counts itself,
@@ -186,26 +188,6 @@ a small space of plausible layouts, and it enumerates all seven:
 | 7 | `u32` big-endian | no | 1 |
 
 Each one is then scored by how far it can walk the buffer before it fails:
-
-```
-for each of the seven candidate layouts:
-    offset = 0
-    score  = 0
-
-    repeat at most 12 times:
-        frame = read one frame at offset, assuming this layout
-        stop unless frame is at least 6 bytes
-                and parses completely as a protobuf message
-        score  = score + 1
-        offset = offset + bytes consumed
-
-    if score >= 3 and score beats the best so far:
-        best = this layout
-
-lock best for this direction, and never re-detect
-```
-
-The same thing as a flowchart, which is how I actually think about it:
 
 ```mermaid
 flowchart TD
@@ -272,10 +254,10 @@ Which is where I came in.
 ## Next
 
 Everything above assumes the three-letter key you decoded yesterday still means
-the same thing today. It does not. The next post is about the game update that
-rotated 141 message keys down to 19 survivors, and about the survivor that kept
-its name and changed its meaning, which was the one that could have quietly
-corrupted a database.
+the same thing today. It does not. The next post is about the game update after
+which 141 keys seen before it and 91 seen after shared only 19 between them, and
+about one of those 19 that kept its name and changed its meaning, which was the
+one that could have quietly corrupted a database.
 
 The code is in [`sniffer/src/framer.rs`](../sniffer/src/framer.rs), and
 [`RUNBOOK.md`](../RUNBOOK.md) part 1 is the reference version of everything here.

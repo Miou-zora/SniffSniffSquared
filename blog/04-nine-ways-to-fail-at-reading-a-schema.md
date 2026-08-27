@@ -173,9 +173,10 @@ come out of the same object and no join is required.
 
 ## Failure two: the runtime route works, then stops
 
-The plan: attach to the running client, walk the loaded protobuf descriptors, and
-pull each `.proto` file's serialized `FileDescriptorProto`. One blob per file,
-carrying real names, real fields, real types and real nesting.
+The plan: reach into the running client with Frida — a dynamic instrumentation
+toolkit that attaches to a running process — walk the loaded protobuf
+descriptors, and pull each `.proto` file's serialized `FileDescriptorProto`. One
+blob per file, carrying real names, real fields, real types and real nesting.
 
 ```mermaid
 flowchart LR

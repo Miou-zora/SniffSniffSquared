@@ -145,25 +145,12 @@ With the base yield decomposed per item, the rest is multipliers the client
 applies at display time. None of them are properties of the item, which is why
 none of them are stored against one:
 
-```mermaid
-flowchart LR
-    A["items.recycle_nuggets<br/>base, one unit"] --> B["x 1.5 zone<br/>in the item's own subarea"]
-    B --> C["x 1.5 craft<br/>you crafted this copy"]
-    C --> D["x 3 boss<br/>boss loot"]
-    D --> E["x 0.6 CHARACTER_SHARE"]
-    E --> F["the figure the client shows"]
-```
-
-None of the three bonuses is a property of the item, which is why none of them
-is stored against one. They depend on where you are standing, what you recycled,
-and whether a boss was involved:
-
 | multiplier | value | when it applies | source |
 |---|---|---|---|
 | zone | x1.5 | recycling inside one of the item's own favoured subareas | read from the client |
 | craft | x1.5 | recycling a copy you crafted yourself | read from the client |
 | boss | x3 | boss loot | read from the client |
-| character share | x0.6 | always | **measured** |
+| character share | x0.6 | the part of the yield that reaches your character, the rest going to the alliance | **measured** |
 
 That last row is the only figure I worked out rather than read: Rune Invo has a
 base of 4.5 and paid 2.70, which is 60% exactly. It is kept as a named constant
@@ -183,9 +170,13 @@ them:
 | Marteau Ridhe | 36.5241 decomposed | x1.5 | 32.87 | 33,69 | **+2.5%** |
 
 Every row also carries the x0.6 character share. The first three are consumables
-and resources, and they land inside display rounding. The x4.5 on the Essence is the craft bonus times the boss bonus, 1.5 x 3, which
-is the model composing correctly across two independent multipliers rather than
-being fitted to that row.
+and resources, and they land inside display rounding.
+
+What the Essence row measures is the product: its payout fits a total multiplier
+of 4.5, and 1.5 x 3 — craft times boss — is the only pair of the multipliers I
+read out of `RecycleUi` that composes to it. Which condition the client tested
+before applying the boss factor to that item is not something I read, so the row
+is evidence for the 4.5 and not for the factorisation.
 
 The last two are equipment, and they are wrong.
 
@@ -249,8 +240,10 @@ find it, rather than on screen where it would cost a paragraph per row.
 
 ## The same discipline, one layer down
 
-The kamas model for crushing items has an outlier with the same shape, and it is
-worth putting next to this one because the resolution went differently.
+The kamas model for crushing items is derived in post 06 — the coefficient, what
+focusing does to it, and the band an integer rune count pins a weight to. All I
+need from it here is one row: an outlier with the same shape as this one, which
+resolved differently.
 
 Five focused crushes, checked against the formula. Four land inside their
 measured band with no fudge factor. The Cape Maj'Hic misses by 0.17 weight, which

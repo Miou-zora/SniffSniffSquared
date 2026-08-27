@@ -107,7 +107,9 @@ the work got more interesting than the arithmetic.
 **The unfocused crush validates the formulas and cannot validate the `+1`.**
 
 I had one clean capture: an Arc Anum, level 96, coefficient 32.185%, no focus.
-Predicted against what the game actually returned:
+The coefficient is not an estimate — it is read out of the `crush_result` message
+that reports the break, and stored as `crushes.yield_percent`, which is why it
+carries three decimals. Predicted against what the game actually returned:
 
 | rune | predicted | actual |
 |---|---|---|
@@ -230,9 +232,9 @@ substitutes for the other.
 Fungible resources sell in stacks, and the marketplace quotes them as a batch
 ladder: a price for 1, for 10, for 100, for 1000. That goes into `prices`.
 
-Equipment sells one copy at a time, because every copy rolled differently, and
-the spread between the cheapest and the dearest listing of the same item is
-routinely 100x. Its price is `min(price)` across the latest snapshot of listings.
+Equipment sells one copy at a time, because every copy rolled differently, so two
+listings of the same item are not interchangeable and an arbitrary one of them is
+not the price. Its price is `min(price)` across the latest snapshot of listings.
 That goes into `offers`, with each listing's rolled stats in `offer_stats`.
 
 The wire distinguishes them with no guesswork required, which is a nice property:
@@ -262,8 +264,11 @@ obvious implementation is to price each craft and add up the results, and it is
 wrong.
 
 The marketplace prices 4 Ébonite differently from 2 Ébonite twice over, because
-the batch ladder is not linear. So quantities are summed across every craft in
-the basket **first**, and the buy planner runs once on the total.
+the batch ladder is not linear. Pooled to 4, the planner can buy one x10 and
+cover both crafts out of it, and a x10 can beat four x1; priced separately,
+neither order of 2 can share that batch and the ladder is paid twice. So
+quantities are summed across every craft in the basket **first**, and the buy
+planner runs once on the total.
 
 ```mermaid
 flowchart TB
