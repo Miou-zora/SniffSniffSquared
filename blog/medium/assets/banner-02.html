@@ -1,0 +1,111 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1500px; height: 750px; }
+  body {
+    background: #0a0d0b;
+    background-image:
+      radial-gradient(1200px 600px at 78% 18%, rgba(127,238,100,0.10), transparent 70%),
+      linear-gradient(180deg, #0b0f0c 0%, #080a09 100%);
+    font-family: Georgia, "Times New Roman", serif;
+    color: #ddffdc;
+    position: relative;
+    overflow: hidden;
+  }
+  .pad { position: absolute; inset: 72px 80px; }
+
+  .mark { display: flex; align-items: center; gap: 18px; }
+  .mark svg { width: 44px; height: 44px; display: block; }
+  .mark span {
+    font: 600 20px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    letter-spacing: 0.14em; color: #7fee64; text-transform: uppercase;
+  }
+
+  h1 {
+    position: absolute; left: 80px; top: 250px; width: 780px;
+    font-weight: 700; font-size: 76px; line-height: 1.06;
+    letter-spacing: -0.015em; color: #f2fff0;
+  }
+  .sub {
+    position: absolute; left: 80px; top: 470px; width: 720px;
+    font: 400 26px/1.4 Georgia, serif; color: #9fc79a;
+  }
+  .kicker {
+    position: absolute; left: 80px; bottom: 72px;
+    font: 400 17px/1 ui-monospace, Menlo, Consolas, monospace;
+    letter-spacing: 0.08em; color: #5f7d5b;
+  }
+
+  .dump {
+    position: absolute; right: 80px; top: 92px; width: 600px;
+    font: 400 16px/1.62 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: #3f5a3c; white-space: pre;
+    padding: 24px 28px;
+    border: 1px solid rgba(127,238,100,0.16);
+    border-radius: 10px;
+    background: rgba(127,238,100,0.03);
+  }
+  .dump .lbl { color: #6a8a65; }
+  .dump .arr { color: #4a6a46; }
+  .dump .hit { color: #7fee64; }
+  .dump .hitbg { background: rgba(127,238,100,0.14); border-radius: 3px; }
+</style>
+
+<body>
+  <div class="pad">
+    <div class="mark">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">
+        <g fill="#7fee64" opacity="0.45">
+          <rect x="7" y="7" width="10" height="10"/><rect x="18" y="7" width="10" height="10"/>
+          <rect x="29" y="7" width="10" height="10"/><rect x="40" y="7" width="10" height="10"/>
+          <rect x="51" y="7" width="10" height="10"/>
+          <rect x="7" y="18" width="10" height="10"/>
+          <rect x="7" y="29" width="10" height="10"/><rect x="18" y="29" width="10" height="10"/>
+          <rect x="29" y="29" width="10" height="10"/><rect x="40" y="29" width="10" height="10"/>
+          <rect x="51" y="29" width="10" height="10"/>
+          <rect x="51" y="40" width="10" height="10"/>
+          <rect x="7" y="51" width="10" height="10"/><rect x="18" y="51" width="10" height="10"/>
+          <rect x="29" y="51" width="10" height="10"/><rect x="40" y="51" width="10" height="10"/>
+          <rect x="51" y="51" width="10" height="10"/>
+        </g>
+        <g fill="#ddffdc">
+          <rect x="4" y="4" width="10" height="10"/><rect x="15" y="4" width="10" height="10"/>
+          <rect x="26" y="4" width="10" height="10"/><rect x="37" y="4" width="10" height="10"/>
+          <rect x="4" y="15" width="10" height="10"/>
+          <rect x="4" y="26" width="10" height="10"/><rect x="15" y="26" width="10" height="10"/>
+          <rect x="37" y="26" width="10" height="10"/><rect x="48" y="26" width="10" height="10"/>
+          <rect x="48" y="37" width="10" height="10"/>
+          <rect x="15" y="48" width="10" height="10"/><rect x="26" y="48" width="10" height="10"/>
+          <rect x="37" y="48" width="10" height="10"/><rect x="48" y="48" width="10" height="10"/>
+        </g>
+        <g fill="#7fee64">
+          <rect x="48" y="4" width="10" height="10"/>
+          <rect x="26" y="26" width="10" height="10"/>
+          <rect x="4" y="48" width="10" height="10"/>
+        </g>
+      </svg>
+      <span>SniffSniffSquared</span>
+    </div>
+  </div>
+
+  <h1>The names rotate every patch</h1>
+  <div class="sub">A patch renamed every message on the wire. One kept its name and changed what it meant.</div>
+
+  <div class="dump"><span class="lbl">message              08-03   08-04</span>
+price_list           kea  <span class="arr">&#8594;</span>  kbt
+chat_message         ksv  <span class="arr">&#8594;</span>  kti
+crush_result         kfy  <span class="arr">&#8594;</span>  kfp
+item_detail          kev  <span class="arr">&#8594;</span>  kfb
+crush_request        ker  <span class="arr">&#8594;</span>  kbj
+crush_slot_put       kch  <span class="arr">&#8594;</span>  kcr
+inventory            iss  <span class="arr">&#8594;</span>  ivx
+inventory_add        <span class="hit hitbg">iun</span>  <span class="arr">&#8594;</span>  iua
+inventory_quantity   iul  <span class="arr">&#8594;</span>  ivj
+inventory_remove     ivf  <span class="arr">&#8594;</span>  ium
+
+<span class="hit hitbg">iun</span> <span class="lbl">stayed on the wire</span> &#8594; 24 B, then 6 B
+<span class="lbl">was an inventory slot, now</span> {1: 383, 3: 6812} <span class="lbl">pods</span></div>
+
+  <div class="kicker">Notes from reverse-engineering a game protocol&nbsp;&nbsp;·&nbsp;&nbsp;post 2 of 6</div>
+</body>
