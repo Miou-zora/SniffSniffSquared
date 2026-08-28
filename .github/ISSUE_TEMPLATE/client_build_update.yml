@@ -1,0 +1,74 @@
+name: Client build update (keys or field numbers rotated)
+description: A game update landed and messages stopped decoding, or now decode to nonsense.
+labels: ["key-rotation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Expected, not a bug. The obfuscated message keys rotate between client
+        builds and so do the field numbers inside them — across the 2026-08-04
+        update, 19 of 141 keys survived and **all ten identified messages moved**.
+
+        Re-identification needs a client on the new build, which may well be you
+        and not the maintainer. It needs no Rust: it is
+        [`sniffer/keymap.json`](https://github.com/Miou-zora/SniffSniffSquared/blob/main/sniffer/keymap.json)
+        and [`sniffer/schema.json`](https://github.com/Miou-zora/SniffSniffSquared/blob/main/sniffer/schema.json),
+        neither of which needs a rebuild. Details in
+        [CONTRIBUTING](https://github.com/Miou-zora/SniffSniffSquared/blob/main/CONTRIBUTING.md#the-most-valuable-contribution-a-key-rotation).
+
+  - type: input
+    id: build
+    attributes:
+      label: New client build
+      placeholder: "2026-09-XX"
+    validations:
+      required: true
+
+  - type: input
+    id: previous_build
+    attributes:
+      label: Last build that worked
+      placeholder: "2026-08-04"
+
+  - type: textarea
+    id: symptoms
+    attributes:
+      label: What broke
+      description: |
+        Which messages went silent, and which now decode to something that is
+        not what they claim. Both matter — a key that *survives* a rotation
+        carrying a different message is the worse case: `iun` was
+        `inventory_add` and now carries pods, so left mapped it wrote nonsense
+        rather than failing.
+    validations:
+      required: true
+
+  - type: textarea
+    id: keys
+    attributes:
+      label: Keys observed on the new build
+      description: |
+        If you have run `sniffer/tools/identify.py` or `findvalue.py`, paste what
+        they reported — the new token for each message, and how you pinned it.
+      placeholder: |
+        price_list:     kbt -> ???   (findvalue.py 75 326 6660 99999 -> one 25-byte message)
+        chat_message:   kti -> ???
+        crush_result:   kfp -> ???
+      render: text
+
+  - type: textarea
+    id: fields
+    attributes:
+      label: Field numbers that moved
+      description: Any change to the message shapes, for `schema.json`.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I checked for surviving tokens that now carry a *different* message, not just for tokens that vanished.
+        - label: Any bytes or captures pasted above have other players' names and chat redacted.
+          required: true
+        - label: I am willing to open a pull request with the new `keymap.json` / `schema.json` and a test over real bytes from this build.

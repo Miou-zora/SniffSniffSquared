@@ -1,0 +1,69 @@
+name: Idea or feature request
+description: Something the project should do that it does not.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The project is **passive**: it connects to nothing, sends nothing, and
+        modifies no part of the game. Packet injection, automation of play,
+        credential handling and anti-cheat evasion are out of scope as a matter
+        of scope, not of politeness —
+        [the full list is in CONTRIBUTING](https://github.com/Miou-zora/SniffSniffSquared/blob/main/CONTRIBUTING.md#what-this-project-accepts-and-what-it-does-not).
+
+        Several plausible ideas are also already settled and measured — static
+        game data does not cross the wire, recycling yield is not in packets, the
+        traffic is not encrypted. [RUNBOOK.md](https://github.com/Miou-zora/SniffSniffSquared/blob/main/RUNBOOK.md)
+        has the evidence that closed each one. Re-opening one needs new evidence,
+        which is a genuinely welcome issue — bring the capture and the numbers.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to find out or do, and where the project stops short.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - sniffer/ — decoding a message that is not decoded yet
+        - web/ — a view or a calculation
+        - tools/ — offline enrichment, backfill, maintenance
+        - docs
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence, if this is about a message on the wire
+      description: |
+        Identification here is empirical. If you can read exact numbers off one
+        screen, `sniffer/tools/findvalue.py 75 326 6660 99999` finds the message
+        carrying all of them. If you can only trigger it on demand,
+        `sniffer/tools/identify.py "open HDV and click several item prices"`
+        samples a baseline and reports what appears while you act. Either output
+        makes this actionable rather than speculative.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: This does not require sending, injecting or modifying anything on the wire, and does not automate play.
+          required: true
+        - label: I checked RUNBOOK.md to see whether this has already been ruled out.
+          required: true

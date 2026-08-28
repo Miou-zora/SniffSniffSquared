@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Miou-zora/SniffSniffSquared/security/advisories/new
+    about: Do not open a public issue. Report privately — see SECURITY.md.
+  - name: The runbook, and the list of dead ends
+    url: https://github.com/Miou-zora/SniffSniffSquared/blob/main/RUNBOOK.md
+    about: Pipeline explanation, the verified command sequence, and what has already been ruled out with the evidence that closed it.
+  - name: Troubleshooting — nothing is being captured
+    url: https://github.com/Miou-zora/SniffSniffSquared#troubleshooting
+    about: No "framing locked" line, no "[db] connected" line, empty pages — the common causes are in the README table.
