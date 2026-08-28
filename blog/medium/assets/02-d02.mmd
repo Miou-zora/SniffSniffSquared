@@ -1,0 +1,8 @@
+flowchart TD
+    A["wire key kbt arrives"] --> B["keymap resolves it: price_list"]
+    B --> C["dumps correctly.<br/>the startup banner and the log look healthy"]
+    C --> D["the parser reads field 5, where the ladder used to be"]
+    D --> E{"is there a ladder at field 5?"}
+    E -- "no: it moved to field 6" --> F["field 5 now holds an item id"]
+    F --> G["the rule fires:<br/>an empty ladder is not a price message"]
+    G --> H["message discarded.<br/>prices table stays empty, no error printed"]

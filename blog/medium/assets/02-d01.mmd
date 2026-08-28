@@ -1,0 +1,7 @@
+flowchart TD
+    W["a 6-byte message arrives<br/>key: iun"] --> B{"what does the keymap say?"}
+    B -->|"stale entry:<br/>iun = inventory_add"| C["hand the bytes to the<br/>inventory-slot parser"]
+    C --> D["it reads what it can.<br/>no crash, no error"]
+    D --> E["INSERT: an item that does not exist,<br/>with a uid that is half a pod count"]
+    B -->|"entry removed:<br/>iun is unmapped"| F["archived to packets, no row written"]
+    F --> G["you notice, and go re-identify it"]

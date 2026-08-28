@@ -1,0 +1,8 @@
+flowchart LR
+    W["wire<br/>type.ankama.com/kbt"] --> KM["keymap.json<br/>token to name"]
+    KM -->|"price_list"| SC["schema.json<br/>shape + field numbers"]
+    SC -->|"a typed Node"| IN["interpret.rs<br/>what the values mean"]
+    IN --> DB[("prices")]
+    R1["a rotation<br/>edits these two"] -.-> KM
+    R1 -.-> SC
+    R2["nothing here<br/>changes"] -.-> IN
