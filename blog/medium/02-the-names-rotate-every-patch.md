@@ -2,7 +2,8 @@
 
 ### What a game update does to a decoder that has ten of those tokens mapped, why a token that *survives* an update is more dangerous than one that breaks, and how to lay out the code so that recovering takes a text editor rather than a rewrite.
 
-*Originally published in [Notes from reverse-engineering a game protocol](https://github.com/Miou-zora/SniffSniffSquared/blob/main/blog/README.md). Post 2 of 6.*
+*Originally published in [Notes from reverse-engineering a game protocol](https://github.com/Miou-zora/SniffSniffSquared/blob/main/blog/README.md).
+Post 2 of 6.*
 
 ---
 
@@ -28,11 +29,12 @@ after, and 19 of them were shared. All ten messages I had identified and named
 moved to new tokens.
 
 That part was survivable, because a mapping that stops resolving fails loudly
-and you go and re-identify it. The dangerous one was `iun`. It survived the
-rotation, it still resolved, it still parsed, and it now meant something
-completely different. This post is about why that second case is worse than the
-first, and about the code layout that makes recovering from either one an edit
-to two JSON files rather than a rewrite.
+and you go and re-identify it. The dangerous one was `iun`: the token stayed on
+the wire while the message it used to name moved to `iua` with the rest. It
+still resolved, it still parsed, and it now meant something completely
+different. This post is about why that second case is worse than the first, and
+about the code layout that makes recovering from either one an edit to two JSON
+files rather than a rewrite.
 
 ## How much actually moved
 
@@ -41,16 +43,19 @@ across two sessions are a weak measurement, because two sessions do different
 things: browse a different shop, fight a different monster, and the key sets
 diverge for reasons that have nothing to do with a patch.
 
-So the sharper reading is the connection handshake, which is identical in kind
-every single session. Here it is on both sides of the update, in order:
+So a tighter comparison is the first eighteen frames of each session, before any
+player action — the same connection phase in both captures, here in order:
 
 ```
 AUG 3   ksv jri jri jri jri knh kmw jri jrj jri jrj iwa jri iwa jrj iwa jri jpp
 AUG 4   lqu hoy kqu mgq mgt hpd kqz krv mgz kqp kqp kvi jtg kvw kub jbf ipc kva
 ```
 
-Eighteen frames each, the same handshake both times, and **not one token in
-common**.
+Eighteen frames each, one message per frame, and **not one token in common**.
+The two token multisets are also shaped differently, so this shows the names
+changed, not that the same messages still flow; the obfuscated names put a
+message-for-message match out of reach. The ten named messages below are the
+firmer reading, and every one of them moved.
 The new build also emits `m*` and `h*` prefixes that the old one never produced
 at all, which suggests the obfuscator is not permuting a fixed alphabet so much
 as regenerating from a different seed.
@@ -59,7 +64,7 @@ Ten of my named messages went from one column to the other:
 
 ```
 message               before  after
---------------------  ------  -----
+-----------------------------------
 `price_list`          `kea`   `kbt`
 `chat_message`        `ksv`   `kti`
 `crush_result`        `kfy`   `kfp`
@@ -84,18 +89,25 @@ Aug 3  iun  24 B  0a16083f2212089c81b3a1011807209d3a2a05400148f201   an inventor
 Aug 4  iun   6 B  08ff02189c35                                       {1: 383, 3: 6812}
 ```
 
+The Aug 4 body decodes as two varint fields, which is what the `{1: …, 3: …}`
+notation is shorthand for:
+
+```
+bytes      field  value
+-----------------------
+`08 ff02`  1      383
+`18 9c35`  3      6812
+```
+
 Six bytes instead of twenty-four. Field 3 stayed constant across every sample I
 had, and field 1 moved whenever I picked something up or crushed something.
 That is current and maximum pods, the weight limit on your bags. It is not an
 inventory addition and it never was.
 
-Now consider what happens if the keymap is left alone. The sniffer sees `iun`,
-looks it up, finds `inventory_add`, hands the six bytes to a parser expecting a
-slot, and that parser reads what it can. It does not crash. It produces
-something. And then the dispatcher writes a row into the `inventory` table for
-an item that does not exist, with a uid that is half a pod count.
+Left mapped to `inventory_add`, `iun` still resolves, and that is where the
+damage is:
 
-![And then the dispatcher writes a row into the inventory table for an item that does not exist, with a uid that is half a pod count.](assets/02-d01.png)
+![Left mapped to `inventory_add`, `iun` still resolves, and that is where the damage is](assets/02-d01.png)
 
 **A stale mapping that still resolves is strictly worse than one that fails.**
 A broken mapping costs you a message type until you notice. A wrong mapping
@@ -116,7 +128,7 @@ Here is `price_list` measured on both builds:
 
 ```
 what it holds    wire type         2026-07-10  2026-08-04
----------------  ----------------  ----------  ----------  ---------
+--------------------------------------------------------------------
 outer category   varint            field 1     field 1     unchanged
 outer item id    varint            field 3     field 2     moved
 outer offer      length-delimited  field 2     field 3     moved
@@ -132,20 +144,17 @@ Five of seven numbers moved. Across every message my interpreters read,
 The failure this produces is nastier than a broken key, because it looks like
 success. Fix the keymap alone and the sniffer names every message correctly,
 dumps every message correctly, prints a clean startup banner, and stores
-nothing. The parser is reading field 5 for the price ladder, and the ladder is
-now at field 6. Field 5 holds an item id. There is no ladder there, so the
-message is discarded as "not a price message", which is a rule I wrote
-deliberately and which is now firing on every valid price message.
+nothing.
 
-![The failure this produces is nastier than a broken key, because it looks like success.](assets/02-d02.png)
+![Fix the keymap alone and the sniffer names every message correctly, dumps every message correctly, prints a clean startup banner, and stores nothing](assets/02-d02.png)
 
 You watch a capture run for ten minutes with a healthy-looking log and an empty
 `prices` table.
 
 **No shape changed anywhere**, and that is the one mercy. Same nesting depth,
-same wire types, same packed ladder, same repeated stat lines, same
-backwards value-then-effect-id ordering. The obfuscator renumbers and renames;
-it does not restructure. So the recovery is mechanical once you know to do it.
+same wire types, same packed ladder, same repeated stat lines. The obfuscator
+renumbers and renames; it does not restructure. So the recovery is mechanical
+once you know to do it.
 
 ## What rotates becomes data; what does not stays code
 
@@ -153,9 +162,7 @@ The design rule that came out of this is one sentence: **anything the obfuscator
 can change lives in a file, and anything that reflects how the game works lives
 in Rust.**
 
-![The design rule that came out of this is one sentence: anything the obfuscator can change lives in a file, and anything that reflects how the game works lives in Rust.](assets/02-d03.png)
-
-Two JSON files absorb the rotation. The Rust never learns that anything moved.
+![The design rule that came out of this is one sentence: anything the obfuscator can change lives in a file, and anything that reflects how the game works lives in Rust](assets/02-d03.png)
 
 Wire keys rotate, so no code anywhere names one. One module holds the mapping,
 and its header states the rule:
@@ -166,18 +173,26 @@ and its header states the rule:
 > Code says `price_list`; this module is the only place that knows the current
 > key is `kea`.
 
+That header still says `kea` while the `DEFAULTS` table right below it now reads
+`price_list` -> `kbt`; a doc comment drifting out of step with the code beneath
+it is the same failure this post is about, one file smaller.
+
 The mapping itself is a flat table of semantic name against current wire key,
 built into the binary as a default:
 
 ```
 semantic name   key on this build  what it carries
---------------  -----------------  ---------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------------------------
 `price_list`    `kbt`              the marketplace ladder, x1 / x10 / x100 / x1000
 `chat_message`  `kti`              author, timestamp, free text
 `crush_result`  `kfp`              what breaking an item yielded
-`item_detail`   `kfb`              an instance uid resolved to a type id and its rolls
+`item_detail`   `kfb`              an instance uid — one specific copy of an item, not the item type — resolved to a type id and its rolls
 …               …                  ten of them in total
 ```
+
+One captured `price_list` had Carapace Verte at 75 / 326 / 6660 / 99999 for
+those four batch sizes, and a 0 in any ladder slot means that batch is not on
+sale, which is why the x1000 tier is often not there at all.
 
 Everything downstream matches on the left column. The interpreter arm is
 `"price_list" =>`, the dispatcher registers with
@@ -281,7 +296,8 @@ rejected or you are in the wrong directory, and the reason prints above it.
 The general form of this is older than obfuscated game protocols: **separate the
 things that change on someone else's schedule from the things that change on
 yours.** What made it concrete here is that the cost of getting it wrong is not
-a compile error, it is a table full of pods recorded as inventory.
+a compile error, it is a pods message the decoder keeps counting as understood
+while it quietly means something else.
 
 ## Next
 

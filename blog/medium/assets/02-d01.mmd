@@ -1,7 +1,9 @@
 flowchart TD
-    W["a 6-byte message arrives<br/>key: iun"] --> B{"what does the keymap say?"}
+    W["a 6-byte pods message arrives<br/>key: iun"] --> B{"what does the keymap say?"}
     B -->|"stale entry:<br/>iun = inventory_add"| C["hand the bytes to the<br/>inventory-slot parser"]
-    C --> D["it reads what it can.<br/>no crash, no error"]
-    D --> E["INSERT: an item that does not exist,<br/>with a uid that is half a pod count"]
+    C --> D["field 1 varint plus field 3 varint<br/>do not fit the slot shape: parse yields nothing, no row"]
+    D --> K["but the key resolved, so is_known_key treats iun as understood"]
+    K --> L["iun never joins the list of unknowns to re-identify;<br/>pods traffic stops being a discovery target"]
+    C --> M["a later body that does fit the old shape<br/>writes a structurally fine, wrong row"]
     B -->|"entry removed:<br/>iun is unmapped"| F["archived to packets, no row written"]
     F --> G["you notice, and go re-identify it"]
