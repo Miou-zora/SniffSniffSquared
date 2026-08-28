@@ -603,6 +603,9 @@ watched.
 | [docs/observations.md](docs/observations.md) | Annotated real captures with byte-level analysis. |
 | [docs/brisage-model.md](docs/brisage-model.md) | The kamas maths: how crushing an item into runes pays, transcribed from `Book 3.xlsx` and measured against real captured crushes. |
 | [sniffer/tools/frida/README.md](sniffer/tools/frida/README.md) | Runtime schema extraction routes. Partly stale — RUNBOOK.md supersedes it. |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | What belongs here and what does not, the setup, and the four steps to add a message. A key rotation is the most useful thing an outsider can contribute. |
+| [SECURITY.md](SECURITY.md) | How to report a vulnerability privately, what counts as one when every byte on the wire is untrusted input, and how to run the stack safely. |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1, plus two rules this project needs: do not publish other players' data, do not point it at anyone else. |
 
 ## Status and limitations
 
