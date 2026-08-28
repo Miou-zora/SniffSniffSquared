@@ -309,6 +309,36 @@ Deliberately not installed: the marketing, SEO and video generation skills
 explanatory, not promotional — the SEO and product-launch halves of
 `blog-writing-guide` are ignored for the same reason.
 
+## Agents and commands
+
+`.claude/agents/` holds five subagents, all of them for `blog/` — nothing in the
+capture or web pipeline is delegated. Two slash commands drive them.
+
+| agent | model | does | never does |
+|---|---|---|---|
+| `player` | sonnet | reads a post as a Dofus player (brisage, runes, focus, HDV, pods) who knows nothing about networks or protobuf, and reports where it lost them or says something about the game that is wrong | proposes wording, edits |
+| `arranger` | sonnet | judges whether material sits in the right file — content belonging in another post, a post carrying two arcs, a duplicated explanation, a post depending on a later one | edits, rewrites the prose it moves |
+| `integrator` | opus | triages both reports into an ordered task list, and finds the source of truth in this repository for every task it accepts | edits the posts |
+| `redactor` | sonnet | applies one task at a time against the source the task cites, moving text verbatim | invents a fact the cited source does not have |
+| `publisher` | sonnet | ports one post to `blog/medium/` — mermaid to PNG, tables reflowed, links absolute | edits the prose; it is a format port |
+
+```sh
+/blog-review [all | 05 | path] [--report-only] [--no-arrange]
+/blog-medium <post>
+```
+
+**The separation is the point, not ceremony.** The reader who finds the problem
+is not the one who fixes it, and the one who fixes it may only write what a cited
+file already says — every number in `blog/` traces to a file here, so an agent
+allowed to improvise would quietly break that. `integrator` is the only opus
+seat because triage is where a wrong call costs a whole redactor pass.
+
+Run the four review agents **in series**; each consumes the previous one's
+output. `--report-only` stops after `integrator` and writes nothing;
+`--no-arrange` skips the structural stage for a wording-only pass. Stage 4 writes
+to `blog/`, so `/blog-review` isolates into a worktree first — a background
+session that has not isolated has its writes rejected, which wastes the spawn.
+
 ## Conventions
 
 - Rust: no `unwrap()` on wire data — everything from the network is
