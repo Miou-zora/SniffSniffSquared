@@ -13,18 +13,19 @@
 >
 > **What it answers.** That step. Given opaque bytes labelled `iua`, `ivj` and
 > `ium`, how do you work out which is which, with no protocol specification, no
-> field names, and without touching the client? Three techniques, ranked, and
-> the storage decision that makes all of them work on traffic you captured
-> before you knew what you were looking for.
+> field names, and without touching the client? Three techniques demonstrated
+> here, ranked, plus a fourth that this post only names, and the storage
+> decision that makes all of them work on traffic you captured before you knew
+> what you were looking for.
 
 After the client update in the last post I had ten message types to re-identify
 and nothing to identify them with. No protocol specification, no field names, and
 a schema registry keyed to a build the wire no longer used.
 
-I got all ten back, one deliberate in-game action each. The strongest of the
-three techniques I use needs nothing on screen at all: it treats the packet
-archive as its own ground truth, which turned out to be possible because of a
-storage decision made months earlier for unrelated reasons.
+I got all ten back, one deliberate in-game action each, using three
+techniques. The strongest of them needs nothing on screen at all: it treats
+the packet archive as its own ground truth, which turned out to be possible
+because of a storage decision made months earlier for unrelated reasons.
 
 Which technique applies depends on what you can observe, so here is the whole
 post as one decision:
@@ -32,15 +33,15 @@ post as one decision:
 ```mermaid
 flowchart TD
     Q1{"Can you read exact numbers<br/>off the screen while it happens?"}
-    Q1 -- yes --> M1["known plaintext<br/>findvalue.py<br/>pins the message AND the field"]
+    Q1 -- yes --> KP["known plaintext<br/>findvalue.py<br/>pins the message AND the field"]
     Q1 -- no --> Q2{"Do two messages you already<br/>decode constrain this one?"}
-    Q2 -- yes --> M2["the archive as its own anchor<br/>one SQL query<br/>the game need not be running"]
+    Q2 -- yes --> ARCH["the archive as its own anchor<br/>one SQL query<br/>the game need not be running"]
     Q2 -- no --> Q3{"Can you trigger it on demand?"}
-    Q3 -- yes --> M3["action correlation<br/>identify.py<br/>run it 2 or 3 times"]
-    Q3 -- no --> M4["instrument the client<br/>see post 04, and brace yourself"]
+    Q3 -- yes --> CORR["action correlation<br/>identify.py<br/>run it 2 or 3 times"]
+    Q3 -- no --> INSTR["instrument the client<br/>see post 04, and brace yourself"]
 ```
 
-## Method one: read numbers off the screen and search for them
+## Known plaintext: read numbers off the screen and search for them
 
 If you can see exact values in the game, you have known plaintext, and known
 plaintext is the strongest tool available here.
@@ -71,7 +72,7 @@ The other reason to prefer this method: it identifies the *field*, not only the
 message. You know which position held 24996, so you have half a schema before
 you have started.
 
-## Method two: do one thing and see what appears
+## Action correlation: do one thing and see what appears
 
 Some messages carry nothing you can read. A container listing, an entity update,
 a heartbeat. For those, correlate against an action instead.
@@ -118,7 +119,7 @@ action apiece:
 `kti` was free. Its body carries an ISO timestamp, the author's name and the
 typed text in plain ASCII, so it identified itself the moment I looked at it.
 
-## Method three: the archive as its own ground truth
+## The archive as its own ground truth
 
 The four inventory messages are the interesting case, because a bag listing
 contains nothing I can read off the screen and does not correspond to a single
@@ -126,6 +127,10 @@ deliberate action. The server sends several large container listings and I had n
 way to tell which one was the bags.
 
 Except I did, and it had been sitting in the database for weeks.
+
+This particular walkthrough is from the previous build, before the rotation in
+the last post: the bag was `iss` and the removal was `ivf`, the same two
+messages post 02's table shows becoming `ivx` and `ium`.
 
 Every item I have ever put into the item breaker is, necessarily, an item I was
 carrying. And `crush_placements` already records the instance uid of each one,
@@ -139,15 +144,16 @@ flowchart LR
     A["crush_placements<br/>12 instance uids,<br/>already decoded and trusted"] --> Q{"for each uid: is it in the newest<br/>container listing sent before it?"}
     Q --> B["iss listings<br/>12 hits out of 12"]
     Q --> C["iso listings<br/>0 hits out of 12"]
-    B --> D["iss is the bag"]
+    B --> D["iss is the bag (now ivx)"]
     C --> E["iso is some other container"]
 ```
 
 **12 placements. 12 hits in `iss`. 0 in `iso`**, the other large container
 listing the server sends. Nothing else in the capture holds that set of uids.
 
-`ivf` fell out of the same anchor from the other direction: the crushed uid turns
-up in one of those messages 1 to 11 seconds after each crush, 8 times out of 8.
+`ivf` (now `ium`) fell out of the same anchor from the other direction: the
+crushed uid turns up in one of those messages 1 to 11 seconds after each
+crush, 8 times out of 8.
 
 Both are a single SQL query. Neither needed the game running, neither needed a
 schema, and neither needed me to read anything off the screen. I re-ran the same
@@ -270,7 +276,10 @@ ranges come from DofusDB instead. That is a better source anyway, and knowing it
 is the *only* source stops the search from reopening every time something is
 missing.
 
-## The four techniques, ranked
+## The techniques, ranked
+
+The sections above ran in the order I reached for them; this list orders the
+same three by strength, plus the fallback this post does not demonstrate.
 
 1. **Known plaintext** when you can read exact values. Identifies the message and
    the field, works on already-captured traffic, unambiguous with three or more
