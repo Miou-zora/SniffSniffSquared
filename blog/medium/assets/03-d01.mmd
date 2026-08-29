@@ -1,0 +1,8 @@
+flowchart TD
+    Q1{"Can you read exact numbers<br/>off the screen while it happens?"}
+    Q1 -- yes --> KP["known plaintext<br/>findvalue.py<br/>pins the message AND the field"]
+    Q1 -- no --> Q2{"Do two messages you already<br/>decode constrain this one?"}
+    Q2 -- yes --> ARCH["the archive as its own anchor<br/>one SQL query<br/>the game need not be running"]
+    Q2 -- no --> Q3{"Can you trigger it on demand?"}
+    Q3 -- yes --> CORR["action correlation<br/>identify.py<br/>run it 2 or 3 times"]
+    Q3 -- no --> INSTR["instrument the client<br/>see post 04, and brace yourself"]
