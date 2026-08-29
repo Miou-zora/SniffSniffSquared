@@ -1,0 +1,6 @@
+flowchart LR
+    A["crush_placements<br/>12 instance uids,<br/>already decoded and trusted"] --> Q{"for each uid: is it in the newest<br/>container listing sent before it?"}
+    Q --> B["iss listings<br/>12 hits out of 12"]
+    Q --> C["iso listings<br/>0 hits out of 12"]
+    B --> D["iss is the bag (now ivx)"]
+    C --> E["iso is some other container"]

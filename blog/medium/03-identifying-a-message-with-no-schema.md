@@ -1,13 +1,19 @@
 # Identifying a message when you have no schema, no source and no names
 
-*by Miou-zora · post 3 of 6 in [Notes from reverse-engineering a game protocol](README.md)*
+### That step. Given opaque bytes labelled `iua`, `ivj` and `ium`, how do you work out which is which, with no protocol specification, no field names, and without touching the client? Three techniques demonstrated here, ranked, plus a fourth that this post only names, and the storage decision that makes all of them work on traffic you captured before you knew what you were looking for.
 
-> **The project.** [SniffSniffSquared](../README.md) reads the Dofus 3 game
+*Originally published in [Notes from reverse-engineering a game protocol](https://github.com/Miou-zora/SniffSniffSquared/blob/main/blog/README.md). Post 3 of 6.*
+
+---
+
+*by Miou-zora · post 3 of 6 in [Notes from reverse-engineering a game protocol](https://github.com/Miou-zora/SniffSniffSquared/blob/main/blog/README.md)*
+
+> **The project.** [SniffSniffSquared](https://github.com/Miou-zora/SniffSniffSquared/blob/main/README.md) reads the Dofus 3 game
 > protocol off the wire, decodes it and writes what it understands to Postgres.
 >
-> **Where this sits.** [Post 01](01-the-traffic-was-never-encrypted.md) got
+> **Where this sits.** [Post 01](https://github.com/Miou-zora/SniffSniffSquared/blob/main/blog/01-the-traffic-was-never-encrypted.md) got
 > frames off the wire and showed that each one carries a three-letter message
-> token. [Post 02](02-the-names-rotate-every-patch.md) showed those tokens
+> token. [Post 02](https://github.com/Miou-zora/SniffSniffSquared/blob/main/blog/02-the-names-rotate-every-patch.md) showed those tokens
 > rotating between client builds, and ended on a step it did not explain:
 > *"re-identify ten keys empirically, one deliberate in-game action each"*.
 >
@@ -30,16 +36,7 @@ because of a storage decision made months earlier for unrelated reasons.
 Which technique applies depends on what you can observe, so here is the whole
 post as one decision:
 
-```mermaid
-flowchart TD
-    Q1{"Can you read exact numbers<br/>off the screen while it happens?"}
-    Q1 -- yes --> KP["known plaintext<br/>findvalue.py<br/>pins the message AND the field"]
-    Q1 -- no --> Q2{"Do two messages you already<br/>decode constrain this one?"}
-    Q2 -- yes --> ARCH["the archive as its own anchor<br/>one SQL query<br/>the game need not be running"]
-    Q2 -- no --> Q3{"Can you trigger it on demand?"}
-    Q3 -- yes --> CORR["action correlation<br/>identify.py<br/>run it 2 or 3 times"]
-    Q3 -- no --> INSTR["instrument the client<br/>see post 04, and brace yourself"]
-```
+![Which technique applies depends on what you can observe, so here is the whole post as one decision](assets/03-d01.png)
 
 ## Known plaintext: read numbers off the screen and search for them
 
@@ -100,18 +97,20 @@ again in post 05, where it closes an entire line of enquiry.
 The re-identification after the 2026-08-04 rotation was ten runs of this, one
 action apiece:
 
-| the action | client sends | server answers | identified as |
-|---|---|---|---|
-| browse a marketplace category | `kdk` | `kda` — the item ids in it | (unnamed) |
-| ask the price of one item | `keh` | `kbt` — the ladder | `price_list` |
-| buy a listing | `kbm` | `kgv` — purchase confirmed | (unnamed) |
-| put an item in the breaker | `kcr` | `kfb` — the item's detail | `item_detail` |
-| crush it | `kbj` | `kfp` — the yield | `crush_result` |
-| send a chat line | `ktm` | `kti` — the broadcast | `chat_message` |
-| (none, unprompted) | | `ivx` — the whole bag | `inventory` |
-| (a stack arrives) | | `iua` | `inventory_add` |
-| (a stack changes size) | | `ivj` | `inventory_quantity` |
-| (an instance leaves) | | `ium` | `inventory_remove` |
+```
+the action                     client sends  server answers              identified as
+---------------------------------------------------------------------------------------------
+browse a marketplace category  `kdk`         `kda` — the item ids in it  (unnamed)
+ask the price of one item      `keh`         `kbt` — the ladder          `price_list`
+buy a listing                  `kbm`         `kgv` — purchase confirmed  (unnamed)
+put an item in the breaker     `kcr`         `kfb` — the item's detail   `item_detail`
+crush it                       `kbj`         `kfp` — the yield           `crush_result`
+send a chat line               `ktm`         `kti` — the broadcast       `chat_message`
+(none, unprompted)                           `ivx` — the whole bag       `inventory`
+(a stack arrives)                            `iua`                       `inventory_add`
+(a stack changes size)                       `ivj`                       `inventory_quantity`
+(an instance leaves)                         `ium`                       `inventory_remove`
+```
 
 "(unnamed)" means the exchange was pinned down but never given a semantic name in
 `sniffer/src/messages.rs`, because nothing reads or stores it yet.
@@ -139,14 +138,7 @@ because that message was identified earlier. So the question becomes a join:
 > For each placement, does the newest container listing before it contain that
 > uid?
 
-```mermaid
-flowchart LR
-    A["crush_placements<br/>12 instance uids,<br/>already decoded and trusted"] --> Q{"for each uid: is it in the newest<br/>container listing sent before it?"}
-    Q --> B["iss listings<br/>12 hits out of 12"]
-    Q --> C["iso listings<br/>0 hits out of 12"]
-    B --> D["iss is the bag (now ivx)"]
-    C --> E["iso is some other container"]
-```
+![For each placement, does the newest container listing before it contain that uid?](assets/03-d02.png)
 
 **12 placements. 12 hits in `iss`. 0 in `iso`**, the other large container
 listing the server sends. Nothing else in the capture holds that set of uids.
@@ -180,12 +172,7 @@ choice that looked like over-collection at the time.
 uninterpreted ones still get their raw `body` stored. It is append-only, it is
 large, and it is the single highest-value thing in this project.
 
-```mermaid
-flowchart LR
-    A["July<br/>capture a session.<br/>every message archived,<br/>understood or not"] --> B["August<br/>identify a key<br/>by correlation"]
-    B --> C["run a backfill<br/>over July's raw bodies"]
-    C --> D["469 offers and 1800 stat lines,<br/>with no re-capture and<br/>no time spent in game"]
-```
+![It is append-only, it is large, and it is the single highest-value thing in this project.](assets/03-d03.png)
 
 The payoff is that **identification is retroactive**. A key identified next month
 decodes traffic captured today. You do not have to be in-game at the moment a
@@ -299,6 +286,20 @@ entirely. I built it. It works on part of the protocol and deadlocks on the part
 I need. The next post is nine ruled-out approaches, two diagnostic traps that
 invalidated a week of readings, and the argument for writing dead ends down.
 
-The tools are [`sniffer/tools/findvalue.py`](../sniffer/tools/findvalue.py) and
-[`sniffer/tools/identify.py`](../sniffer/tools/identify.py); the procedure is
-[`RUNBOOK.md`](../RUNBOOK.md) part 2 step 6.
+The tools are [`sniffer/tools/findvalue.py`](https://github.com/Miou-zora/SniffSniffSquared/blob/main/sniffer/tools/findvalue.py) and
+[`sniffer/tools/identify.py`](https://github.com/Miou-zora/SniffSniffSquared/blob/main/sniffer/tools/identify.py); the procedure is
+[`RUNBOOK.md`](https://github.com/Miou-zora/SniffSniffSquared/blob/main/RUNBOOK.md) part 2 step 6.
+
+---
+
+Passive observation of your own client's traffic, for interoperability research.
+It sends nothing, modifies nothing, and automates no part of the game. Not
+affiliated with Ankama. MIT licensed.
+
+Every number in these posts traces to a file in this repository. Player names and
+IP addresses in captured output are replaced with placeholders; the byte
+sequences around them are real and self-consistent.
+
+**Wire keys are not durable.** Any three-letter token quoted in these posts was
+true for the build it was observed on and is probably wrong by the time you read
+it. That is the subject of post 02.
