@@ -1,0 +1,6 @@
+flowchart TB
+    R["the static registry<br/>2317 entries keyed by obfuscated<br/>C# class path: ksx.ksw.ksv"] --> J["take the last dotted segment<br/>and match"]
+    W["the wire<br/>an Any type URL suffix: ksv"] --> J
+    J --> M["ksv equals ksv.<br/>looks conclusive"]
+    M --> X["but these are two different naming schemes<br/>that sometimes agree by coincidence"]
+    X --> Y["wrong for 4 of the 6 keys measured"]

@@ -1,12 +1,18 @@
 # Nine ways to fail at reading a schema out of a running game
 
-*by Miou-zora · post 4 of 6 in [Notes from reverse-engineering a game protocol](README.md)*
+### The two attempts to stop working around it and get a real schema, one static and one from the running client. The static one is wrong in a way that reads as right. The runtime one works on 51 messages and deadlocks on the ones I need. This is the map of that failure, and the argument for keeping such a map in the repository at all.
 
-> **The project.** [SniffSniffSquared](../README.md) reads the Dofus 3 game
+*Originally published in [Notes from reverse-engineering a game protocol](https://github.com/Miou-zora/SniffSniffSquared/blob/main/blog/README.md). Post 4 of 6.*
+
+---
+
+*by Miou-zora · post 4 of 6 in [Notes from reverse-engineering a game protocol](https://github.com/Miou-zora/SniffSniffSquared/blob/main/blog/README.md)*
+
+> **The project.** [SniffSniffSquared](https://github.com/Miou-zora/SniffSniffSquared/blob/main/README.md) reads the Dofus 3 game
 > protocol off the wire, decodes it and writes what it understands to Postgres.
 >
-> **Where this sits.** Posts [01](01-the-traffic-was-never-encrypted.md) to
-> [03](03-identifying-a-message-with-no-schema.md) are all workarounds for the
+> **Where this sits.** Posts [01](https://github.com/Miou-zora/SniffSniffSquared/blob/main/blog/01-the-traffic-was-never-encrypted.md) to
+> [03](https://github.com/Miou-zora/SniffSniffSquared/blob/main/blog/03-identifying-a-message-with-no-schema.md) are all workarounds for the
 > same missing thing: a schema. Without one, a message is a bag of numbered
 > fields, and post 03 recovers meaning by correlating those numbers against the
 > game rather than by looking anything up.
@@ -39,26 +45,17 @@ The registry is keyed by obfuscated C# class path, like `ksx.ksw.ksv`. The wire
 gives an `Any` type URL suffix, like `ksv`. Joining them means matching the last
 dotted segment:
 
-```mermaid
-flowchart TB
-    R["the static registry<br/>2317 entries keyed by obfuscated<br/>C# class path: ksx.ksw.ksv"] --> J["take the last dotted segment<br/>and match"]
-    W["the wire<br/>an Any type URL suffix: ksv"] --> J
-    J --> M["ksv equals ksv.<br/>looks conclusive"]
-    M --> X["but these are two different naming schemes<br/>that sometimes agree by coincidence"]
-    X --> Y["wrong for 4 of the 6 keys measured"]
-```
+![Joining them means matching the last dotted segment](assets/04-d01.png)
 
 Two identifiers that look alike are not therefore the same identifier, and
 **that join is often wrong**. Measured over one capture:
 
-| key | mismatched fields |
-|---|---|
-| `ksv` | 3 |
-| `jrj` | 1 |
-| `kmw` | 1 |
-| `jri` | 1 |
-| `iwa` | 0, clean |
-| `kdh` | 0, clean |
+- **`ksv`** — 3
+- **`jrj`** — 1
+- **`kmw`** — 1
+- **`jri`** — 1
+- **`iwa`** — 0, clean
+- **`kdh`** — 0, clean
 
 Four of six observed keys mis-joined. And this was measured *before* I
 understood that keys rotate between builds, so the true cause is probably worse
@@ -81,17 +78,7 @@ It sent me looking for the bug in the wrong place more than once.
 The fix was to treat the schema as a hypothesis rather than an authority. Two
 guards in `sniffer/src/dump.rs`:
 
-```mermaid
-flowchart TD
-    F["a field on the wire"] --> D{"does the schema<br/>declare a type for it?"}
-    D -- no --> H["decode by heuristics<br/>and print honestly"]
-    D -- yes --> W{"guard 1: wire type<br/>declared long, but the bytes are<br/>length-delimited?"}
-    W -- "contradiction" --> X["drop the declaration<br/>tag it: declared long"]
-    X --> H
-    W -- "consistent" --> P{"guard 2: content<br/>declared packed ints, but the<br/>bytes are valid UTF-8 and look like text?"}
-    P -- yes --> Y["decode as a string<br/>tag it: declared packed, reads as text"]
-    P -- no --> Z["decode as declared"]
-```
+![Two guards in `sniffer/src/dump.rs`](assets/04-d02.png)
 
 Guard 2 exists because protobuf itself cannot help here: a packed integer array
 and a string are both length-delimited, so the wire type alone cannot separate
@@ -149,15 +136,7 @@ toolkit that attaches to a running process — walk the loaded protobuf
 descriptors, and pull each `.proto` file's serialized `FileDescriptorProto`. One
 blob per file, carrying real names, real fields, real types and real nesting.
 
-```mermaid
-flowchart LR
-    A["attach to a re-signed<br/>debuggable copy"] --> B["walk the loaded classes"]
-    B --> C["chat service assembly<br/>not obfuscated"]
-    C --> OK["51 messages,<br/>real names, real fields ✓"]
-    B --> G["Ankama.Dofus.Protocol.Game<br/>the one that matters"]
-    G --> H["invoke the descriptor getter<br/>on class 7, hdx"]
-    H --> STOP["deadlock.<br/>CPU idle, never returns"]
-```
+![The plan: reach into the running client with Frida — a dynamic instrumentation toolkit that attaches to a running process — walk the loaded protobuf descriptors, and pull each `.proto` file's serialized `FileDescriptorProto`.](assets/04-d03.png)
 
 It works. Proven end to end on the chat service, which the obfuscator left
 readable, 51 messages with real field names:
@@ -177,17 +156,19 @@ and the process goes to idle CPU and never returns.
 
 Nine approaches, each tested on its own:
 
-| what it varied | tried | result |
-|---|---|---|
-| where the code runs | deferred via `setTimeout` (free thread) | blocks |
-| where the code runs | deferred with `Il2Cpp.perform(..., "main")` | blocks |
-| how the bytes leave the agent | binary `send(payload, data)` | blocks |
-| how the bytes leave the agent | hex payload, O(n) encoder | blocks |
-| where the code runs | synchronous at top level | blocks |
-| what gets invoked | skip the offending class | blocks on the next one |
-| what gets invoked | seed directly from `ksv`, no class scan | blocks |
-| the state of the process | second attach to the same process | blocks |
-| the state of the process | let the client sit idle for minutes first | blocks |
+```
+what it varied                 tried                                        result
+----------------------------------------------------------------------------------
+where the code runs            deferred via `setTimeout` (free thread)      blocks
+where the code runs            deferred with `Il2Cpp.perform(..., "main")`  blocks
+how the bytes leave the agent  binary `send(payload, data)`                 blocks
+how the bytes leave the agent  hex payload, O(n) encoder                    blocks
+where the code runs            synchronous at top level                     blocks
+what gets invoked              skip the offending class                     blocks on the next one
+what gets invoked              seed directly from `ksv`, no class scan      blocks
+the state of the process       second attach to the same process            blocks
+the state of the process       let the client sit idle for minutes first    blocks
+```
 
 Row six is the informative one. It blocks on class 7, `hdx`. Add `hdx` to a skip
 list and it blocks on `hdy`. So it is not one bad class, it is the shared static
@@ -294,12 +275,14 @@ thread. Thread context was a real part of the problem and not all of it.
 Then, with the launcher arguments added so the client boots fully, the same code
 crashes the process outright at `ksv`:
 
-| context | client state | result |
-|---|---|---|
-| injected thread, sync | broken boot (no catalogs) | probe read `ksv` FullName, the only success |
-| injected thread, sync | properly booted | deadlock, process idle |
-| inside `EventSystem.Update` hook | properly booted, standalone | `ksv` threw, scan continued, `jrj` deadlocked |
-| inside hook | properly booted, launcher args | hard process crash at `ksv` |
+```
+context                           client state                    result
+------------------------------------------------------------------------
+injected thread, sync             broken boot (no catalogs)       probe read `ksv` FullName, the only success
+injected thread, sync             properly booted                 deadlock, process idle
+inside `EventSystem.Update` hook  properly booted, standalone     `ksv` threw, scan continued, `jrj` deadlocked
+inside hook                       properly booted, launcher args  hard process crash at `ksv`
+```
 
 Four contexts, four different failures, and the only success came from the client
 that was not actually working. That is the shape of a problem you do not
@@ -378,5 +361,19 @@ The same discipline applied to a number instead of a technique: how to tell the
 difference between a value you have not found yet and a value that is not there,
 and why the recycling dashboard deliberately shows nothing at all for equipment.
 
-The full account is [`RUNBOOK.md`](../RUNBOOK.md) part 3, and the decoder guards
-are in [`sniffer/src/dump.rs`](../sniffer/src/dump.rs).
+The full account is [`RUNBOOK.md`](https://github.com/Miou-zora/SniffSniffSquared/blob/main/RUNBOOK.md) part 3, and the decoder guards
+are in [`sniffer/src/dump.rs`](https://github.com/Miou-zora/SniffSniffSquared/blob/main/sniffer/src/dump.rs).
+
+---
+
+Passive observation of your own client's traffic, for interoperability research.
+It sends nothing, modifies nothing, and automates no part of the game. Not
+affiliated with Ankama. MIT licensed.
+
+Every number in these posts traces to a file in this repository. Player names and
+IP addresses in captured output are replaced with placeholders; the byte
+sequences around them are real and self-consistent.
+
+**Wire keys are not durable.** Any three-letter token quoted in these posts was
+true for the build it was observed on and is probably wrong by the time you read
+it. That is the subject of post 02.

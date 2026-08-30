@@ -1,0 +1,9 @@
+flowchart TD
+    F["a field on the wire"] --> D{"does the schema<br/>declare a type for it?"}
+    D -- no --> H["decode by heuristics<br/>and print honestly"]
+    D -- yes --> W{"guard 1: wire type<br/>declared long, but the bytes are<br/>length-delimited?"}
+    W -- "contradiction" --> X["drop the declaration<br/>tag it: declared long"]
+    X --> H
+    W -- "consistent" --> P{"guard 2: content<br/>declared packed ints, but the<br/>bytes are valid UTF-8 and look like text?"}
+    P -- yes --> Y["decode as a string<br/>tag it: declared packed, reads as text"]
+    P -- no --> Z["decode as declared"]
