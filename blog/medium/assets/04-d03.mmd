@@ -1,0 +1,7 @@
+flowchart LR
+    A["attach to a re-signed<br/>debuggable copy"] --> B["walk the loaded classes"]
+    B --> C["chat service assembly<br/>not obfuscated"]
+    C --> OK["51 messages,<br/>real names, real fields ✓"]
+    B --> G["Ankama.Dofus.Protocol.Game<br/>the one that matters"]
+    G --> H["invoke the descriptor getter<br/>on class 7, hdx"]
+    H --> STOP["deadlock.<br/>CPU idle, never returns"]
