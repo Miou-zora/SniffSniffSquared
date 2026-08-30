@@ -88,7 +88,7 @@ flowchart TD
     D -- yes --> W{"guard 1: wire type<br/>declared long, but the bytes are<br/>length-delimited?"}
     W -- "contradiction" --> X["drop the declaration<br/>tag it: declared long"]
     X --> H
-    W -- "consistent" --> P{"guard 2: content<br/>declared packed ints, but the<br/>bytes are printable text?"}
+    W -- "consistent" --> P{"guard 2: content<br/>declared packed ints, but the<br/>bytes are valid UTF-8 and look like text?"}
     P -- yes --> Y["decode as a string<br/>tag it: declared packed, reads as text"]
     P -- no --> Z["decode as declared"]
 ```
@@ -96,35 +96,6 @@ flowchart TD
 Guard 2 exists because protobuf itself cannot help here: a packed integer array
 and a string are both length-delimited, so the wire type alone cannot separate
 them and only the bytes can.
-
-**A wire-type check.** If the schema declares `long` and the wire says
-length-delimited, those contradict. Drop the declaration for that field, fall
-back to the heuristics, and say so:
-
-```
-declared = the schema's type for this field, if it has one
-
-if declared exists and contradicts the wire type actually present:
-    discard declared
-    tag the field with: declared <that type>
-    decode by heuristics instead
-```
-
-The comment above it in the source is the whole argument in three lines: a
-schema that disagrees with the wire is worse than none, because it pushes
-strings through the packed-varint path and prints digit soup.
-
-**A content check**, because the wire type is not always enough. The schema is
-precisely the thing under suspicion, so the bytes decide:
-
-```
-if declared is a packed array of scalars:
-    if the bytes are valid UTF-8 and look like text:
-        decode as a string
-        tag the field with: declared packed, reads as text
-    else:
-        decode as packed numbers, as declared
-```
 
 That second guard is what rescued the chat messages. Output now looks like this,
 with the disagreements tallied on the envelope so a mis-joined schema announces
@@ -206,17 +177,17 @@ and the process goes to idle CPU and never returns.
 
 Nine approaches, each tested on its own:
 
-| tried | result |
-|---|---|
-| deferred via `setTimeout` (free thread) | blocks |
-| deferred with `Il2Cpp.perform(..., "main")` | blocks |
-| binary `send(payload, data)` | blocks |
-| hex payload, O(n) encoder | blocks |
-| synchronous at top level | blocks |
-| skip the offending class | blocks on the next one |
-| seed directly from `ksv`, no class scan | blocks |
-| second attach to the same process | blocks |
-| let the client sit idle for minutes first | blocks |
+| what it varied | tried | result |
+|---|---|---|
+| where the code runs | deferred via `setTimeout` (free thread) | blocks |
+| where the code runs | deferred with `Il2Cpp.perform(..., "main")` | blocks |
+| how the bytes leave the agent | binary `send(payload, data)` | blocks |
+| how the bytes leave the agent | hex payload, O(n) encoder | blocks |
+| where the code runs | synchronous at top level | blocks |
+| what gets invoked | skip the offending class | blocks on the next one |
+| what gets invoked | seed directly from `ksv`, no class scan | blocks |
+| the state of the process | second attach to the same process | blocks |
+| the state of the process | let the client sit idle for minutes first | blocks |
 
 Row six is the informative one. It blocks on class 7, `hdx`. Add `hdx` to a skip
 list and it blocks on `hdy`. So it is not one bad class, it is the shared static
@@ -259,10 +230,11 @@ it worked. Matching on signature instead, a static zero-argument method returnin
 
 This one invalidated more than the first.
 
-The client ships with the hardened runtime and no `get-task-allow`, so under SIP
-nothing can attach to it, including root. `sudo frida` fails outright. The
-workaround is to re-sign a *copy* with the entitlement added, which is what
-`sniffer/tools/resign-debug-app.sh` does, never touching the real install.
+macOS refuses to let anything attach to the shipped client, root included,
+because of how it is signed under SIP — so `sudo frida` fails outright, and the
+workaround is to re-sign a *copy* with the one flag that permits attaching,
+which `sniffer/tools/resign-debug-app.sh` does without touching the real
+install.
 
 I was launching that copy from a scratch build directory. Dofus resolves its
 Addressables catalogs relative to the launch directory, so it failed at boot:
@@ -272,10 +244,13 @@ ERROR [Addressables] (AddressableUtility:118) - Unable to find catalog list
 Core.DataCenter.DataCenterModule:LoadData()
 ```
 
-A window opens. It looks like a working client. But `DataCenter` never loads and
-**no per-frame method ever runs**, so every conclusion drawn against that copy
-was worthless, including one "let the client settle first" test and an early hook
-probe that reported zero callbacks and which I had read as meaningful.
+A window opens. It looks like a working client. But `DataCenter` never loads,
+**no per-frame method ever runs**, and the protocol descriptors never
+initialise either — which is precisely why a scan against that copy could
+return nothing and look like a result. Every conclusion drawn against that
+copy was worthless, including one "let the client settle first" test and an
+early hook probe that reported zero callbacks and which I had read as
+meaningful.
 
 There is now a check that runs before anything else:
 
@@ -293,6 +268,15 @@ Which meant re-running every earlier test.
 
 ## What a correctly booted client changed, and what it did not
 
+Invoking the descriptor getter forces that class's static constructor to run,
+and the constructor waits on something that never completes when the call
+comes from Frida's injected thread — the process goes idle rather than busy,
+and an IL2CPP invoke cannot be given a timeout, which is why the list is nine
+variations rather than one call with a deadline. `Il2Cpp.perform(..., "main")`
+does not fix this: it attaches the injected thread to the main context, it
+does not run the code on the game's own thread. Hooking a real per-frame
+method does.
+
 Running the extraction inside a hook on `EventSystem.Update`, so the code
 executes on the game's own thread where the class-initialisation lock is already
 held by us, moved the failure rather than removing it:
@@ -304,7 +288,8 @@ held by us, moved the failure rather than removing it:
 ```
 
 `ksv` raises an exception instead of hanging and the loop moves on. `jrj` still
-deadlocks. Thread context was a real part of the problem and not all of it.
+deadlocks — the whole process goes to 0% CPU, since the hook occupies the main
+thread. Thread context was a real part of the problem and not all of it.
 
 Then, with the launcher arguments added so the client boots fully, the same code
 crashes the process outright at `ksv`:
