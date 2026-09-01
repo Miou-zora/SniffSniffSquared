@@ -33,15 +33,13 @@ Usage:
 Requires the `db` container running and, unless --no-enrich, `requests`.
 """
 import argparse
-import json
-import os
 import subprocess
 import sys
 
+import wirekeys
+
 API = "https://api.dofusdb.fr/items"
 RECIPES_API = "https://api.dofusdb.fr/recipes"
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KEYMAP = os.path.join(ROOT, "sniffer", "keymap.json")
 
 DDL = """
 CREATE TABLE IF NOT EXISTS item_stats (
@@ -170,28 +168,34 @@ def fields(b):
 def parse_item_detail(body):
     """(uid, item_id, [(effect_id, value)]) — mirrors interpret::item_detail_full.
 
-    Shape: field 2 > field 4 > { 1: uid, 4: item id, 5*: { 8: value, 9: effect } }
-    Note the stat line carries value before effect id, which reads backwards.
+    The field numbers come from sniffer/schema.json rather than from constants
+    here, because they rotate with the build. Today the shape is
+    item_detail {slot+} > slot {entry} > item_entry {item_id, stat+, uid}, with
+    stat_line carrying value before effect id, which reads backwards.
     """
+    det = wirekeys.field_numbers("item_detail")
+    slot = wirekeys.field_numbers("slot")
+    entry = wirekeys.field_numbers("item_entry")
+    line = wirekeys.field_numbers("stat_line")
     for f, wt, payload in fields(body):
-        if f != 2 or wt != 2:
+        if f != det["slot"] or wt != 2:
             continue
         for f2, wt2, p2 in fields(payload):
-            if f2 != 4 or wt2 != 2:
+            if f2 != slot["entry"] or wt2 != 2:
                 continue
             uid = item = None
             stats = []
             for f3, wt3, p3 in fields(p2):
-                if f3 == 1 and wt3 == 0:
+                if f3 == entry["uid"] and wt3 == 0:
                     uid = p3
-                elif f3 == 4 and wt3 == 0:
+                elif f3 == entry["item_id"] and wt3 == 0:
                     item = p3
-                elif f3 == 5 and wt3 == 2:
+                elif f3 == entry["stat"] and wt3 == 2:
                     value = effect = None
                     for f4, wt4, p4 in fields(p3):
-                        if f4 == 8 and wt4 == 0:
+                        if f4 == line["value"] and wt4 == 0:
                             value = p4
-                        elif f4 == 9 and wt4 == 0:
+                        elif f4 == line["effect"] and wt4 == 0:
                             effect = p4
                     if value is not None and effect is not None:
                         stats.append((effect, value))
@@ -200,26 +204,15 @@ def parse_item_detail(body):
     return None
 
 
-def detail_key():
-    """The wire key for item_detail, from keymap.json — it rotates per build."""
-    try:
-        with open(KEYMAP, encoding="utf-8") as fh:
-            k = json.load(fh).get("item_detail")
-            if k:
-                return k
-    except (OSError, ValueError) as e:
-        print("  ! could not read %s (%s); assuming 'kev'" % (KEYMAP, e))
-    return "kev"
-
-
 def backfill(dry_run):
-    key = detail_key()
+    key = wirekeys.key("item_detail")
     rows = psql(
         "SELECT id, encode(body,'hex') FROM packets WHERE msg_key = %s ORDER BY id" % lit(key),
         rows=True,
     )
     print("backfill: %d archived %s messages" % (len(rows), key))
     if not rows:
+        wirekeys.explain_empty_scan("item_detail", key, psql)
         return
 
     # Keyed, not appended: the same instance is re-described every time it is
@@ -252,7 +245,7 @@ def backfill(dry_run):
 
 
 def observed_item_ids(refresh):
-    """Every item id the database has seen, from all four tables that carry one."""
+    """Every item id the database has seen, from all five tables that carry one."""
     where = "" if refresh else " WHERE i.item_id IS NULL OR i.name_fr IS NULL"
     sql = """
     SELECT DISTINCT s.item_id FROM (
@@ -260,6 +253,7 @@ def observed_item_ids(refresh):
         UNION SELECT item_id FROM crushes WHERE item_id IS NOT NULL
         UNION SELECT item_id FROM crush_placements
         UNION SELECT item_id FROM prices
+        UNION SELECT item_id FROM inventory
     ) s LEFT JOIN items i USING (item_id)%s ORDER BY 1
     """ % where
     return [int(r[0]) for r in psql(sql, rows=True) if r[0]]
