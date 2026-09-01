@@ -27,13 +27,10 @@ Usage:
     tools/backfill_offers.py --dry-run   # report only
 """
 import argparse
-import json
-import os
 import subprocess
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KEYMAP = os.path.join(ROOT, "sniffer", "keymap.json")
+import wirekeys
 
 
 def psql(sql, rows=False):
@@ -51,14 +48,7 @@ def psql(sql, rows=False):
 
 def price_key():
     """The wire key for price_list — it rotates per client build."""
-    try:
-        with open(KEYMAP, encoding="utf-8") as fh:
-            k = json.load(fh).get("price_list")
-            if k:
-                return k
-    except (OSError, ValueError) as e:
-        print("  ! could not read %s (%s); assuming 'kea'" % (KEYMAP, e))
-    return "kea"
+    return wirekeys.key("price_list")
 
 
 def varint(b, i):
@@ -107,36 +97,51 @@ def packed(b):
     return out
 
 
+def _shape():
+    """Field numbers for the price ladder, from sniffer/schema.json.
+
+    Not written into this file, because they rotate with the build: the
+    2026-08-04 update moved every one of them here — the offer list itself from
+    2 to 3, the item id inside an offer from 1 to 5, the listing id from 7 to 1
+    and the ladder from 5 to 6. Old numbers over new bytes do not fail, they
+    read a listing id as an item id.
+    """
+    return (wirekeys.field_numbers("price_list"),
+            wirekeys.field_numbers("price_offer"),
+            wirekeys.field_numbers("stat_line"))
+
+
 def parse_offers(body):
     """[(listing_id, item_id, price, [(effect_id, value)])] for gear offers only."""
+    lst, off, line = _shape()
     category = 0
     outer_item = 0
     offers = []
     for f, wt, payload in fields(body):
-        if f == 1 and wt == 0:
+        if f == lst["category"] and wt == 0:
             category = payload
-        elif f == 3 and wt == 0:
+        elif f == lst["item_id"] and wt == 0:
             outer_item = payload
-        elif f == 2 and wt == 2:
+        elif f == lst["offer"] and wt == 2:
             item = listing = 0
             ladder, stats = [], []
             for f2, wt2, p2 in fields(payload):
-                if f2 == 1 and wt2 == 0:
+                if f2 == off["item_id"] and wt2 == 0:
                     item = p2
-                elif f2 == 4 and wt2 == 2:
+                elif f2 == off["stat"] and wt2 == 2:
                     value = effect = None
                     for f3, wt3, p3 in fields(p2):
-                        if f3 == 8 and wt3 == 0:
+                        if f3 == line["value"] and wt3 == 0:
                             value = p3
-                        elif f3 == 9 and wt3 == 0:
+                        elif f3 == line["effect"] and wt3 == 0:
                             effect = p3
-                    # weapon damage arrives as a nested dice with no field 8;
+                    # weapon damage arrives as a nested dice with no value field;
                     # it yields no rune, so it is dropped rather than guessed
                     if value is not None and effect is not None:
                         stats.append((effect, value))
-                elif f2 == 5 and wt2 == 2:
+                elif f2 == off["ladder"] and wt2 == 2:
                     ladder = packed(p2)
-                elif f2 == 7 and wt2 == 0:
+                elif f2 == off["listing_id"] and wt2 == 0:
                     listing = p2
             # A single copy quotes x1 and nothing else. Stats do not settle it:
             # a rune carries its own bonus as one stat line and is still a
@@ -151,25 +156,26 @@ def parse_offers(body):
 
 def parse_stacks(body):
     """[(listing_id, item_id, ladder, category)] for the stack quotes in a message."""
+    lst, off, _line = _shape()
     category = 0
     outer_item = 0
     stacks = []
     for f, wt, payload in fields(body):
-        if f == 1 and wt == 0:
+        if f == lst["category"] and wt == 0:
             category = payload
-        elif f == 3 and wt == 0:
+        elif f == lst["item_id"] and wt == 0:
             outer_item = payload
-        elif f == 2 and wt == 2:
+        elif f == lst["offer"] and wt == 2:
             item = listing = 0
             ladder, stats = [], []
             for f2, wt2, p2 in fields(payload):
-                if f2 == 1 and wt2 == 0:
+                if f2 == off["item_id"] and wt2 == 0:
                     item = p2
-                elif f2 == 4 and wt2 == 2:
+                elif f2 == off["stat"] and wt2 == 2:
                     stats.append(p2)
-                elif f2 == 5 and wt2 == 2:
+                elif f2 == off["ladder"] and wt2 == 2:
                     ladder = packed(p2)
-                elif f2 == 7 and wt2 == 0:
+                elif f2 == off["listing_id"] and wt2 == 0:
                     listing = p2
             if not ladder:
                 continue
@@ -252,6 +258,8 @@ def main():
         rows=True,
     )
     print("backfill: %d archived %s messages" % (len(rows), key))
+    if not rows:
+        wirekeys.explain_empty_scan("price_list", key, psql)
 
     if args.repair:
         repair(rows, args.dry_run)

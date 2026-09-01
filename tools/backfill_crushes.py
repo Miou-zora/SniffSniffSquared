@@ -24,14 +24,11 @@ Usage:
     tools/backfill_crushes.py --dry-run   # report only
 """
 import argparse
-import json
-import os
 import struct
 import subprocess
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KEYMAP = os.path.join(ROOT, "sniffer", "keymap.json")
+import wirekeys
 
 
 def psql(sql, rows=False):
@@ -49,14 +46,7 @@ def psql(sql, rows=False):
 
 def crush_key():
     """The wire key for crush_result — it rotates per client build."""
-    try:
-        with open(KEYMAP, encoding="utf-8") as fh:
-            k = json.load(fh).get("crush_result")
-            if k:
-                return k
-    except (OSError, ValueError) as e:
-        print("  ! could not read %s (%s); assuming 'kfy'" % (KEYMAP, e))
-    return "kfy"
+    return wirekeys.key("crush_result")
 
 
 def varint(b, i):
@@ -124,6 +114,8 @@ def main():
         rows=True,
     )
     print("backfill: %d archived %s messages" % (len(rows), key))
+    if not rows:
+        wirekeys.explain_empty_scan("crush_result", key, psql)
 
     # uid -> item type, from the item_detail messages the sniffer already stored
     uid_type = {int(r[0]): int(r[1]) for r in psql(

@@ -30,13 +30,10 @@ Usage:
     tools/backfill_inventory.py --dry-run   # report only
 """
 import argparse
-import json
-import os
 import subprocess
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KEYMAP = os.path.join(ROOT, "sniffer", "keymap.json")
+import wirekeys
 
 
 def psql(sql, rows=False):
@@ -52,27 +49,15 @@ def psql(sql, rows=False):
     return out.stdout
 
 
-DEFAULT_KEYS = {
-    "inventory": "iss",
-    "inventory_add": "iun",
-    "inventory_quantity": "iul",
-    "inventory_remove": "ivf",
-}
-
-
 def wire_keys():
-    """Semantic name -> wire key. They rotate per client build, so keymap.json
-    wins over the defaults noted here, exactly as the Rust side does."""
-    keys = dict(DEFAULT_KEYS)
-    try:
-        with open(KEYMAP, encoding="utf-8") as fh:
-            over = json.load(fh)
-        for name in keys:
-            if over.get(name):
-                keys[name] = over[name]
-    except (OSError, ValueError) as e:
-        print("  ! could not read %s (%s); using built-in keys" % (KEYMAP, e))
-    return keys
+    """Semantic name -> wire key, resolved the way the sniffer resolves them.
+
+    These four used to be hardcoded here as iss/iun/iul/ivf, which the
+    2026-08-04 rotation retired. That was not merely stale: `iun` is still on
+    the wire carrying pods, so the old table did not fail, it parsed pods as
+    inventory additions."""
+    return wirekeys.keys("inventory", "inventory_add",
+                         "inventory_quantity", "inventory_remove")
 
 
 def varint(b, i):
@@ -109,25 +94,35 @@ def fields(b):
             return
 
 
-def parse_inventory(body):
-    """[(uid, item_id, quantity)] -- one entry per occupied slot."""
+def parse_inventory(body, message="inventory"):
+    """[(uid, item_id, quantity)] -- one entry per occupied slot.
+
+    Field numbers come from sniffer/schema.json rather than from constants here,
+    because they rotate with the build. The 2026-08-04 update moved the slot list
+    from 1 to 3 and the entry from 4 to 5, and — the dangerous one — swapped uid
+    and item id inside the entry. Both are varints, so the old numbers over new
+    bytes yield a perfectly plausible row with the two exchanged.
+    """
+    inv = wirekeys.field_numbers(message)
+    slot_f = wirekeys.field_numbers("slot")
+    entry_f = wirekeys.field_numbers("item_entry")
     out = []
     for f, wt, slot in fields(body):
-        if f != 1 or wt != 2:
+        if f != inv["slot"] or wt != 2:
             continue
         for f2, wt2, entry in fields(slot):
-            if f2 != 4 or wt2 != 2:
+            if f2 != slot_f["entry"] or wt2 != 2:
                 continue
             uid = item = None
             quantity = 1
             for f3, wt3, v in fields(entry):
                 if wt3 != 0:
                     continue
-                if f3 == 1:
+                if f3 == entry_f["uid"]:
                     uid = v
-                elif f3 == 3:
+                elif f3 == entry_f["quantity"]:
                     quantity = v
-                elif f3 == 4:
+                elif f3 == entry_f["item_id"]:
                     item = v
             if uid and item:
                 out.append((uid, item, quantity))
@@ -136,16 +131,18 @@ def parse_inventory(body):
 
 def parse_quantity(body):
     """(uid, new stack size) from an inventory_quantity message."""
+    outer = wirekeys.field_numbers("inventory_quantity")
+    change = wirekeys.field_numbers("quantity_change")
     for f, wt, now in fields(body):
-        if f != 4 or wt != 2:
+        if f != outer["change"] or wt != 2:
             continue
         uid = quantity = None
         for f2, wt2, v in fields(now):
             if wt2 != 0:
                 continue
-            if f2 == 1:
+            if f2 == change["quantity"]:
                 quantity = v
-            elif f2 == 2:
+            elif f2 == change["uid"]:
                 uid = v
         if uid:
             return uid, quantity or 0
@@ -154,8 +151,9 @@ def parse_quantity(body):
 
 def parse_remove(body):
     """The uid an inventory_remove message says has gone."""
+    uid_f = wirekeys.field_numbers("inventory_remove")["uid"]
     for f, wt, v in fields(body):
-        if f == 3 and wt == 0 and v:
+        if f == uid_f and wt == 0 and v:
             return v
     return None
 
@@ -174,6 +172,7 @@ def main():
         rows=True,
     )
     if not rows:
+        wirekeys.explain_empty_scan("inventory", listing, psql)
         sys.exit("no archived %s messages; nothing to replay" % listing)
 
     from_id, hexed, captured_at = rows[0]
@@ -198,7 +197,8 @@ def main():
     for key, body_hex in changes:
         body = bytes.fromhex(body_hex)
         if key == keys["inventory_add"]:
-            added = parse_inventory(body)
+            # same envelope as a full listing, but read against its own shape
+            added = parse_inventory(body, "inventory_add")
             for uid, item, quantity in added:
                 bag[uid] = [item, quantity]
             applied += len(added)
