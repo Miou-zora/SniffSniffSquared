@@ -208,7 +208,7 @@ covers the known cases; a new capture format is your responsibility.
   `MISMATCH` tag in `sniffer/src/dump.rs`. A wrong schema is worse than none — it
   forces strings through the packed-int path and prints digit soup that looks
   like a decoder bug.
-- `cargo fmt` and `cargo clippy` before pushing. `cargo test` is 74 tests.
+- `cargo fmt` and `cargo clippy` before pushing. `cargo test` is 84 tests.
 
 **TypeScript / `web/`**
 

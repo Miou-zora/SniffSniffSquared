@@ -22,7 +22,7 @@ did not, so paste what you actually ran.
 
 ## Gates
 
-- [ ] `cd sniffer && cargo build && cargo test` — 74 tests (if `sniffer/` changed)
+- [ ] `cd sniffer && cargo build && cargo test` — 84 tests (if `sniffer/` changed)
 - [ ] `cargo fmt` and `cargo clippy` clean (if `sniffer/` changed)
 - [ ] `cd web && pnpm check` — typecheck + lint + format (if `web/` changed)
 - [ ] Not applicable — docs only

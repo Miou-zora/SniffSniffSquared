@@ -282,7 +282,7 @@ the previous one, so the fixtures captured on that build still run. Real bytes
 from each, one set of parsers, two schemas. A change that is right for today's
 wire and quietly wrong in general breaks the old fixtures.
 
-All 74 tests run against captured bytes rather than synthesised ones, which is a
+All 84 tests run against captured bytes rather than synthesised ones, which is a
 rule worth stating on its own: for a protocol with no specification, a
 hand-written fixture is a record of what you *believed* the wire looked like, and
 that is exactly the thing under test.

@@ -204,7 +204,7 @@ directory.
 ```sh
 docker compose up -d                      # postgres + pgadmin, from repo root
 cd sniffer
-cargo build && cargo test                 # 74 tests
+cargo build && cargo test                 # 84 tests
 ./target/debug/SniffSniffSquared --dev en0 --all "tcp port 5555"
 ./target/debug/SniffSniffSquared --dev en0 --raw "tcp port 5555"
 ./target/debug/SniffSniffSquared --list
@@ -226,6 +226,25 @@ a link-local address (`169.254/16`, `fe80::/10`); loopback is exempt because
 `tools/replay.py` targets it deliberately.
 
 ## Traps that have already cost time
+
+- **Capture going quiet used to need a restart, and the cause was one lost
+  segment.** `flow.rs` stashed every segment arriving after a hole and waited
+  for the hole to fill. A segment the *capture* missed is never retransmitted —
+  the real client received it — so that direction stayed silent for the rest of
+  the process's life while the other kept decoding. Visible in `packets` as one
+  direction of a connection stopping while its opposite continues. It now gives
+  up on a hole after 2 s (or 256 KB / 64 segments), resynchronises onto the next
+  frame boundary and prints `capture missed N bytes`. The drops themselves came
+  from the 1 MB default pcap buffer plus a blocking Postgres insert per message
+  in the capture loop; the buffer is now 16 MB and kernel drops are reported.
+  A second, independent cause had the same symptom: `detect()` only ever tried
+  offset 0, so a sniffer started while the game was already connected — first
+  bytes mid-frame, same prefix on every later push — never locked at all and
+  stayed dark until a restart happened to land on a boundary. Detection now
+  slides to find the first real boundary.
+  A resync can still land one sub-frame early — a length read from inside a
+  frame can consume exactly to that frame's end — so the first frame after one
+  is not fully trustworthy. Everything after it realigns.
 
 - **`cargo test` does not rebuild `target/debug/SniffSniffSquared`.** Run
   `cargo build` before capturing, or you will analyse output from a stale

@@ -61,7 +61,7 @@ never uses.
 | file | job |
 |---|---|
 | `sniffer/src/main.rs` | pcap capture, link-layer strip, IPv4/IPv6, flags, DB wiring |
-| `sniffer/src/flow.rs` | per-direction TCP reassembly (seq-aware, drops retransmits) |
+| `sniffer/src/flow.rs` | per-direction TCP reassembly (seq-aware, drops retransmits, gives up on a hole the capture will never see filled) |
 | `sniffer/src/framer.rs` | adaptive deframing — the seven candidate layouts |
 | `sniffer/src/frame.rs` | the `Frame` envelope |
 | `sniffer/src/pb.rs` | schema-less protobuf wire reader |
@@ -226,7 +226,7 @@ The Rust app lives in `sniffer/`. **Run it from there** — it resolves
 ```sh
 cd sniffer
 cargo build
-cargo test          # 74 tests, all should pass
+cargo test          # 84 tests, all should pass
 ```
 
 > **Windows.** Install [Npcap](https://npcap.com/#download) first — it is what
