@@ -19,6 +19,9 @@ RUN mkdir src && echo 'fn main() {}' > src/main.rs \
  && rm -rf src
 
 COPY src ./src
+# schema.rs compiles this in as the fallback for a sniffer started from the
+# wrong directory, so the build needs it even though compose bind-mounts it
+COPY schema.json ./schema.json
 # cargo skips rebuilds on unchanged mtimes; the dummy main.rs above shares one
 RUN touch src/main.rs && cargo build --release
 
@@ -33,6 +36,7 @@ WORKDIR /app
 COPY --from=build /src/target/release/SniffSniffSquared /usr/local/bin/sniffer
 COPY proto ./proto
 COPY keymap.json ./keymap.json
+COPY schema.json ./schema.json
 
 ENTRYPOINT ["sniffer"]
 CMD ["--all", "tcp port 5555"]
