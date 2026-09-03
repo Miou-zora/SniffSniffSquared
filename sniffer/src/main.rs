@@ -24,6 +24,8 @@ mod messages;
 mod pb;
 mod registry;
 mod schema;
+#[cfg(test)]
+mod testdata;
 
 use dispatch::Dispatcher;
 use flow::{FlowKey, Reassembler};
@@ -103,6 +105,12 @@ fn main() {
         .expect("open device")
         .immediate_mode(true)
         .snaplen(65535)
+        // Every decoded message is written to Postgres from this thread, so a
+        // slow database stalls the reader while the kernel keeps filling this
+        // buffer. The 1 MB default overruns during a burst — an 80 KB `iuz`
+        // catalogue is a dozen of them — and every dropped segment costs the
+        // rest of that message.
+        .buffer_size(16 * 1024 * 1024)
         .open()
         .expect("start capture");
     cap.filter(&bpf, true).expect("bad BPF filter");
@@ -111,11 +119,46 @@ fn main() {
     let mut re = Reassembler::new();
     let mut dispatch = build_dispatch();
 
-    while let Ok(packet) = cap.next_packet() {
-        if let Some((ip_bytes, _)) = strip_link(link, packet.data) {
-            handle_ip(&mut re, &mut dispatch, ip_bytes);
+    let mut seen = 0u64;
+    let mut reported = 0u32;
+    loop {
+        match cap.next_packet() {
+            Ok(packet) => {
+                if let Some((ip_bytes, _)) = strip_link(link, packet.data) {
+                    handle_ip(&mut re, &mut dispatch, ip_bytes);
+                }
+                seen += 1;
+                if seen.is_multiple_of(2000)
+                    && let Some(lost) = new_drops(&mut cap, &mut reported)
+                {
+                    eprintln!(
+                        "[!] kernel dropped {lost} packets — the decoded stream will have holes"
+                    );
+                }
+            }
+            // A live capture does not end on its own. A read timeout means
+            // "no packet yet" — and libpcap reports a poll interrupted by a
+            // signal the same way. Treating either as the end silently
+            // stopped the capture with the process still running.
+            Err(pcap::Error::TimeoutExpired) => continue,
+            Err(err) => {
+                eprintln!("[!] capture stopped: {err}");
+                break;
+            }
         }
     }
+}
+
+/// Drop total, reported only when it grows. `dropped` is the kernel buffer
+/// overrunning, `if_dropped` the interface itself.
+fn new_drops(cap: &mut Capture<pcap::Active>, reported: &mut u32) -> Option<u32> {
+    let stats = cap.stats().ok()?;
+    let lost = stats.dropped.saturating_add(stats.if_dropped);
+    if lost > *reported {
+        *reported = lost;
+        return Some(lost);
+    }
+    None
 }
 
 /// Announces a change to anyone LISTENing, so the web app can update without
@@ -924,6 +967,9 @@ fn handle_tcp(
         return;
     }
     let frames = re.push(key, seq, payload);
+    if let Some(lost) = re.take_skipped(&key) {
+        eprintln!("[{key}] capture missed {lost} bytes — resynchronised, some messages lost");
+    }
     if frames.is_empty() {
         return;
     }

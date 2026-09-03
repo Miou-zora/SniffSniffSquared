@@ -60,6 +60,20 @@ const CANDIDATES: &[Layout] = &[
     },
 ];
 
+/// Consecutive parseable frames that confirm a frame boundary. Same bar
+/// `detect` uses to lock a layout in the first place.
+const CONFIRM: usize = 3;
+
+/// How much unrecognised data a resynchronising framer will hold while looking
+/// for a boundary. A whole `iuz` catalogue message is ~80 KB, so this is room
+/// for several before the oldest bytes are dropped.
+const MAX_RESYNC_BUF: usize = 1024 * 1024;
+
+/// How far into an unrecognised buffer to look for a first frame boundary.
+/// Comfortably past the largest frame seen on the wire — an `iuz` catalogue is
+/// ~80 KB — so a capture that starts inside one still finds the next.
+const MAX_DETECT_SCAN: usize = 128 * 1024;
+
 /// One deframed frame: the raw body bytes plus a decoded Frame if it parsed.
 pub struct Deframed {
     pub body: Vec<u8>,
@@ -69,6 +83,7 @@ pub struct Deframed {
 pub struct Framer {
     buf: Vec<u8>,
     layout: Option<Layout>,
+    resyncing: bool,
 }
 
 impl Framer {
@@ -76,6 +91,7 @@ impl Framer {
         Framer {
             buf: Vec::new(),
             layout: None,
+            resyncing: false,
         }
     }
 
@@ -88,10 +104,47 @@ impl Framer {
         })
     }
 
+    /// Drop everything buffered and hunt for a frame boundary in what comes
+    /// next. Called when the reassembler gives up on a gap: the bytes after a
+    /// segment the capture never saw start mid-frame, and reading a length
+    /// from the middle of one yields a garbage length.
+    pub fn resync(&mut self) {
+        self.buf.clear();
+        self.resyncing = self.layout.is_some();
+    }
+
     pub fn push(&mut self, data: &[u8]) -> Vec<Deframed> {
         self.buf.extend_from_slice(data);
         if self.layout.is_none() {
-            self.layout = detect(&self.buf);
+            match detect_at(&self.buf) {
+                Some((off, layout)) => {
+                    self.buf.drain(0..off);
+                    self.layout = Some(layout);
+                }
+                // Nothing recognisable yet. Keep buffering — but a stream that
+                // never resolves must not grow without bound.
+                None if self.buf.len() > MAX_RESYNC_BUF => {
+                    let excess = self.buf.len() - MAX_RESYNC_BUF;
+                    self.buf.drain(0..excess);
+                }
+                None => {}
+            }
+        }
+        if self.resyncing {
+            match self.layout.and_then(|l| find_boundary(&self.buf, l)) {
+                Some(off) => {
+                    self.buf.drain(0..off);
+                    self.resyncing = false;
+                }
+                None => {
+                    // No boundary yet — keep buffering, but never without bound.
+                    if self.buf.len() > MAX_RESYNC_BUF {
+                        let excess = self.buf.len() - MAX_RESYNC_BUF;
+                        self.buf.drain(0..excess);
+                    }
+                    return Vec::new();
+                }
+            }
         }
         let mut out = Vec::new();
         if let Some(layout) = self.layout {
@@ -195,6 +248,49 @@ mod tests {
         assert!(f.locked().is_some());
     }
 
+    /// After a lost segment the stream resumes at an arbitrary byte. The
+    /// partial frame at the head must not be read as a length, and the frames
+    /// behind it must come back whole.
+    ///
+    /// Real captured bytes: a frame boundary is only recognisable by what a
+    /// real message looks like, so a hand-built frame cannot exercise this.
+    #[test]
+    fn resync_recovers_whole_frames_after_a_partial_head() {
+        let frame = crate::testdata::kdh_frame();
+        let mut f = Framer::new();
+        assert_eq!(f.push(&frame.repeat(4)).len(), 4);
+
+        f.resync();
+        let mut resumed = frame[3..].to_vec(); // tail of a frame never seen whole
+        resumed.extend_from_slice(&frame.repeat(4));
+        let out = f.push(&resumed);
+
+        assert!(!out.is_empty(), "resync never found a boundary");
+        // The head fragment can confirm a boundary one sub-frame early, and
+        // nothing in the bytes tells the two apart — a length read from inside
+        // a frame can consume exactly to that frame's end. What must hold is
+        // that the stream realigns: every frame after the first is whole.
+        for d in out.iter().skip(1) {
+            assert_eq!(d.body, frame[1..], "stream did not realign");
+        }
+    }
+
+    /// A resync with too little data to confirm a boundary waits rather than
+    /// guessing.
+    #[test]
+    fn resync_waits_until_a_boundary_is_confirmed() {
+        let frame = crate::testdata::kdh_frame();
+        let mut f = Framer::new();
+        f.push(&frame.repeat(4));
+        f.resync();
+
+        assert!(f.push(&frame[3..10]).is_empty(), "not enough to confirm");
+        assert!(
+            !f.push(&frame.repeat(4)).is_empty(),
+            "confirmed once the run arrives"
+        );
+    }
+
     #[test]
     fn handles_split_across_pushes() {
         let mut f = Framer::new();
@@ -235,4 +331,108 @@ fn detect(buf: &[u8]) -> Option<Layout> {
         }
     }
     best.map(|(_, l)| l)
+}
+
+/// Count consecutive frames readable from `off`, up to `CONFIRM`.
+fn frames_from(buf: &[u8], layout: Layout, mut off: usize) -> usize {
+    let mut ok = 0;
+    while ok < CONFIRM {
+        match read_one(&buf[off..], layout) {
+            Some((consumed, body)) if body.len() >= 6 && crate::pb::looks_like_message(&body) => {
+                ok += 1;
+                off += consumed;
+            }
+            _ => break,
+        }
+    }
+    ok
+}
+
+/// First offset in `buf` that reads as a run of whole frames carrying a
+/// message. Used after a lost segment, where the stream resumes at an
+/// arbitrary byte.
+///
+/// A run of clean parses is not enough on its own. A length read from *inside*
+/// a frame can consume exactly to that frame's end and parse as valid
+/// protobuf, after which every following frame is aligned again — so the
+/// false boundary confirms just as well as the true one, and comes first.
+/// Requiring the frame at the offset to actually carry an `Any` rejects it:
+/// resynchronising a sub-frame early would hand a truncated message to the
+/// interpreters, and a wrong decode is worse than a missed one.
+fn find_boundary(buf: &[u8], layout: Layout) -> Option<usize> {
+    (0..buf.len())
+        .find(|&off| frames_from(buf, layout, off) >= CONFIRM && carries_message(buf, layout, off))
+}
+
+/// Does the frame at `off` hold an `Any`? That is what the interpreters read,
+/// and what a frame boundary landing mid-frame will not produce.
+fn carries_message(buf: &[u8], layout: Layout, off: usize) -> bool {
+    let Some((_, body)) = read_one(&buf[off..], layout) else {
+        return false;
+    };
+    let mut anys = Vec::new();
+    crate::dump::collect_any(&body, &mut anys);
+    !anys.is_empty()
+}
+
+#[cfg(test)]
+mod midstream_tests {
+    use super::*;
+
+    /// Starting the sniffer while the game is already connected: the first
+    /// bytes captured are the tail of a frame whose head was never seen. Every
+    /// later push keeps that prefix, so a detector that only ever tries offset
+    /// 0 never locks — the flow stays dark for the life of the process and
+    /// only a restart, landing by luck on a boundary, brings it back.
+    #[test]
+    fn detection_locks_when_the_capture_starts_mid_frame() {
+        let frame = crate::testdata::kdh_frame();
+        let mut f = Framer::new();
+
+        let mut out = f.push(&frame[3..]); // tail of a frame never seen whole
+        for _ in 0..40 {
+            out.extend(f.push(&frame));
+        }
+
+        assert!(f.locked().is_some(), "never locked on a mid-frame start");
+        assert!(!out.is_empty(), "locked but decoded nothing");
+        for d in out.iter().skip(1) {
+            assert_eq!(d.body, frame[1..], "decoded a frame that is not whole");
+        }
+    }
+
+    /// The aligned case must still lock at offset 0 and lose nothing.
+    #[test]
+    fn detection_still_locks_at_offset_zero_when_aligned() {
+        let frame = crate::testdata::kdh_frame();
+        let mut f = Framer::new();
+
+        let out = f.push(&frame.repeat(4));
+        assert_eq!(out.len(), 4, "aligned start must decode every frame");
+        assert_eq!(out[0].body, frame[1..]);
+    }
+}
+
+/// Where the framing starts, not just which layout it uses.
+///
+/// Offset 0 is the aligned case and by far the common one, so it keeps the
+/// original bar. A capture started while the game was already connected has no
+/// such luck: its first bytes are the tail of a frame it never saw the head
+/// of, and every later push keeps that same prefix, so testing offset 0 alone
+/// never locks and the flow stays dark until the sniffer is restarted. Sliding
+/// is a guess, so a slid offset has to clear the stricter bar `find_boundary`
+/// uses — a run of whole frames, the first of which carries a message.
+fn detect_at(buf: &[u8]) -> Option<(usize, Layout)> {
+    if let Some(layout) = detect(buf) {
+        return Some((0, layout));
+    }
+    let window = buf.len().min(MAX_DETECT_SCAN);
+    (1..window).find_map(|off| {
+        CANDIDATES
+            .iter()
+            .find(|&&layout| {
+                frames_from(buf, layout, off) >= CONFIRM && carries_message(buf, layout, off)
+            })
+            .map(|&layout| (off, layout))
+    })
 }

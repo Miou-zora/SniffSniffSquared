@@ -50,7 +50,7 @@ off the marketplace batch ladder, and which of a job's recipes actually pay.
 
 ## What it does
 
-**`sniffer/` — capture and decode** (Rust, ~4.5k lines, 74 tests)
+**`sniffer/` — capture and decode** (Rust, ~4.5k lines, 84 tests)
 
 - Passive libpcap capture on TCP 5555. It never connects, injects or modifies
   anything; the client cannot tell it is there.
@@ -535,7 +535,7 @@ so that path needs no configuration.
 
 ```sh
 cd sniffer
-cargo build && cargo test        # 74 tests, over real captured bytes
+cargo build && cargo test        # 84 tests, over real captured bytes
 cargo run -- --list
 ```
 
